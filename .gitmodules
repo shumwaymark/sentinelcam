@@ -1,0 +1,6 @@
+[submodule "imagehub"]
+	path = imagehub
+	url = https://github.com/shumwaymark/imagehub
+[submodule "imagenode"]
+	path = imagenode
+	url = https://github.com/shumwaymark/imagenode
