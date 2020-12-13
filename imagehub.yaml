@@ -1,0 +1,10 @@
+# Settings file imagehub.yaml -- sentinelcam test #1
+---
+hub:
+  queuemax: 500 # maximum size of queue of images to write
+  patience: 1  # how often to log a lack of message in minutes
+  print_settings: False
+  data_directory: /mnt/usb1/imagedata
+  max_images_write: 1500  # a cap on images to write in one day
+camwatcher:
+  CW1: tcp://localhost:5566

@@ -1,0 +1,25 @@
+# Settings file imagenode.yaml -- sentinelcam test #1
+---
+node:
+  name: outpost
+  publish_log: 5565 # activates log publishing to camwatcher 
+  publish_cams: 5567 # activates camera option for video frame publishing 
+  queuemax: 50
+  patience: 10
+  heartbeat: 10
+  send_type: jpg
+  print_settings: True
+hub_address:
+  H1: tcp://data1:5555
+cameras:
+  P1:
+    viewname: PiCamera
+    resolution: (640, 480)
+    framerate: 32
+    vflip: True
+    video: True # all video frames published
+    detectors:
+      tracker:
+        ROI: (25,50),(60,85)
+        draw_roi: ((255,0,0),5)
+
