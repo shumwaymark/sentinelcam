@@ -19,8 +19,8 @@ ZMQ as configurable options. All the new configuration items, and what they do, 
 
 For complete details on the use of these modules, refer to the existing baseline documentation.
 
-- `Baseline imagenode documentaiton <../imagenode/blob/master/README.rst>`_
-- `Baseline imagehub documentation <../imagehub/blob/master/README.rst>`_
+- `Baseline imagenode documentaiton <imagenode/blob/master/README.rst>`_
+- `Baseline imagehub documentation <imagehub/blob/master/README.rst>`_
 
 ==========================
 Modifications to imagenode
