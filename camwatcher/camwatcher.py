@@ -152,13 +152,10 @@ class CSVwriter:
                 try:
                     if ote["evt"] == 'start': 
                         f = open(os.path.join(self._setindex(nodeView, ote['id'], ote['timestamp']), ote["id"] + '_trk.csv'), mode='wt')
-                        f.write("node,view,event,timestamp,objid,centroid_x,centroid_y\n") # write column headers
+                        f.write("timestamp,objid,centroid_x,centroid_y\n") # write column headers
                         self._openfiles[ote["id"]] = f # add to list
                     elif ote["evt"] == 'trk':
                         self._openfiles[ote["id"]].write(','.join([
-                            nodeView[0], 
-                            nodeView[1],
-                            ote["id"],
                             ote['timestamp'],
                             str(ote["obj"]),
                             str(ote['cent'][0]), 
@@ -296,7 +293,7 @@ async def main():
         await asyncio.gather(control_loop(logsock), process_logs(logsock))
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
-    except Exception as ex:  # traceback will appear in log
+    except Exception as ex:  # traceback will appear in log 
         log.exception('Unanticipated error with no Exception handler.')
     finally:
         csv.close()
@@ -308,7 +305,7 @@ def start_logging():
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     log.addHandler(handler)
-    log.setLevel(logging.DEBUG)
+    log.setLevel(logging.WARNING)
     return log
 
 if __name__ == '__main__' :
