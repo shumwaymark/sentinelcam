@@ -2,13 +2,13 @@
 ---
 node:
   name: outpost
-  publish_log: 5565 # activates log publishing to camwatcher 
-  publish_cams: 5567 # activates camera option for video frame publishing 
-  queuemax: 50
-  patience: 10
   heartbeat: 10
+  patience: 5
+  REP_watcher: True
+  queuemax: 50
   send_type: jpg
-  print_settings: True
+  send_threading: True
+  print_settings: False
 hub_address:
   H1: tcp://data1:5555
 cameras:
@@ -16,10 +16,14 @@ cameras:
     viewname: PiCamera
     resolution: (640, 480)
     framerate: 32
-    vflip: True
-    video: True # all video frames published
+    vflip: False
     detectors:
-      tracker:
-        ROI: (25,50),(60,85)
+      outpost:
+        publish_cam: 5567 # activates video frame publishing
+        publish_log: 5565 # activates log publishing to camwatcher
+        camwatcher: tcp://data1:5566 # connect to camwatcher control port
+        ROI: (10,20),(70,80)
         draw_roi: ((255,0,0),5)
-
+        draw_time: ((255,0,0),1)  # the timestamp text is blue with 1 pixel line width
+        draw_time_org: (5,5)  # the timestamp text starts at pixel (1,1)
+        draw_time_fontScale: 1  # the timestamp fontScale factor is 1

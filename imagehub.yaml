@@ -6,5 +6,3 @@ hub:
   print_settings: False
   data_directory: /mnt/usb1/imagedata
   max_images_write: 1500  # a cap on images to write in one day
-camwatcher:
-  CW1: tcp://localhost:5566
