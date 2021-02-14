@@ -123,7 +123,6 @@ class CamData:
                             parse_dates=["timestamp"]
                           ).sort_values(
                              by="timestamp", ascending=False)
-        
         else:
             # if no index file, return an empty DataFrame 
             self._index = pd.DataFrame(columns=CamData.IDXCOLS)
@@ -234,16 +233,16 @@ cfg = {'csvdir': '/mnt/usb1/imagedata/camwatcher'}
 
 if __name__ == '__main__' :
 
-    cdata = CamData(cfg["csvdir"]) # allocate and initialize index for current date
-    cindx = cdata.get_index()      # get reference to index DataFrame
+    cdata = CamData(cfg["csvdir"])   # allocate and initialize index for current date
+    cindx = cdata.get_index()        # get reference to index DataFrame
     
     # most recent 5 events
     for row in cindx[:5].itertuples():
         print(row.node + " " + row.view + " " + str(row.timestamp) + " " + row.event)
 
-    event_id = cdata.get_last_event() # grab the most recent event id
-    cdata.set_event(event_id)         # load event data 
-    cam_data = cdata.get_cam_data()   # cam tracking dataset from event as pandas DataFrame
+    event_id = cdata.get_last_event()  # grab the most recent event id
+    cdata.set_event(event_id)          # load event data 
+    cam_data = cdata.get_cam_data()    # cam tracking dataset from event as pandas DataFrame
     
     print(f"Event ID [{event_id}] started at {str(cdata.get_event_start())}")
     for row in cam_data[:10].itertuples():
