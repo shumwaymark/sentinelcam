@@ -50,7 +50,7 @@ class CamData:
 
     IDXFILE = "camwatcher.csv"
     IDXCOLS = ["node","view","timestamp","event","type"]
-    IDXTYPES = ["TRK"]
+    IDXTYPES = ["trk"]
 
     def get_indexname(self, date):
         """ Return filename reference to camwatcher index
@@ -154,7 +154,7 @@ class CamData:
 
         return self._index.iloc[0].event
     
-    def get_event_pathname(self, event, type='TRK'):
+    def get_event_pathname(self, event, type='trk'):
         """ Return pathname to the camera event detail file
                 
         Parameters
@@ -190,7 +190,7 @@ class CamData:
         self._event_start = self._event_subset["timestamp"].min()
         self._event_types = self._event_subset["type"]
         self._cam_data = pd.read_csv(
-            self.get_event_pathname(event, 'TRK'),
+            self.get_event_pathname(event, 'trk'),
             parse_dates=['timestamp']
         )
         self._cam_data["elapsed"] = self._cam_data["timestamp"] - self._event_start
@@ -220,6 +220,25 @@ class CamData:
         """
         
         return self._event_types
+
+    def _list_event_images(self, imagebase):
+        # return the set of image files for the current event
+        imagefolder = os.path.join(imagebase, self._ymd)
+        return self._list_files(imagefolder, prefix=self._event_id)
+
+    def _list_files(self, basePath, prefix):
+        # loop over the directory structure
+        for (rootDir, dirNames, fileNames) in os.walk(basePath):
+            # loop over the filenames in the current date directory
+            for filename in fileNames:
+                # skip any files without a matching filename prefix
+                if filename.startswith(prefix):
+                    # construct the path to the image and yield it
+                    imagePath = os.path.join(rootDir, filename)
+                    yield imagePath
+
+    def get_event_images(self, imagebase):
+        return sorted(list(self._list_event_images(imagebase)))
 
     def __init__(self, dir, date = datetime.utcnow().isoformat()[:10]):
         self._index_path = dir
