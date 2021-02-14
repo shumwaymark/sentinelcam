@@ -31,7 +31,9 @@ class CamData:
     get_indexname(date) -> str
         Returns filesystem pathname to camwatcher index
     set_date(date)
-        Set index to specified date
+        Set index to specified (YYYY-MM-DD) date
+    get_date() -> str
+        Return current index date as YYYY-MM-DD
     get_last_event() -> str
         Returns most recent event id 
     set_event(event)
@@ -131,6 +133,17 @@ class CamData:
         self._event_types = None
         self._cam_data = None
 
+    def get_date(self):
+        """ Return current index date
+        
+        Returns
+        -------
+        str
+            Currently selected index date in YYYY-MM-DD format.
+        """
+
+        return self._ymd
+
     def get_last_event(self):
         """ Return most recent Event ID 
         
@@ -165,7 +178,7 @@ class CamData:
 
         Sets index to the specified event. Establishes references to event detail 
         files. Loads camera detail data for default event type. A prerequisite
-        to establishing valid references to event and camera deta. 
+        to establishing valid references to event and camera data. 
 
         Parameters
         ----------
