@@ -1,149 +1,130 @@
-import os
+""" video_review: A trivial Flask application to demonstrate video event review """
 import time
-import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta
 from flask import Flask
-from flask import request
 from flask import Response
-from flask import render_template
-import psycopg2
+from flask import render_template, g
 import cv2
-
-cfg = {'port': 8080, 
-       'address': '0.0.0.0',
-       'basefolder': '/mnt/usb1/imagedata/video',
-       'dbconn': 'postgresql://sentinelcam:sentinelcam@data1./sentinelcam'} # DBMS connection string 
-
-SQL = """
-SELECT object_tag, 
-       EXTRACT(SECONDS FROM object_time - start_time) AS elaps,
-       centroid_x,
-       centroid_y
-  FROM cam_tracking
- WHERE node_name = '{}'
-   AND view_name = '{}'
-   AND start_time = (
-      SELECT start_time
-        FROM cam_event
-       WHERE node_name = cam_tracking.node_name
-         AND view_name = cam_tracking.view_name
-         AND date(start_time) = '{}'
-         AND pipe_event = {} )
- ORDER BY object_time """
+from camwatcher.camdata import CamData
 
 app = Flask(__name__) # initialize a flask object
 
-def list_frames(ymd, node, view, eventid):
-    # return the set of files that captured the event
-    datefolder = os.path.join(cfg["basefolder"], ymd)
-    jpegbase = '_'.join([node, view, str(eventid).zfill(5)])
-    return list_framefiles(datefolder, jpegbase)
+# cfg = {'port': 8080, 
+#         'address': '0.0.0.0',
+#         'imagefolder': '/mnt/usb1/imagedata/video',
+#         'datafolder':  '/mnt/usb1/imagedata/camwatcher'} 
 
-def list_framefiles(basePath, prefix):
-    # loop over the directory structure
-    with os.scandir(basePath) as framefiles:
-        # loop over entries in the base directory
-        for framefile in framefiles:
-            # only produce file entries with a matching prefix
-            # yield tuple with pathname, file modifaction timestamp
-            if framefile.name.startswith(prefix):
-                info = framefile.stat()
-                yield (framefile.path, 
-                       datetime.fromtimestamp(info.st_mtime, timezone.utc))
+@app.before_request
+def before_request():
+    g.cwData = CamData("/mnt/usb1/imagedata/camwatcher")
+    g.date = g.cwData.get_date()
+    g.event = None
 
-def convert_date(timestamp):
-    return timestamp.strftime('%d %b %Y %I:%M:%S %p %Z')
+def _event_selection(date=None, event=None):
+    if date is None:
+        g.date = datetime.utcnow().isoformat()[:10]
+    else:
+        g.date = date
+    g.cwData.set_date(g.date)
+    if event is None:
+        g.event = g.cwData.get_last_event()
+    else:
+        g.event = event
+    g.cwData.set_event(g.event)
 
-# function to extract frame number from the frame pathname
-def get_number(frameFrame):
-    return int(frameFrame[0][-14:-4])
+def _generate_event_list(cindx):
+    for row in cindx[:].itertuples():
+        yield (row.event, row.timestamp.strftime("%H:%M:%S") + " " +
+                          row.node + " " + 
+                          row.viewname)
 
-def generate(ymd, node, view, eventID):
+def _setup_form_data():
+    if not g.event: 
+        _event_selection()    
+    g.node = g.cwData.get_event_node()
+    g.view = g.cwData.get_event_view()
+    g.start = g.cwData.get_event_start()
+    g.datelist = [(d, date.fromisoformat(d).strftime('%A %B %d, %Y')) for d in g.cwData.get_date_list()]
+    g.eventlist = [(evt, descr) for (evt, descr) in _generate_event_list(g.cwData.get_index())]
+
+def _get_frametime(pathname):
+    return datetime.strptime(pathname[-30:-4],"%Y-%m-%d_%H.%M.%S.%f")
+
+def generate_video(date, event):
     color = (0,255,0)
-
-    # query event tracking data from database
-    with psycopg2.connect(cfg['dbconn']) as conn:
-        with conn.cursor() as curs:
-            curs.execute(SQL.format(node,view,ymd,eventID))
-            objlist = curs.fetchall()
-
+    _cwData = CamData("/mnt/usb1/imagedata/camwatcher", date)
+    _cwData.set_event(event)
+    tracker = _cwData.get_event_data()[:].itertuples()
+    image_list = _cwData.get_event_images("/mnt/usb1/imagedata/video")
+    event_start = _cwData.get_event_start()
     objects = {}  # object dictionary for holding last known coordinates
-    tracker = iter(objlist) # iterator for object tracking query result set
-
-    # grab sorted list of video frame tuples (pathname, timestamp)
-    videoframes = sorted(list(list_frames(ymd, node, view, eventID)),
-                         key=get_number)
-    begintime = datetime.now()
-    eventstart = videoframes[0][1]
-
-    (objid, elaps, centx, centy) = next(tracker)
-    for (framepath, capturetime) in videoframes:
-	
+    trk = next(tracker)
+    iter_elapsed = trk.elapsed
+    playback_begin = datetime.utcnow()
+    for framepath in image_list:
         frame = cv2.imread(framepath)
-        frametime = capturetime - eventstart
-        thisframe = frametime.seconds + frametime.microseconds/1000000
-        if elaps < thisframe:
+        frame_time = _get_frametime(framepath) 
+        frame_elaps = frame_time - event_start
+        if iter_elapsed < frame_elaps:
             try:
-                while elaps < thisframe:
-                    objects[objid] = (centx, centy, elaps)
-                    (objid, elaps, centx, centy) = next(tracker)
+                while trk.elapsed < frame_elaps:
+                    objects[trk.objid] = (trk.centroid_x, trk.centroid_y, trk.elapsed)
+                    trk = next(tracker)
+                iter_elapsed = trk.elapsed
             except StopIteration:
-                elaps = 86400.0 # short-cicuit any futher calls back to the interator
+                iter_elapsed = timedelta(days=1) # short-cicuit any futher calls back to the interator
 
         for (objid, (centx, centy, lastknown)) in objects.items():
             # draw both the ID and centroid of the object on the output frame
             label = "ID {}".format(objid)
             cv2.putText(frame, label, (centx - 10, centy - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
             cv2.circle(frame, (centx, centy), 4, color, -1)
 
         # draw timestamp on image frame
-        tag = "{}".format(convert_date(capturetime))
+        tag = "{} UTC".format(framepath[-30:-4].replace('_',' '))
         cv2.putText(frame, tag, (30, 450),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
         # re-encode the frame back into JPEG format
         (flag, encodedframe) = cv2.imencode(".jpg", frame)
-
-        # ensure the frame was successfully encoded
-        if not flag:
-            continue
             
         # whenever elapsed time within event > playback elapsed time,
         # estimate a sleep time to dial back the replay framerate
-        present = datetime.now() - begintime
-        if (frametime > present):
-            pause = frametime - present
+        playback_elaps = datetime.utcnow() - playback_begin
+        if frame_elaps > playback_elaps:
+            pause = frame_elaps - playback_elaps
             time.sleep(pause.seconds + pause.microseconds/1000000)
 
         # yield the output frame in byte format
         yield(b'--frame\r\nContent-Type: frame/jpeg\r\n\r\n' + 
             bytearray(encodedframe) + b'\r\n')
 
+@app.route("/video_display/<date>/<event>")
+def video_display(date, event):
+    return Response(generate_video(date, event),
+        mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+@app.route("/cam_event/")
+@app.route("/cam_event/<date>")
+@app.route("/cam_event/<date>/<event>")
+def cam_event(date=None, event=None):
+    _event_selection(date, event)
+    return index()
+
 @app.route("/")
 def index():
-    return render_template("index.html")
-
-@app.route("/video_sample")
-def video_sample():
-    return Response(generate("2020-11-22", "outpost", "PiCamera", 213),
-        mimetype = "multipart/x-mixed-replace; boundary=frame")
-
-@app.route("/replay_event")
-def replay_event():
-    yyyy = int(request.args.get("year"))
-    mm = int(request.args.get("month"))
-    dd = int(request.args.get("day"))
-    node = request.args.get("node")
-    view = request.args.get("view")
-    eventid = request.args.get("event")
-    eventdate = datetime(yyyy,mm,dd)
-    ymd = eventdate.isoformat()[:10] # this is "YYYY-MM-DD" format
-    #print(f"yyyy={yyyy} mm={mm} dd={dd} node={node} view={view} eventid={eventid}")
-    return Response(generate(ymd, node, view, eventid),
-        mimetype = "multipart/x-mixed-replace; boundary=frame")
+    _setup_form_data()
+    return render_template("index.html",
+                    date = g.date,
+                    event = g.event,
+                    node = g.node,
+                    view = g.view,
+                    start = g.start,
+                    datelist = g.datelist,
+                    eventlist = g.eventlist)
 
 if __name__ == "__main__":
-	# start the flask app
-	app.run(host=cfg["address"], port=cfg["port"], debug=True,
+    # start the flask app
+    app.run(host="0.0.0.0", port=8080, debug=True,
 		threaded=True, use_reloader=False)

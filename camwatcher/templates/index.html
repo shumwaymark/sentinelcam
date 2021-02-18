@@ -1,9 +1,48 @@
 <html>
   <head>
     <title>Sentinelcam Event Review</title>
+    <script>
+       var eventurl = "{{ url_for('cam_event') }}";
+       function change_date() {
+         _date = document.controls.pickdate.value;
+         location = eventurl + _date;
+       }
+       function change_event() {
+         _date = document.controls.pickdate.value;
+         _event = document.controls.pickevent.value;
+         location = eventurl + _date + "/" + _event;
+       }
+    </script>
   </head>
   <body>
-    <h1>Sentinelcam Event Sample</h1>
-    <img src="{{ url_for('video_sample') }}">
+    <h1>Sentinelcam Video Review</h1>
+    <table>
+      <tr>
+        <td><img src="{{ url_for('video_display', date=date, event=event) }}"></td>
+        <td>
+          <form name="controls">
+            <p><strong>Select Date</strong></p>
+            <select name="pickdate" onchange="change_date()">
+              {% for d in datelist %}
+                <option value="{{ d[0] }}"{% if d[0] is eq(date) %} selected{% endif %}>{{ d[1] }}</option>
+              {% endfor %}
+            </select>
+            <p><strong>Select Event</strong></p>
+            <select name="pickevent" size="15" onchange="change_event()">
+              {% for e in eventlist %}
+                <option value="{{ e[0] }}"{% if e[0] is eq(event) %} selected{% endif %}>{{ e[1] }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </td>
+      </tr>
+    </table>
+    <ul>
+      <li>Date {{ date }}</li>
+      <li>Event {{ event }}</li>
+      <li>Node {{ node }}</li>
+      <li>View {{ view }}</li>
+      <li>Start time {{ start }} UTC</li>
+    </ul>
   </body>
 </html>
