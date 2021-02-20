@@ -121,7 +121,7 @@ class CSVwriter:
         self._thread.daemon = True
         self._thread.start()
     
-    def _setindex(self, nodeView, evt, timestamp):
+    def _setindex(self, nodeView, evt, timestamp, fps):
         today = timestamp[:10] 
         logging.debug("CSVwriter index setup " + evt)
         date_directory = os.path.join(self._folder, today)
@@ -136,7 +136,7 @@ class CSVwriter:
         self._today = today
         try:
             with open(os.path.join(date_directory, 'camwatcher.csv'), mode='at') as index:
-                index.write(','.join([nodeView[0], nodeView[1], timestamp, evt, 'trk']) + "\n")
+                index.write(','.join([nodeView[0], nodeView[1], timestamp, evt, str(fps), 'trk']) + "\n")
         except Exception as ex:
             logging.error("CSVwriter failure updating index file: " + ex)
         return date_directory
@@ -151,7 +151,9 @@ class CSVwriter:
                 nodeView, ote = dbLogMsgs.get()
                 try:
                     if ote["evt"] == 'start': 
-                        f = open(os.path.join(self._setindex(nodeView, ote['id'], ote['timestamp']), ote["id"] + '_trk.csv'), mode='wt')
+                        f = open(os.path.join(self._setindex(
+                            nodeView, ote['id'], ote['timestamp'], ote["fps"]), 
+                            ote["id"] + '_trk.csv'), mode='wt')
                         f.write("timestamp,objid,centroid_x,centroid_y\n") # write column headers
                         self._openfiles[ote["id"]] = f # add to list
                     elif ote["evt"] == 'trk':
@@ -232,7 +234,8 @@ async def process_logs(loggers):
                 if category == 'ote':   # object tracking event 
                     await dispatch_ote(topics[0], message[3:])
                 else:
-                    logging.warning("Unknown message category ignored: " + ".".join(topics))
+                    logging.warning("Unknown message category {} from {}".format(
+                        message[:3], ".".join(topics)))
             else:
                 dispatch_logger(topics, msg)
             logging.debug(message)

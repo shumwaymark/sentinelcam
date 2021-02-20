@@ -78,8 +78,8 @@ if __name__ == "__main__":
             if cfg["showfps"]:
                 tfps.update()
                 text = "FPS: {:.2f}/{:.2f}".format(receiver.velocity.fps(),tfps.fps()) 
-                cv2.putText(image, text, (60, 450),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)            
+                cv2.putText(image, text, (50, 450),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)            
             cv2.imshow(msg, image)
             cv2.waitKey(1)
     except (KeyboardInterrupt, SystemExit):

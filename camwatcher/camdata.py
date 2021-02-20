@@ -51,7 +51,7 @@ class CamData:
     """
 
     IDXFILE = "camwatcher.csv"
-    IDXCOLS = ["node","viewname","timestamp","event","type"]
+    IDXCOLS = ["node","viewname","timestamp","event","fps","type"]
     IDXTYPES = ["trk"]
 
     def set_date(self, date):
