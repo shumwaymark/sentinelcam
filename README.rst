@@ -90,14 +90,14 @@ Project status
 Camwatcher design
 -----------------
 
-A first draft of the **camwatcher** functionality is up and running. In its current state, 
-this is best evaluated as an early working proof of concept. The diagram below presents a
-high-level design sketch.
+A working draft of the **camwatcher** functionality is up and running. In its current 
+state, this is best evaluated as an early working proof of concept. The diagram below
+presents a high-level design sketch.
 
 .. image:: docs/images/CamWatcher.png
    :alt: Sketch of early camwatcher design
 
-This design exploits two modifications made to the **imagenode** module: log and video 
+This design exploits two enhancements made to the **imagenode** module: log and video 
 publishing over ZMQ as configurable options.
 
 Logfile publishing serves two purposes. It first allows error and warning conditions to be
@@ -124,83 +124,116 @@ the following tasks.
 
 - *Dispatcher*. Handles object tracking event data. For each new event, a video stream 
   subscriber is instantiated to begin capturing the video. All event tracking data is queued
-  for permanent storage by the *Database Writer*.
+  for permanent storage by the *CSV File Writer*.
 
-- *Database Writer*. Receives queued event tracking data and writes to the database.
+This design packs a fair amount of network I/O activity into a single thread of execution. To 
+best exploit the multi-core architecture of the Raspberry Pi 4B, a child process is forked to
+capture and store the published video stream from each detected tracking event.
 
-This design packs a fair amount of I/O activity into a single thread of execution. To 
-best exploit the multi-core architecture of the Raspberry Pi 4B, a child process is forked
-to capture and store the published video stream from each detected tracking event.
+The *CSV File Writer* runs in a separate thread of execution. This component is responsible for
+receiving queued data events and writing them into CSV-format text files based on the following 
+data model.
 
 Data model
 ----------
 
-The data model is still in its infancy and is unlikely to survive in its current form.
-The structures described below support the initial proof of concept for the high-level
-design: all of which is subject to change.
+The data model is still in its infancy and continues to evolve. Two types of data are collected
+by the **camwatcher**. Data related to the analysis of the event, and captured video images. All 
+data is stored in the filesystem, within a separate folder for each category. 
 
-Tracking data currently exists as a set of relational tables stored within a DBMS. 
+Event tracking data and results from event analysis are written to the filesystem as a set of 
+CSV-format text files. For each date, there is an event index file and a separate file with
+the detailed data for each event.
 
-.. code-block:: sql
+The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
+*header row* included in the data. This data structure is fixed, with no further changes expected.
 
-   CREATE TABLE cam_event (
-       node_name    VARCHAR(64),   -- Imagenode name
-       view_name    VARCHAR(64),   -- camera view name
-       start_time   TIMESTAMP,     -- event start time
-       pipe_event   INTEGER,       -- pipeline event id at start
-       pipe_fps     SMALLINT       -- pipeline velocity at start
-   );
+  .. csv-table:: Event Index 
+    :header: "Name", "Type", "Description"
+    :widths: 20, 20, 60
 
-   CREATE TABLE cam_tracking (
-       node_name    VARCHAR(64),   -- Imagenode name
-       view_name    VARCHAR(64),   -- camera view name
-       start_time   TIMESTAMP,     -- initial start time for event
-       pipe_event   INTEGER,       -- can vary to support multiple events
-       object_time  TIMESTAMP,     -- when motion was detected
-       object_tag   INTEGER,       -- object identifier
-       centroid_x   INTEGER,       -- object centroid X-coordinate
-       centroid_y   INTEGER        -- object centroid Y-coordinate
-   );
+    node, str, node name  
+    viewname, str, camera view name 
+    timestamp, datetime, timestamp at the start of the event
+    event, str, unique identifer for the event 
+    fps, int, pipeline FPS at start of event
+    type, str, event type 
 
-There is a one-to-many relationship between each ``cam_event`` record and rows of ``cam_tracking``
-data. These two tables are joined on the columns ``node_name, view_name, start_time``.
+Event detail files always include a header row, with varying data structures depending on the type 
+of event. There is currently only a single event type defined, the tracking events. The naming
+convention for all detail files is: ``EventID_TypeCode.csv``
 
-Both tables have a ``pipe_event`` column. However, this value can vary within the tracking table
-across any set of distinct motion events which have been associated with the same camera view and
-starting time.
+  .. csv-table:: Tracking Event Detail
+    :header: "Name", "Type", "Description"
+    :widths: 20, 20, 60
+
+    timestamp, datetime, timestamp when tracking record written
+    objid, int, object identifier
+    centroid_x, int, object centroid X-coordinate
+    centroid_y, int, object centroid Y-coordinate
+
+These CSV files are written into the folder specified by the ``csvdir`` configuration setting and 
+organized by date into subfolders with a YYYY-MM-DD naming convention.
+
+.. code-block:: 
+
+  csvdir
+  ├── 2021-02-11
+  │   ├── camwatcher.csv
+  │   ├── 0b98da686cbf11ebb942dca63261a32e_trk.csv
+  │   ├── 109543546cbe11ebb942dca63261a32e_trk.csv
+  │   ├── 1fda8cb26cbd11ebb942dca63261a32e_trk.csv
+  │   ├── 202cda206cbe11ebb942dca63261a32e_trk.csv
+  │   ├── 7bf2ba8c6cb911ebb942dca63261a32e_trk.csv
+  │   ├── a4f355686cbe11ebb942dca63261a32e_trk.csv
+  │   ├── cde802a06cc011ebb942dca63261a32e_trk.csv
+  │   ├── d1995d346cb811ebb942dca63261a32e_trk.csv
+  │   └──  # etc, etc. for additional events
+  ├── 2021-02-12
+  │   ├── camwatcher.csv
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_trk.csv
+  │   ├── 1af4aac66d5c11ebb942dca63261a32e_trk.csv
+  │   ├── 1dd50b3a6d4a11ebb942dca63261a32e_trk.csv
+  │   ├── 27f4b4686d3f11ebb942dca63261a32e_trk.csv
+  │   ├── 3ce8389c6d3d11ebb942dca63261a32e_trk.csv
+  │   └──  # etc, etc. for additional events
+  │
+  └──  # additional directories for each date
 
 Captured video streams are written to the filesystem as individual image frames compressed into
 JPEG files. These files are written into the folder specified by the ``outdir`` configuration
 setting and organized by date into subfolders with a YYYY-MM-DD naming convention.
 
-The file name convention for each stored frame is: NodeName_ViewName_EventID_FrameNumber.jpg
+The file name convention for each stored frame is: ``EventID_TimeStamp.jpg`` as portrayed below.
 
 .. code-block:: 
 
   outdir
-  ├── 2020-11-22
-  │   ├── outpost_PiCamera_00169_0000000001.jpg
-  │   ├── outpost_PiCamera_00169_0000000002.jpg
-  │   ├── outpost_PiCamera_00169_0000000003.jpg
-  │   ├── outpost_PiCamera_00169_0000000004.jpg
+  ├── 2021-02-11
+  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.542141.jpg
+  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.572958.jpg
+  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.603971.jpg
+  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.635492.jpg
   │   ├── ...
-  │   ├── outpost_PiCamera_00241_0000000383.jpg
-  │   ├── outpost_PiCamera_00241_0000000384.jpg
-  │   ├── outpost_PiCamera_00242_0000000001.jpg
-  │   ├── outpost_PiCamera_00242_0000000002.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.274055.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.305151.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.336279.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.367344.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.399926.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.429276.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.459129.jpg
+  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.490918.jpg
   │   └──  # etc, etc. for additional images
-  ├── 2020-11-23
-  │   ├── outpost_PiCamera_00251_0000000001.jpg
-  │   ├── outpost_PiCamera_00251_0000000002.jpg
-  │   ├── outpost_PiCamera_00251_0000000003.jpg
+  ├── 2021-02-12
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.33.998836.jpg
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.028291.jpg
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.060119.jpg
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.093632.jpg
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.124754.jpg
+  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.154909.jpg
   │   └──  # etc, etc. for additional images
   │
   └──  # additional directories for each date
-
-The EventID and FrameNumber components of the filenames are zero-filled to a fixed length.
-The intent behind this convention is to simplify grouping frames by date and event, and 
-sorting them into sequence, while relying on the filesystem timestamp to associate each 
-frame with an approximate point in time.
 
 It is important to note that the capture rate for frames of video can vary significantly from
 the rate of capture for the tracking data. To correlate tracking data back to a captured image,
@@ -294,5 +327,5 @@ Acknowledgements
 
 - Dr. Adrian Rosebrock and the PyImageSearch team; his book: *Raspberry Pi for Computer Vision* 
   has been an invaluable resource.
-- Jeff Bass (imagezmq, imagehub, and imagenode); his outstanding work has allowed this project
+- Jeff Bass (imagezmq, imagenode, and imagehub); his outstanding work has allowed this project
   to get off to a fast start.

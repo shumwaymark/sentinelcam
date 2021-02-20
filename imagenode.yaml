@@ -1,4 +1,4 @@
-# Settings file imagenode.yaml -- sentinelcam test #1
+# Settings file imagenode.yaml -- sentinelcam test #2
 ---
 node:
   name: outpost
@@ -20,10 +20,10 @@ cameras:
     detectors:
       outpost:
         publish_cam: 5567 # activates video frame publishing
-        publish_log: 5565 # activates log publishing to camwatcher
+        publish_log: 5565 # activates logfile publishing over ZMQ
         camwatcher: tcp://data1:5566 # connect to camwatcher control port
         ROI: (10,20),(70,80)
-        draw_roi: ((255,0,0),5)
-        draw_time: ((255,0,0),1)  # the timestamp text is blue with 1 pixel line width
-        draw_time_org: (5,5)  # the timestamp text starts at pixel (1,1)
-        draw_time_fontScale: 1  # the timestamp fontScale factor is 1
+        draw_roi: ((255,0,0),1)
+        draw_time: ((255,0,0),1)  
+        draw_time_org: (5,5)  
+        draw_time_fontScale: 1  
