@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - For any video subscriber given a new lease on life, the event id used for the filenames
   should be updated to match the new index entry.
 
-## 0.0.2-alpha - 2021-02-02
+## 0.0.2-alpha - 2021-02-20
 
 ### Added
 
