@@ -9,7 +9,7 @@ import pandas as pd
 from datetime import datetime
 
 class CamData:
-    """ Data and access methods to camwatcher CSV data.
+    """ Data and access methods to camwatcher CSV and image data.
 
     Always operates within the context of a specific date. Any
     call to `set_event()` should refernce an event within the 
@@ -18,25 +18,29 @@ class CamData:
 
     Parameters
     ----------
-    dir : str  
+    csvdir : str  
         High-level folder name for camwatcher CSV date folders
+    imgdir : str  
+        High-level folder name for camwatcher image folders
     date : str, optional
         Target date in "YYYY-MM-DD" format. This defaults to 
         current date if not specified.
     
     Methods
     -------
-    set_date(date)
+    set_date(date() -> None
         Set index to specified (YYYY-MM-DD) date
     get_date() -> str
         Return current index date as YYYY-MM-DD
+    get_date_list() -> List
+        Returns list of available YYYY-MM-DD date folders from most recent to oldest
     get_index_name(date) -> str
         For given date, returns filesystem pathname to camwatcher index
     get_index() -> pandas.DataFrame
-        Returns reference to the current camwatacher index data
+        Returns reference to the current camwatcher index data
     get_last_event() -> str
         Returns most recent event id 
-    set_event(event)
+    set_event(event) -> None
         Set index to specifed event id
     get_event_node() -> str
         Returns node name associated with current event
@@ -48,6 +52,8 @@ class CamData:
         Retruns filesystem pathname to event detail file
     get_event_data(type) -> pandas.DataFrame
         Returns reference to tracking detail for current event and type
+    get_event_images() -> List
+        Returns list of pathnames to individual image frame files in chronological order
     """
 
     IDXFILE = "camwatcher.csv"
@@ -59,10 +65,10 @@ class CamData:
 
         Loads the camwatcher index data for the given date. Clears any existing
         references to event and camera data. This is a clean reset to an entirely
-        new date.  
+        new date, or used as a refresh of the current date.   
 
-        Parameter
-        ---------
+        Parameters
+        ----------
         date : str
             Target date in "YYYY-MM-DD" format
         """
@@ -261,13 +267,33 @@ class CamData:
         self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
         return self._event_data
 
+    def get_date_list(self):
+        """ Returns list of available YYYY-MM-DD date folders from most recent to oldest
+        
+        Returns
+        -------
+        List
+            The list of available date folders
+        """
+        return sorted([d[-10:] for d in list(self._list_date_folders())], reverse=True)
+            
+    def get_event_images(self):
+        """ Returns list of pathnames to individual image frame files in chronological order
+        
+        Returns
+        -------
+        List
+            The list of pathnames to individual image frame files
+        """
+        return sorted(list(self._list_event_images()))
+
     def _list_date_folders(self):
         # returns a list of the available date folders
         return self._list_files(self._index_path, prefix=None)
 
-    def _list_event_images(self, imagebase):
+    def _list_event_images(self):
         # return the set of image files for the current event
-        imagefolder = os.path.join(imagebase, self._ymd)
+        imagefolder = os.path.join(self._image_path, self._ymd)
         return self._list_files(imagefolder, prefix=self._event_id)
 
     def _list_files(self, basePath, prefix):
@@ -280,26 +306,22 @@ class CamData:
             imagePath = os.path.join(basePath, filename)
             yield imagePath
 
-    def get_date_list(self):
-        return sorted([d[-10:] for d in list(self._list_date_folders())], reverse=True)
-
-    def get_event_images(self, imagebase):
-        return sorted(list(self._list_event_images(imagebase)))
-
-    def __init__(self, dir, date = datetime.utcnow().isoformat()[:10]):
-        self._index_path = dir
+    def __init__(self, csvdir, imgdir, date = datetime.utcnow().isoformat()[:10]):
+        self._index_path = csvdir
+        self._image_path = imgdir
         self.set_date(date)
 
 # ----------------------------------------------------------------------------------------
 #   See below for usaage 
 # ----------------------------------------------------------------------------------------
 
-cfg = {'csvdir': '/mnt/usb1/imagedata/camwatcher'} 
+cfg = {'csvdir': '/mnt/usb1/imagedata/camwatcher',
+       'imgdir': '/mnt/usb1/imagedata/video'} 
 
 if __name__ == '__main__' :
 
-    cdata = CamData(cfg["csvdir"])   # allocate and initialize index for current date
-    cindx = cdata.get_index()        # get reference to index DataFrame
+    cdata = CamData(cfg["csvdir"], cfg["imgdir"])  # allocate and initialize index (current date)
+    cindx = cdata.get_index()                      # get reference to index DataFrame
     
     # most recent 5 events
     for row in cindx[:5].itertuples():

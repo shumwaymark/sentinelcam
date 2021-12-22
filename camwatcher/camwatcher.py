@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import multiprocessing
 import queue
 import threading
 import numpy as np
@@ -18,8 +19,7 @@ import imagezmq
 import zmq
 from time import sleep
 from datetime import datetime
-from multiprocessing import Process
-from multiprocessing import Value
+from multiprocessing import sharedctypes
 from zmq.asyncio import Context as AsyncContext
 
 cfg = {'control_port': 5566, # bind on this socket as REP for control commands
@@ -69,30 +69,38 @@ class VideoStreamWriter:
 
     def __init__(self, event, host, port, node, view):
         self.nodeView = (node, view)
-        self.event = event
         self.timer = None
-        self._writeVideo = Value('i', 1)
-        self.process = Process(target=self._capture_video, args=(
-            self._writeVideo, host, port, node, view, cfg['outdir']))
+        self._writeVideo = multiprocessing.Value('i', 1)
+        self._eventID = sharedctypes.RawArray('c', bytes(event,'utf-8'))
+        self._newEventID = multiprocessing.Event()
+        self._newEventID.set()
+        self.process = multiprocessing.Process(target=self._capture_video, args=(
+            self._writeVideo, self._newEventID, self._eventID, host, port, view, cfg['outdir']))
         self.process.start()
         logging.debug("Video writer started for {} event {} pid {}".format((node,view),
-            self.event, self.process.pid))
+            str(self._eventID.value,'utf-8'), self.process.pid))
     
-    def _capture_video(self, writeVideo, host, port, node, view, outdir):
-        publisher = "tcp://{}:{}".format(host, port)
-        date = datetime.utcnow().isoformat()[:10]
-        date_directory = os.path.join(outdir, date)
+    def _set_datedir(self, dir, date):
+        path = os.path.join(dir, date)
         try:
-            os.mkdir(date_directory)
+            os.mkdir(path)
         except FileExistsError:
             pass
+        return path
+
+    def _capture_video(self, writeVideo, newEvent, eventID, host, port, view, outdir):
+        publisher = "tcp://{}:{}".format(host, port)
         # start image subscription thread and begin video capture loop
         receiver = VideoStreamSubscriber(publisher, view)
         try:
             while writeVideo.value:
                 dt, frame = receiver.receive()
+                if newEvent.is_set():
+                    evt = str(eventID.value,'utf-8')
+                    date_directory = self._set_datedir(outdir, dt[:10])
+                    newEvent.clear()
                 jpegframe = "{}_{}_{}.jpg".format(
-                    self.event, dt[:10], dt[11:].replace(':','.'))
+                    evt, dt[:10], dt[11:].replace(':','.'))
                 jpegfile = os.path.join(date_directory, jpegframe)
                 # write the image file to disk 
                 with open(jpegfile,"wb") as f:
@@ -104,10 +112,17 @@ class VideoStreamWriter:
         finally:
             receiver.close()
 
+    def update_eventID(self, event):
+        self._eventID.value = bytes(event,'utf-8')
+        self._newEventID.set()
+    
+    def get_eventID(self):
+        return str(self._eventID.value, 'utf-8')
+
     def close(self):
         self._writeVideo.value = 0
         logging.debug("CamWatcher closing capture process {} from {} event {}".format(
-            self.process.pid, self.nodeView, self.event))
+            self.process.pid, self.nodeView, self.event.value))
 
 # Disk I/O CSV writer thread
 class CSVwriter:
@@ -220,6 +235,8 @@ def dispatch_logger(topics, msg):
         logging.info(f"|{'.'.join(topics)}|{msg}") 
     elif topics[1] == 'DEBUG':
         logging.debug(f"|{'.'.join(topics)}|{msg}") 
+    else:
+        logging.error(f"|{'.'.join(topics)}|{'*** Foreign TOPIC ***  ' + msg}") 
 
 async def process_logs(loggers):
     while True:
@@ -243,7 +260,7 @@ async def process_logs(loggers):
             await asyncio.sleep(1)
 
 def shutdown_writer(nodeView, evt):
-    if writerList[nodeView].event == evt:
+    if writerList[nodeView].get_eventID() == evt:
         writerList[nodeView].close()
         del writerList[nodeView]
         logging.debug("Video capture shutdown for event {} from {}".format(evt,nodeView))
@@ -263,12 +280,11 @@ async def dispatch_ote(node, ote_data):
         if nodeView in writerList:
             if writerList[nodeView].process.is_alive():
                 # still running, update stored eventID and stay alive 
-                writerList[nodeView].event = eventID 
+                writerList[nodeView].update_eventID(eventID)
                 writerList[nodeView].timer.cancel() 
             else:
                 writerList[nodeView] = VideoStreamWriter(eventID, 
                     outpost['host'], outpost['video'], node, view) 
-                dbLogMsgs.put(ote2db)
         else:
             writerList[nodeView] = VideoStreamWriter(eventID, 
                 outpost['host'], outpost['video'], node, view)
