@@ -4,8 +4,8 @@ import datetime
 import traceback
 import cv2
 import imagezmq
+import simplejpeg
 import threading
-import numpy as np
 from collections import deque
 
 cfg = {'host': 'lab1.', 
@@ -20,7 +20,7 @@ class FPS:
 
 	def update(self):
 		# capture current timestamp
-		self._deque.append(datetime.datetime.now())
+		self._deque.append(datetime.datetime.utcnow())
 	
 	def fps(self):
 		# calculate and return estimated frames/sec
@@ -74,7 +74,8 @@ if __name__ == "__main__":
     try:
         while True:
             msg, frame = receiver.receive()
-            image = cv2.imdecode(np.frombuffer(frame, dtype='uint8'), -1)
+            #image = cv2.imdecode(np.frombuffer(frame, dtype='uint8'), -1)
+            image = simplejpeg.decode_jpeg(frame, colorspace='BGR')
             if cfg["showfps"]:
                 tfps.update()
                 text = "FPS: {:.2f}/{:.2f}".format(receiver.velocity.fps(),tfps.fps()) 

@@ -5,18 +5,19 @@ from flask import Flask
 from flask import Response
 from flask import render_template, g
 import cv2
+import simplejpeg
 from camwatcher.camdata import CamData
 
 app = Flask(__name__) # initialize a flask object
 
-# cfg = {'port': 8080, 
-#         'address': '0.0.0.0',
-#         'imagefolder': '/mnt/usb1/imagedata/video',
-#         'datafolder':  '/mnt/usb1/imagedata/camwatcher'} 
+cfg = {'port': 8080, 
+       'address': '0.0.0.0',
+       'imagefolder': '/mnt/usb1/imagedata/video',
+       'datafolder':  '/mnt/usb1/imagedata/camwatcher'} 
 
 @app.before_request
 def before_request():
-    g.cwData = CamData("/mnt/usb1/imagedata/camwatcher")
+    g.cwData = CamData(cfg["datafolder"], cfg["imagefolder"])
     g.date = g.cwData.get_date()
     g.event = None
 
@@ -52,10 +53,10 @@ def _get_frametime(pathname):
 
 def generate_video(date, event):
     color = (0,255,0)
-    _cwData = CamData("/mnt/usb1/imagedata/camwatcher", date)
+    _cwData = CamData(cfg["datafolder"], cfg["imagefolder"], date)
     _cwData.set_event(event)
     tracker = _cwData.get_event_data()[:].itertuples()
-    image_list = _cwData.get_event_images("/mnt/usb1/imagedata/video")
+    image_list = _cwData.get_event_images()
     event_start = _cwData.get_event_start()
     objects = {}  # object dictionary for holding last known coordinates
     trk = next(tracker)
@@ -72,7 +73,7 @@ def generate_video(date, event):
                     trk = next(tracker)
                 iter_elapsed = trk.elapsed
             except StopIteration:
-                iter_elapsed = timedelta(days=1) # short-cicuit any futher calls back to the interator
+                iter_elapsed = timedelta(days=1) # short-circuit any further calls back to the iterator
 
         for (objid, (centx, centy, lastknown)) in objects.items():
             # draw both the ID and centroid of the object on the output frame
@@ -87,8 +88,10 @@ def generate_video(date, event):
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
         # re-encode the frame back into JPEG format
-        (flag, encodedframe) = cv2.imencode(".jpg", frame)
-            
+        #(flag, encodedframe) = cv2.imencode(".jpg", frame)
+        encodedframe = simplejpeg.encode_jpeg(frame, 
+            quality=95, colorspace='BGR')
+
         # whenever elapsed time within event > playback elapsed time,
         # estimate a sleep time to dial back the replay framerate
         playback_elaps = datetime.utcnow() - playback_begin
