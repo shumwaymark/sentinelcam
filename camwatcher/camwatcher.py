@@ -108,11 +108,13 @@ class VideoStreamWriter:
         except (KeyboardInterrupt, SystemExit):
             logging.info('VideoStreamWriter exiting')
         except Exception as ex:
-            logging.error("VideoStreamWriter exception: " + ex)
+            logging.error("VideoStreamWriter exception: " + str(ex))
         finally:
             receiver.close()
 
     def update_eventID(self, event):
+        if self.timer:
+            self.timer.cancel()
         self._eventID.value = bytes(event,'utf-8')
         self._newEventID.set()
     
@@ -121,8 +123,9 @@ class VideoStreamWriter:
 
     def close(self):
         self._writeVideo.value = 0
-        logging.debug("CamWatcher closing capture process {} from {} event {}".format(
-            self.process.pid, self.nodeView, self.event.value))
+        self.process.join()
+        logging.debug("CamWatcher closed capture process {} from {} event {}".format(
+            self.process.pid, self.nodeView, self._eventID.value))
 
 # Disk I/O CSV writer thread
 class CSVwriter:
@@ -153,7 +156,7 @@ class CSVwriter:
             with open(os.path.join(date_directory, 'camwatcher.csv'), mode='at') as index:
                 index.write(','.join([nodeView[0], nodeView[1], timestamp, evt, str(fps), 'trk']) + "\n")
         except Exception as ex:
-            logging.error("CSVwriter failure updating index file: " + ex)
+            logging.error("CSVwriter failure updating index file: " + str(ex))
         return date_directory
 
     def _run(self):
@@ -169,14 +172,17 @@ class CSVwriter:
                         f = open(os.path.join(self._setindex(
                             nodeView, ote['id'], ote['timestamp'], ote["fps"]), 
                             ote["id"] + '_trk.csv'), mode='wt')
-                        f.write("timestamp,objid,centroid_x,centroid_y\n") # write column headers
+                        f.write("timestamp,objid,classname,rect_x1,rect_y1,rect_x2,rect_y2\n") # write column headers
                         self._openfiles[ote["id"]] = f # add to list
                     elif ote["evt"] == 'trk':
                         self._openfiles[ote["id"]].write(','.join([
                             ote['timestamp'],
-                            str(ote["obj"]),
-                            str(ote['cent'][0]), 
-                            str(ote['cent'][1])
+                            str(ote['obj']),
+                            str(ote['class']),
+                            str(ote['rect'][0]), 
+                            str(ote['rect'][1]), 
+                            str(ote['rect'][2]), 
+                            str(ote['rect'][3])
                             ]) + "\n" )
                     elif ote["evt"] == 'end':
                         logging.debug("CSVwriter closing file for {}".format(ote['id']))
@@ -187,7 +193,7 @@ class CSVwriter:
                 except KeyError:
                     logging.error("CSVWriter event not found in list of writers: " + ote["id"])
                 except Exception as ex:
-                    logging.error("CSVwriter thread unhandled exception: " + ex)
+                    logging.error("CSVwriter thread unhandled exception: " + str(ex))
                 dbLogMsgs.task_done()
         logging.debug("CSVwriter closing")
         for f in self._openfiles:
@@ -195,10 +201,12 @@ class CSVwriter:
 
     def close(self):
         self._stop = True
+        self._thread.join()
 
 async def control_loop(loggers):
     rep = ctx.socket(zmq.REP)
     rep.bind(f"tcp://*:{cfg['control_port']}")
+    logging.info("CamWatcher control port ready.")
     while True:
         msg = await rep.recv()
         msg = msg.decode("ascii").split('|')
@@ -214,29 +222,28 @@ async def control_loop(loggers):
                 print_outpost(outpost)
             except Exception as ex:  
                 result = 'FAILED'
-                logging.error('CW subscription failure ' + ex)
-        logging.debug("CW control port reply " + result)
+                logging.error('CamWatcher subscription failure ' + ex)
+        else:
+            logging.info("CamWatcher already connected with " + outpost['node'])
+        logging.debug("CamWatcher control port reply " + result)
         await rep.send(result.encode("ascii"))
             
 def print_outpost(outpost):
-    print('New outpost registered')
-    print(f"host: {outpost['host']}")
-    print(f"node: {outpost['node']}")
-    print(f"view: {outpost['view']}")
+    print(f"New outpost registered. host: {outpost['host']} node: {outpost['node']}")
 
 def dispatch_logger(topics, msg):
     if topics[1] == 'ERROR':
-        logging.error(f"|{'.'.join(topics)}|{msg}") 
+        logging.error(f"[{'.'.join(topics)}]{msg}") 
     elif topics[1] == 'WARNING':
-        logging.warning(f"|{'.'.join(topics)}|{msg}") 
+        logging.warning(f"[{'.'.join(topics)}]{msg}") 
     elif topics[1] == 'CRITICAL':
-        logging.critical(f"|{'.'.join(topics)}|{msg}") 
+        logging.critical(f"[{'.'.join(topics)}]{msg}") 
     elif topics[1] == 'INFO':
-        logging.info(f"|{'.'.join(topics)}|{msg}") 
+        logging.info(f"[{'.'.join(topics)}]{msg}") 
     elif topics[1] == 'DEBUG':
-        logging.debug(f"|{'.'.join(topics)}|{msg}") 
+        logging.debug(f"[{'.'.join(topics)}]{msg}") 
     else:
-        logging.error(f"|{'.'.join(topics)}|{'*** Foreign TOPIC ***  ' + msg}") 
+        logging.error(f"[{'.'.join(topics)}]{'*** Foreign TOPIC *** ' + msg}") 
 
 async def process_logs(loggers):
     while True:
@@ -250,6 +257,8 @@ async def process_logs(loggers):
                 category = message[:3] 
                 if category == 'ote':   # object tracking event 
                     await dispatch_ote(topics[0], message[3:])
+                elif category == 'Exi':  # this is the "Exit" message from an imagenode
+                    dispatch_logger(topics, msg)
                 else:
                     logging.warning("Unknown message category {} from {}".format(
                         message[:3], ".".join(topics)))
@@ -281,7 +290,6 @@ async def dispatch_ote(node, ote_data):
             if writerList[nodeView].process.is_alive():
                 # still running, update stored eventID and stay alive 
                 writerList[nodeView].update_eventID(eventID)
-                writerList[nodeView].timer.cancel() 
             else:
                 writerList[nodeView] = VideoStreamWriter(eventID, 
                     outpost['host'], outpost['video'], node, view) 

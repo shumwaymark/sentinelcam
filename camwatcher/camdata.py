@@ -337,5 +337,8 @@ if __name__ == '__main__' :
             print(str(row.timestamp) + " " + 
                   str(row.elapsed) + " " + 
                   str(row.objid) + " " + 
-                  str(row.centroid_x) + " " + 
-                  str(row.centroid_y))
+                  str(row.classname) + " " +
+                  str(row.rect_x1) + " " + 
+                  str(row.rect_x2) + " " +
+                  str(row.rect_y1) + " " +
+                  str(row.rect_y2))

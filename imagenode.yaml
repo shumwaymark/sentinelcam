@@ -1,4 +1,4 @@
-# Settings file imagenode.yaml -- sentinelcam test #2
+# Settings file imagenode.yaml -- version 3 for sentinelcam testing
 ---
 node:
   name: outpost
@@ -19,9 +19,23 @@ cameras:
     vflip: False
     detectors:
       outpost:
-        publish_cam: 5567 # activates video frame publishing
-        publish_log: 5565 # activates logfile publishing over ZMQ
+        publish_cam: 5567            # activate video frame publishing
+        publish_log: 5565            # activate logfile publishing over ZMQ
         camwatcher: tcp://data1:5566 # connect to camwatcher control port
+        spyglass: (640, 480)         # must match camera "resolution" above
+        tracker: kcf                 # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
+        detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
+        skip_frames: 30
+        mobilenetssd:
+            prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+            model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+            confidence: 0.5
+            target: cpu      # [cpu, myriad]
+        yolov3:  
+            yolo_path: /home/pi/imagenode/outpost/yolo-coco
+            confidence: 0.5
+            threshold: 0.3
+            consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
         ROI: (10,20),(70,80)
         draw_roi: ((255,0,0),1)
         draw_time: ((255,0,0),1)  

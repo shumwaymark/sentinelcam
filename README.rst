@@ -26,7 +26,7 @@ as desired.
 - Able to operate independently of any cloud-based services or externally hosted infrastructure 
 - Automatic video capture should be triggered by motion detection and stored for review/modeling
 - Motion detector will provide basic object tracking for the duration of the event
-- Object ids and associated tracking centroids are logged as an outcome of motion detection
+- Object identifiers and associated tracking centroids are logged as an outcome of motion detection
 - A live video feed from each camera must be available for on-demand viewing as desired  
 - Video playback should support an optional timestamp and any desired labeling of inference results
 - Optional time-lapse capture 
@@ -36,11 +36,11 @@ High-level design concept
 
 The birds-eye overview of the early conceptual framework is portrayed by the following sketch. 
 
-Multiple *outposts* are each a camera node. These are not rigged with internal disk storage.
+Multiple **Outposts** are each a camera node. These are not rigged with internal disk storage.
 One or more *data aggregators* are responsible for accumulating reported data and capturing
 video streams. 
 
-Realtime analysis of logged data from each *outpost* feeds a *dispatcher* responsible for
+Realtime analysis of logged data from each **Outpost** feeds a *dispatcher* responsible for
 submitting tasks to the *sentinel*. Inference and labeling tasks should be prioritized over
 modeling runs. The *sentinel* will need to be provisioned with adequate memory and computing
 resources. 
@@ -57,7 +57,7 @@ employing parallelization where helpful for processing incoming data sets. Keep 
 minimum. Each node in the network should serve a distinct purpose. Take care, do not overburden 
 any individual node, while watching out for untapped idle capacity. Orchestration is key.
 
-Although each *outpost* node operates independently, any detected event could be directly
+Although each **Outpost** node operates independently, any detected event could be directly
 related to an event being simultaneously processed by another node with an overlapping or 
 adjacent field of view.
 
@@ -71,60 +71,128 @@ Fortunately, early research led to the `imageZMQ <https://github.com/jeffbass/im
 library authored by Jeff Bass. This was key to resolving data transport issues between
 nodes. 
 
-For building out both the *outpost* and **camwatcher** functionality, it quickly became 
+For building out both the **Outpost** and **camwatcher** functionality, it quickly became 
 obvious that his **imagenode** and **imagehub** projects could provide scaffolding that 
 was both structurally sound and already working.
 
-Both projects have been forked as submodules to the **SentinelCam** project. Further 
+Both projects have been forked as submodules to the **SentinelCam** project. Additional 
 details on how these modules have been adapted is documented in
 `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
-Currently, the complete functionality of the **SentinelCam** *outpost* has been entirely
-encapsulated by **imagenode**. 
+Most significantly, the enhanced **imagenode** module completely encapsulates all functionality
+required by the **Outpost**. The baseline **imagehub** module is used as-is.
 
 Project status
 ==============
 
 **SentinelCam** is an incomplete, and largely experimental, work in progress. 
 
+Outpost design
+--------------
+
+Imagine a lonely sentry standing guard at a remote outpost. Each outpost is positioned to watch over
+the paths leading towards the inner fortifications. Sentries are tasked with observing, monitoring,
+and reporting anything of interest or concern. Such reports should be sent back to central command
+for analysis and descision making.
+
+This analogy represents the underlying concept behind the **Outpost** design. Each node monitors the
+field of view, watching for motion. Once motion has occured a ``SpyGlass`` is deployed for a closer
+look. Whenever one or more recognizable objects have been detected, this is reported and motion through
+the field of view tracked and logged.
+
+The **Outpost** is implemented as a ``Detector`` for an **imagenode** camera. This allows it to easily
+slip into the existing **imagenode** / **imangehub** / **librarian** ecosystem as supplemental functionality
+while benefiting from the full feature set offered by that system.
+
+.. image:: docs/images/Outpost.png
+   :alt: High-level sketch of Outpost integration with imagenode
+
+Two key enhancements provide the essential wiring to make this possible. Log and video publishing over 
+PyZMQ and imageZMQ respectively.
+
+Video publishing has a twofold benefit.
+
+- Video capture from another node can be quickly initiated by an event in progress.
+- A live stream can simultaneously feed one or more monitors for on-demand real time display.
+
+Images are captured as individual frames, and each compressed into JPEG format for publication.
+For smooth realistic video playback, the pipeline needs to run with a target thoughput of 
+somewhere close to 30 frames per second, ideally.
+
+Obtaining this goal can quickly become a signficant challenge when building out the pipeline with
+CPU-intensive tasks such as object identifcation and tracking.
+
+To achieve the highest frame rate possible, an **Outpost** node can employ a ``SpyGlass`` for closer 
+analysis of motion events. The idea is to keep the pipeline lean for quickly publishing each frame,
+while processing a subset of the images in parallel to drive a feeedback loop. This spyglass is a
+multiprocessing solution. 
+
+The following general strategy provides an overview of this technique.
+
+- Motion detection is applied to each frame whenever there is nothing of interest within the field
+  of view. This is a relatively quick background subtraction model which easily runs within the main 
+  image processing pipeline.
+- A motion event triggers the application of an object identification lens to the spyglass.
+- Each object of interest is tagged for tracking.
+- With objects of interest in view, a tracking lens is applied to subsequent frames whenever the 
+  spyglass is not already busy.
+- Object identification is periodically reapplied to refresh the tracking data.
+- The new current image available within the pipeline is only provided to the spyglass after results 
+  from the prior task have been returned and it has signaled availability for new work.
+
+This architecture potentially allows for increasingly sophisticated vision analysis models to be
+deployed directly on an **Outpost** node. Specialized lenses could be developed for the ``SpyGlass``
+based on the type of event and results from current analysis. The intent is to support the design
+of a cascading algorithm to first inspect, then analyze a subset of selected frames and regions of
+interest as efficiently as possible on multi-core hardware.
+
+For example, if a person was detected, is there a face in view? If so, can it be recognized? Was it
+package delivery or a postal carrier? If the object of interest is a vehicle, can the make/model be
+deterimined? The color? Is there a license plate visible?
+
+As a general rule, in-depth analysis tasks such as these are assigned to batch jobs running on the
+**Sentinel** itself.
+
+Log publishing also offers two benefits.
+
+- Allows error and warning conditions to be accumulated in a centralized repository as they occur.
+  This avoids reliance on SD cards with limited storage capacity which could be dispersed across 
+  potentially dozens of individual camera nodes.
+- More importantly, logged event notifications including information related to an event in progress
+  are then available as data which can be streamed to multiple interested consumers in real time.
+
+The **Outpost** as currently implemented is still highly experimental, and best represents proof 
+of concept as a working draft. Complete details on the design, structure, and operation of
+the **Outpost** have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
+
 Camwatcher design
 -----------------
 
-A working draft of the **camwatcher** functionality is up and running. In its current 
-state, this is best evaluated as an early working proof of concept. The diagram below
-presents a high-level design sketch.
+A prototype of the **camwatcher** functionality is up and running in production. In its current
+state, this is best evaluated as working proof of concept. The diagram below presents a high-level 
+design sketch.
 
 .. image:: docs/images/CamWatcher.png
-   :alt: Sketch of early camwatcher design
+   :alt: Sketch of basic camwatcher design
 
-This design exploits two enhancements made to the **imagenode** module: log and video 
-publishing over ZMQ as configurable options.
-
-Logfile publishing serves two purposes. It first allows error and warning conditions to be
-accumulated in a centralized repository as they occur. This avoids reliance on SD cards
-with limited storage capacity which could be dispersed across potentially dozens of
-individual camera nodes. More importantly, logged event notifications and information 
-related to an event in progress are then available as data which can be streamed to multiple
-interested consumers in real time.
-
-Video publishing also has a twofold benefit. Not only can video capture be quickly triggered
-by an event in progress, a live video stream can simultaneously feed one or more monitors for
-display as desired.
+This design exploits two of the enhancements made to the **imagenode** module described
+above supporting **Outpost** functionality: log and video publishing over ZMQ as 
+configurable options.
 
 The **camwatcher** employs a Python ``asyncio`` event loop running a set of coroutines with
 the following tasks.
 
 - *Control Loop*. Uses a ZMQ Req/Rep port for receiving control commands. This currently 
-  just allows an **imagenode** to route a notification during initialization to insure that
+  just allows an **Outpost** to route a notification during initialization to insure that
   a logfile subscription has been established. 
 
-- *Log Subscriber*. Subscribes to logging data streamed from one or more **imagenode**
+- *Log Subscriber*. Subscribes to logging data streamed from one or more **Outpost**
   publishers via ZMQ. Logging data that pertains to a video event is directed to the 
   *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
 
-- *Dispatcher*. Handles object tracking event data. For each new event, a video stream 
-  subscriber is instantiated to begin capturing the video. All event tracking data is queued
-  for permanent storage by the *CSV File Writer*.
+- *Dispatcher*. Handles object tracking event data. For each new event, a subprocess is
+  started as a video stream subscriber to begin capturing the video. All event tracking data
+  is queued for permanent storage by the *CSV File Writer*.
 
 This design packs a fair amount of network I/O activity into a single thread of execution. To 
 best exploit the multi-core architecture of the Raspberry Pi 4B, a child process is forked to
@@ -156,7 +224,7 @@ The index file for each date folder is named ``camwatcher.csv`` as described bel
     viewname, str, camera view name 
     timestamp, datetime, timestamp at the start of the event
     event, str, unique identifer for the event 
-    fps, int, pipeline FPS at start of event
+    fps, int, pipeline velocity at start of event
     type, str, event type 
 
 Event detail files always include a header row, with varying data structures depending on the type 
@@ -168,9 +236,12 @@ convention for all detail files is: ``EventID_TypeCode.csv``
     :widths: 20, 20, 60
 
     timestamp, datetime, timestamp when tracking record written
-    objid, int, object identifier
-    centroid_x, int, object centroid X-coordinate
-    centroid_y, int, object centroid Y-coordinate
+    objid, str, object identifier
+    classname, str, classification name
+    rect_x1, int, bounding rectangle X1-coordinate
+    rect_y1, int, bounding rectangle Y1-coordinate
+    rect_x2, int, bounding rectangle X2-coordinate
+    rect_y2, int, bounding rectangle Y2-coordinate
 
 These CSV files are written into the folder specified by the ``csvdir`` configuration setting and 
 organized by date into subfolders with a YYYY-MM-DD naming convention.
@@ -235,10 +306,10 @@ The file name convention for each stored frame is: ``EventID_TimeStamp.jpg`` as 
   │
   └──  # additional directories for each date
 
-It is important to note that the capture rate for frames of video can vary significantly from
-the rate of capture for the tracking data. To correlate tracking data back to a captured image,
-it is necessary to bind these together by estimating an elapsed time from the start of the event 
-for each data source.
+It is important to note that the collection of image data occurs independently from the tracking data.
+Some variation in the rate of capture can be expected. Differences from a perspective in real time are 
+not expected to be signficant. To correlate tracking data back to a captured image, it is helpful to bind 
+these together by estimating an elapsed time from the start of the event for each data source.
 
 Research and development roadmap
 ================================
@@ -262,15 +333,19 @@ and labeling tasks are the highest priority; modeling and reinforcement more sec
 Outpost
 -------
 
-Beyond simple motion detection and object tracking, some inference tasks can be pushed out to
-the edge where appropriate and helpful. Applying object identification across a sampling of
-incoming frames could help determine whether a motion event is deserving of prioritized analysis
-by the *sentinel*.
+Beyond simple object detection and tracking, some inference tasks can be pushed out to the
+edge where appropriate and helpful. Applying more sophisticated models across a sampling
+of incoming frames could help determine whether a motion event should be prioritized for
+closer analysis by the *sentinel*. 
 
-Taken a leap further, selected camera nodes can be equipped with a coprocessor such as the
-Google Coral USB Accelerator or Intel Neural Compute Stick. This can allow for running a facial
-recognition model directly on the *outpost* itself. When focused on an entry into the house,
-any face immediately recognized would not require engaging the *sentinel* for further analysis.
+Additional performance gains can be achieved here by equipping selected ``Outpost`` nodes with
+a coprocessor such as the Google Coral USB Accelerator or Intel Neural Compute Stick. Proper
+hardware provisioning can allow for running facial and vehicle recognition models directly on
+the camera node. When focused on an entry into the house, any face immediately recognized would
+not require engaging the *sentinel* for further analysis.
+
+Essentially, this could enable a camera to provide data in real time for discerning between
+expected/routine events and unexpected activity deserving of a closer look.
 
 Data management
 ---------------
@@ -319,6 +394,7 @@ and libraries.
 - PyZMQ
 - imageZMQ
 - imutils
+- simplejpeg
 - numpy
 - pandas
 
