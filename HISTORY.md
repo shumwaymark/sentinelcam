@@ -7,25 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Ongoing development
 
-- Begin building out the *sentinel* module. This will be the inference and modeling engine.
-- Experiment with leveraging the new `send_threading` option in **imagenode** to supplement
+- Continue building out the *sentinel* module. This will become the inference and modeling engine.
+- Experiment with leveraging the `send_threading` option in **imagenode** to supplement
   published video capture triggered from a motion event. By dumping the `cam_q` at the start 
   of a motion event, those frames could theoretically be used to assemble video from just prior 
   to that point in time.
-- Refinements to object tracking code in **imagenode**. Begin initial experiments with 
-  layering in some inference, such as object identifcation, here. Expecting to employ 
-  a cascading technique to first inspect, then analyze a sampling of selected frames 
-  over a sub-process call. 
+- Continue refinments to **outpost** implementation. 
 - Continue development of the **camwatcher** module.
   - Move configuration into YAML file.
   - Clean up exception handling. 
-- Experiment with adopting **simplejpeg** library for more efficient frame file encoding.
-- Add missing node/view filtering functionality to video_review.py
+- Continue development of video_review.py
+  - Add missing node/view filtering functionality
+  - Adapt to use the `DataFeed` for operation from an application server
 
 ### Known bugs
 
-- For any video subscriber given a new lease on life, the event id used for the filenames
-  should be updated to match the new index entry.
+- `CamData` class fails with bad input values for date/event. Any `DataFeed` request can
+  potentially query events that do not exist. Should probably return empty results for
+  this condition.
+
+## 0.0.3-alpha - 2021-01-03
+
+### Added
+
+- First working prototype of the **datapump** module. This is a stand-alone process 
+  itended for running on the same node as a **camwatcher**. This module services access requests 
+  to the data and image sinks over *imageZMQ* transport, specifically for use with the `DataFeed`
+  class from a process running on another node, such as the *sentinel* itself.
+- Added example **datafeed** module implementing requests to the **datapump**. This is still
+  evolving. 
+
+### Changed
+
+- Image folder path added as argument to CamData initialization.
+- Adopted **simplejpeg** library in place of using **OpenCV** for more efficient frame file
+  encoding/decoding.
+- Corrected handling for updating the EventID used by an active **camwatcher** video subscriber.
+- Data model for tracking events revised to substitue bounding rectangles for detected obects rather
+  than an object centroid. Classname also added for those events where this can be
+  estimated in real time.
+- Fleshed out intitial **outpost** functionality for the **imagenode** project, including an early
+  vesrion of the ``SpyGlass`` as a multiprocessing vision analysis pipeline. 
 
 ## 0.0.2-alpha - 2021-02-20
 
