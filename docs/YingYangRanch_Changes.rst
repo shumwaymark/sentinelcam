@@ -198,9 +198,9 @@ This setting specifies a tuple with the dimensions of the camera image being pas
 **imagenode** pipeline. This should match the setting for the camera ``resolution`` value in the
 YAML configuration file.  
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      spyglass: (640, 480)   # important, must match camera "resolution" setting
+    spyglass: (640, 480)   # important, must match camera "resolution" setting
 
 *Caution*. This is not an ideal, so a word to the wise. The **imagenode** pipeline might be carrying
 an image sized differently than the camera setting. An example of this is the ``resize_width`` 
@@ -242,19 +242,19 @@ is increased or decreased.
 A value of (0,0),(100,100) would specify an ROI that is the full image. This is the
 default if not explicitly specified.
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      ROI: (10,20),(70,80)   # region of interest for motion detection
+    ROI: (10,20),(70,80)   # region of interest for motion detection
 
 Additional **imagenode** optional settings helpful for debugging and for tuning camera
 and detector settings. 
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      draw_roi: ((255,0,0),1)   # draw the ROI box in blue with a line 1 pixel wide
-      draw_time: ((255,0,0),1)  # timestamp text is blue with 1 pixel line width
-      draw_time_org: (5,5)      # timestamp text starts at this (x,y) location 
-      draw_time_fontScale: 1    # timestamp fontScale factor is 1
+    draw_roi: ((255,0,0),1)   # draw the ROI box in blue with a line 1 pixel wide
+    draw_time: ((255,0,0),1)  # timestamp text is blue with 1 pixel line width
+    draw_time_org: (5,5)      # timestamp text starts at this (x,y) location 
+    draw_time_fontScale: 1    # timestamp fontScale factor is 1
 
 For furter information regarding these settings, please refer to
 *"Camera Detectors, ROI and Event Tuning"* in
@@ -268,39 +268,39 @@ tracker
 This setting selects the object tracking algorithm to use. The following subset of the 
 OpenCV legacy contributed object trackers are supported.    
 
-  ``boosting``
-    A rather old AdaBoost implementation that has been superceded by faster algorithms.
+``boosting``
+  A rather old AdaBoost implementation that has been superceded by faster algorithms.
 
-  ``mil``
-    Multiple Instance Learning. An improvement on the BOOSTING tracker, though faster 
-    techniques such as KCF are now available.
+``mil``
+  Multiple Instance Learning. An improvement on the BOOSTING tracker, though faster 
+  techniques such as KCF are now available.
 
-  ``kcf`` 
-    Kernelized Correlation Filters. Builds on the concepts of BOOSTING and MIL, faster
-    and more accurate than both.
+``kcf`` 
+  Kernelized Correlation Filters. Builds on the concepts of BOOSTING and MIL, faster
+  and more accurate than both.
 
-  ``tld``
-    Tracking, Learning, and Detection. A self-correcting implementation that might work 
-    well in certain scenarios. 
+``tld``
+  Tracking, Learning, and Detection. A self-correcting implementation that might work 
+  well in certain scenarios. 
 
-  ``medianflow``
-    Compares references across time, excels at identifying tracking failures.
+``medianflow``
+  Compares references across time, excels at identifying tracking failures.
 
-  ``mosse``
-    Minimum Output Sum of Squared Error. Uses an adaptive correlation filtering technique 
-    that is both accurate and fast.
+``mosse``
+  Minimum Output Sum of Squared Error. Uses an adaptive correlation filtering technique 
+  that is both accurate and fast.
   
-  ``csrt``
-    Discriminative Correlation Filter with Channel and Spatial Reliability. A very accurate 
-    tracking algorithm with a trade-off of slightly slower operation. 
+``csrt``
+  Discriminative Correlation Filter with Channel and Spatial Reliability. A very accurate 
+  tracking algorithm with a trade-off of slightly slower operation. 
 
 The general consensus on these seems to be that KCF is likely the best all around choice. The
 CSRT tracker is more accurate though slightly slower. While MOSSE is very fast with some loss 
 in accuracy.
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      tracker: kcf  # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
+    tracker: kcf  # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
 
 skip_frames
 -----------
@@ -314,9 +314,9 @@ a tick count for the **outpost**. The value specified here is not based on the n
 analyzed by the ``SpyGlass``.  This trigger is measured against the number of frames which have passed 
 through the outpost for publishing, including those not analyzed.
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      skip_frames: 30
+    skip_frames: 30
 
 detectobjects
 -------------
@@ -324,9 +324,9 @@ detectobjects
 Object detection algorithm to use. Only YOLOv3 and MobileNetSSD have been implemented.
 More to come later. YOLOv3 *is not recommended due to performance concerns*.
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
+    detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
 
 mobilenetssd
 ------------
@@ -334,13 +334,13 @@ mobilenetssd
 This is used to specify the configuration for the MobileNetSSD object detector. Required 
 when ``mobilenetssd`` is specifed for object detection.
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      mobilenetssd:
-        prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-        model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
-        confidence: 0.5
-        target: cpu     # [cpu, myriad]          
+    mobilenetssd:
+      prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+      model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+      confidence: 0.5
+      target: cpu     # [cpu, myriad]          
 
 yolov3
 ------
@@ -348,13 +348,13 @@ yolov3
 This is used to specify the configuration for the YOLOv3 object detector. Required 
 when ``yolov3`` is specifed for object detection.
 
-    .. code-block:: yaml
+  .. code-block:: yaml
 
-      yolov3:
-        yolo_path:  /home/pi/imagenode/outpost/yolo-coco
-        confidence: 0.5
-        threshold:  0.3
-        consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
+    yolov3:
+      yolo_path:  /home/pi/imagenode/outpost/yolo-coco
+      confidence: 0.5
+      threshold:  0.3
+      consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
 
 
 Logging for tracking events
@@ -407,7 +407,7 @@ time of the observation, and the logged/reported time.
        "id": "42fc4bb46cc611ebb942dca63261a32e",
        "evt": "trk",
        "obj": 999999,
-       "class": "person"
+       "class": "person",
        "rect": [0000, 0000, 0000, 0000]
      }
 
@@ -434,8 +434,8 @@ Changes to Python source code
 
 *more to come on this later* 
 
-In short: ``sentinelcam`` folder has the code needed and all changes to the baseline as 
-detailed below can be found in ``tools/imaging.py`` 
+In short: the ``sentinelcam`` folder has the Python code modules needed, and all changes
+to the baseline as detailed below can be found in ``tools/imaging.py`` 
 
 .. code-block:: 
 
