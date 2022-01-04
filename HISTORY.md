@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - First working prototype of the **datapump** module. This is a stand-alone process 
-  itended for running on the same node as a **camwatcher**. This module services access requests 
+  intended for running on the same node as a **camwatcher**. This module services access requests 
   to the data and image sinks over *imageZMQ* transport, specifically for use with the `DataFeed`
   class from a process running on another node, such as the *sentinel* itself.
 - Added example **datafeed** module implementing requests to the **datapump**. This is still
