@@ -242,19 +242,19 @@ is increased or decreased.
 A value of (0,0),(100,100) would specify an ROI that is the full image. This is the
 default if not explicitly specified.
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    ROI: (10,20),(70,80)   # region of interest for motion detection
+  ROI: (10,20),(70,80)   # region of interest for motion detection
 
 Additional **imagenode** optional settings helpful for debugging and for tuning camera
 and detector settings. 
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    draw_roi: ((255,0,0),1)   # draw the ROI box in blue with a line 1 pixel wide
-    draw_time: ((255,0,0),1)  # timestamp text is blue with 1 pixel line width
-    draw_time_org: (5,5)      # timestamp text starts at this (x,y) location 
-    draw_time_fontScale: 1    # timestamp fontScale factor is 1
+  draw_roi: ((255,0,0),1)   # draw the ROI box in blue with a line 1 pixel wide
+  draw_time: ((255,0,0),1)  # timestamp text is blue with 1 pixel line width
+  draw_time_org: (5,5)      # timestamp text starts at this (x,y) location 
+  draw_time_fontScale: 1    # timestamp fontScale factor is 1
 
 For furter information regarding these settings, please refer to
 *"Camera Detectors, ROI and Event Tuning"* in
@@ -298,9 +298,9 @@ The general consensus on these seems to be that KCF is likely the best all aroun
 CSRT tracker is more accurate though slightly slower. While MOSSE is very fast with some loss 
 in accuracy.
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    tracker: kcf  # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
+  tracker: kcf  # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
 
 skip_frames
 -----------
@@ -309,14 +309,14 @@ Once objects are in view, the correlation tracking alogorithm specified above is
 movement from one frame to the next. This tends to improve efficiency, since object detection is 
 a relatively expensive operation in terms of CPU resources relative to object tracking. 
 
-This setting controls the frequency for which object detection is re-applied to the view, measured in
+This setting controls the frequency for which object detection is re-applied to the view, measured by
 a tick count for the **outpost**. The value specified here is not based on the number of frames actually
 analyzed by the ``SpyGlass``.  This trigger is measured against the number of frames which have passed 
 through the outpost for publishing, including those not analyzed.
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    skip_frames: 30
+  skip_frames: 30
 
 detectobjects
 -------------
@@ -324,9 +324,9 @@ detectobjects
 Object detection algorithm to use. Only YOLOv3 and MobileNetSSD have been implemented.
 More to come later. YOLOv3 *is not recommended due to performance concerns*.
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
+  detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
 
 mobilenetssd
 ------------
@@ -334,13 +334,13 @@ mobilenetssd
 This is used to specify the configuration for the MobileNetSSD object detector. Required 
 when ``mobilenetssd`` is specifed for object detection.
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    mobilenetssd:
-      prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-      model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
-      confidence: 0.5
-      target: cpu     # [cpu, myriad]          
+  mobilenetssd:
+    prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    confidence: 0.5
+    target: cpu     # [cpu, myriad]          
 
 yolov3
 ------
@@ -348,24 +348,23 @@ yolov3
 This is used to specify the configuration for the YOLOv3 object detector. Required 
 when ``yolov3`` is specifed for object detection.
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    yolov3:
-      yolo_path:  /home/pi/imagenode/outpost/yolo-coco
-      confidence: 0.5
-      threshold:  0.3
-      consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
+  yolov3:
+    yolo_path:  /home/pi/imagenode/outpost/yolo-coco
+    confidence: 0.5
+    threshold:  0.3
+    consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
 
 
 Logging for tracking events
 ===========================
 
-There are three motion events reported by the ``outpost``. There is a single reported item for the
-start of each event, and another for the end of the event when no nore motion is occuring. The third
-reporting point is the tracking data itself, which is published repetitively across multiple frames 
-throughout the lifespan of the event, for each frame and tracked object. All of the data being reported 
-for these three conditions is stored within a python dictionary structure, and published over the logger 
-in JSON format.
+There are three tracking events reported by the ``outpost``. There is a single reported item for the
+start of each event, and another at the end. The third reporting point is the tracking data itself, 
+which is published repetitively across multiple frames throughout the lifespan of the event, for 
+each frame reviewded and tracked object within. All of the data being reported for these three 
+conditions is published over the logger in JSON format.
 
 Each tracking message is associated with a specific event and camera view. The ``id`` field serves as the 
 event identifier, this is a UUID value for uniqueness. The ``view`` field contains the configured ``viewname`` 
@@ -381,7 +380,7 @@ opertaing efficiently, there should be at most just a few milliseconds of latenc
 time of the observation, and the logged/reported time. 
 
 1) Event start, the ``evt`` field contains the text ``start``. This message is sent once, when
-   motion is first detected. The ``fps`` field reflects the velocity of the **outpost** pipeline
+   the tracking event begins. The ``fps`` field reflects the velocity of the **outpost** pipeline
    at the start of the event in frames per second. This value is calculated based on a rolling 
    average looking back over the previous 160 frames. A reported rate of 32 frames/second would 
    reflect the average pipelne velocity for the 5 seconds prior to the start of the event.  
@@ -397,8 +396,8 @@ time of the observation, and the logged/reported time.
 
 2) Object tracking data, the ``evt`` field contains the text ``trk``. This message is sent multiple
    times while the event is in progress, for each analyzed frame and tracked object within the frame.
-   The ``obj`` and ``class`` fields contain an object identifier and classification name. The ``rect`` 
-   field has the x1,y1,x2,y2 corners of the bounding rectangle for the object being reported. 
+   The ``obj`` and ``class`` fields contain an object identifier and classification name if available.
+   The ``rect`` field has the x1,y1,x2,y2 corners of the bounding rectangle for the object being reported. 
 
    .. code-block:: json
 
@@ -408,13 +407,12 @@ time of the observation, and the logged/reported time.
        "evt": "trk",
        "obj": 999999,
        "class": "person",
-       "rect": [0000, 0000, 0000, 0000]
+       "rect": [0, 0, 0, 0]
      }
 
-3) End of the event, the ``evt`` field contains the text ``end``. Sent when no more motion is 
-   detected. Any other fields contained in the structure beyond what is portrayed in the example
-   below should be ignored. There could be extraneous data carried in this message left over from
-   the prior tracking event. 
+3) End of the event, the ``evt`` field contains the text ``end``. Any other fields contained in the 
+   structure beyond what is portrayed in the example below should be ignored. There could be extraneous 
+   data carried in this message left over from the prior tracking event. 
 
    .. code-block:: json
 
@@ -435,7 +433,7 @@ Changes to Python source code
 *more to come on this later* 
 
 In short: the ``sentinelcam`` folder has the Python code modules needed, and all changes
-to the baseline as detailed below can be found in ``tools/imaging.py`` 
+to the baseline as detailed below can be found in ``imagenode/tools/imaging.py`` 
 
 .. code-block:: 
 
@@ -454,7 +452,7 @@ to the baseline as detailed below can be found in ``tools/imaging.py``
 
   from sentinelcam.outpost import Outpost # SentineCam outpost support
 
-*initializaton hook for the for the Detector instance*
+*initializaton hook for the Detector instance*
 
 .. code-block:: python
 
