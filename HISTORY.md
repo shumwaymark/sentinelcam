@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   potentially query events that do not exist. Should probably return empty results for
   this condition.
 
-## 0.0.3-alpha - 2021-01-03
+## 0.0.3-alpha - 2022-01-03
 
 ### Added
 
