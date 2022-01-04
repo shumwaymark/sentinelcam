@@ -198,9 +198,9 @@ This setting specifies a tuple with the dimensions of the camera image being pas
 **imagenode** pipeline. This should match the setting for the camera ``resolution`` value in the
 YAML configuration file.  
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
-    spyglass: (640, 480)   # important, must match camera "resolution" setting
+  spyglass: (640, 480)   # important, must match camera "resolution" setting
 
 *Caution*. This is not an ideal, so a word to the wise. The **imagenode** pipeline might be carrying
 an image sized differently than the camera setting. An example of this is the ``resize_width`` 
