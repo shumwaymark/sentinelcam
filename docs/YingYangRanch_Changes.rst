@@ -432,8 +432,8 @@ Changes to Python source code
 
 *more to come on this later* 
 
-In short: the ``sentinelcam`` folder has the Python code modules needed, and all changes
-to the baseline as detailed below can be found in ``imagenode/tools/imaging.py`` 
+The new ``imagenode/sentinelcam`` folder has the Python code modules needed, and all changes
+to the baseline, as detailed below, can be found in ``imagenode/tools/imaging.py`` 
 
 .. code-block:: 
 
@@ -465,10 +465,10 @@ That is all.
 Legacy OpenCV contributed object trackers
 -----------------------------------------
 
-Note regarding more recent versions of OpenCV. The object tracking code is currently
-being updated and refactored. The legacy contributed object trackers have been moved
-into an ``OpenCV.legacy`` library.  The **spyglass** module as posted, currently still 
-specifies the original hooks.
+Note regarding more recent versions of the OpenCV library. The object tracking code
+within OpenCV is currently being updated and refactored. The legacy contributed object
+trackers have been moved into an ``OpenCV.legacy`` library.  The **spyglass** module 
+as posted, currently still specifies the original hooks.
 
 Provisioning the Outpost
 ------------------------

@@ -377,7 +377,7 @@ for, list, and replay events that have been cataloged.
 Additional documentation
 ========================
 - `Version History and Changelog <HISTORY.md>`_
-- `Changes to imagenode and imagehub projects <docs/YingYangRanch_Changes.rst>`_
+- `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
 - `Development blog <https://blog.swanriver.dev>`_
 
 Technology foundation
