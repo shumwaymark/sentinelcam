@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   potentially query events that do not exist. Should probably return empty results for
   this condition.
 
+## 0.0.4-alpha - 2022-01-05
+
+### Changed
+
+- Now using ZeroMQ to rig the IPC signaling mechanism between `Outpost` and the `SpyGlass`
+
 ## 0.0.3-alpha - 2022-01-03
 
 ### Added

@@ -101,7 +101,7 @@ look. Whenever one or more recognizable objects have been detected, this is repo
 the field of view tracked and logged.
 
 The **Outpost** is implemented as a ``Detector`` for an **imagenode** camera. This allows it to easily
-slip into the existing **imagenode** / **imangehub** / **librarian** ecosystem as supplemental functionality
+slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as supplemental functionality
 while benefiting from the full feature set offered by that system.
 
 .. image:: docs/images/Outpost.png

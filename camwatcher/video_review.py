@@ -6,7 +6,7 @@ from flask import Response
 from flask import render_template, g
 import cv2
 import simplejpeg
-from camwatcher.camdata import CamData
+from camdata import CamData
 
 app = Flask(__name__) # initialize a flask object
 
@@ -69,18 +69,20 @@ def generate_video(date, event):
         if iter_elapsed < frame_elaps:
             try:
                 while trk.elapsed < frame_elaps:
-                    objects[trk.objid] = (trk.centroid_x, trk.centroid_y, trk.elapsed)
+                    objects[trk.objid] = (trk.rect_x1, trk.rect_y1, trk.rect_x2, trk.rect_y2, 
+                        trk.classname, trk.elapsed)
                     trk = next(tracker)
                 iter_elapsed = trk.elapsed
             except StopIteration:
                 iter_elapsed = timedelta(days=1) # short-circuit any further calls back to the iterator
 
-        for (objid, (centx, centy, lastknown)) in objects.items():
-            # draw both the ID and centroid of the object on the output frame
-            label = "ID {}".format(objid)
-            cv2.putText(frame, label, (centx - 10, centy - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-            cv2.circle(frame, (centx, centy), 4, color, -1)
+        for (objid, (rect_x1, rect_y1, rect_x2, rect_y2, classname, lastknown)) in objects.items():
+            # draw last known object tracking data on the output frame
+            cv2.rectangle(frame, (rect_x1, rect_y1), (rect_x2, rect_y2), color, 2)
+            x, y, h = rect_x1, rect_y1, rect_x2 - rect_x1
+            y = (y - 15) if (y - 15) > 0 else h - 15 
+            cv2.putText(frame, classname, (x, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         # draw timestamp on image frame
         tag = "{} UTC".format(framepath[-30:-4].replace('_',' '))

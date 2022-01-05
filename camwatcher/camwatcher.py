@@ -262,9 +262,9 @@ async def process_logs(loggers):
                 else:
                     logging.warning("Unknown message category {} from {}".format(
                         message[:3], ".".join(topics)))
+                logging.debug(message)
             else:
                 dispatch_logger(topics, msg)
-            logging.debug(message)
         else:
             await asyncio.sleep(1)
 
@@ -332,7 +332,7 @@ def start_logging():
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     log.addHandler(handler)
-    log.setLevel(logging.WARNING)
+    log.setLevel(logging.INFO)
     return log
 
 if __name__ == '__main__' :
