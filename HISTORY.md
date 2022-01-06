@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a motion event, those frames could theoretically be used to assemble video from just prior 
   to that point in time.
 - Continue refinments to **outpost** implementation. 
-- Continue development of the **camwatcher** module.
+  - Provide for a motion-only option to drive the on-board tracker.
+  - Modernize object detector capbilites with support for newer algorithms.
+  - Implement a filtering mechanism by object type?
+- Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
   - Move configuration into YAML file.
   - Clean up exception handling. 
 - Continue development of video_review.py
@@ -22,15 +25,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known bugs
 
+- Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
+  `Outpost` is still under active development, and highly experimental. 
 - `CamData` class fails with bad input values for date/event. Any `DataFeed` request can
   potentially query events that do not exist. Should probably return empty results for
   this condition.
+
+## 0.0.5-alpha - 2022-01-05
+
+### Changed
+
+- Achieved considerably lower latency between `Outpost` and the `SpyGlass` by moving 
+  ZMQ signaling protocol from ``tcp://localhost`` to ``ipc://name`` 
 
 ## 0.0.4-alpha - 2022-01-05
 
 ### Changed
 
-- Now using ZeroMQ to rig the IPC signaling mechanism between `Outpost` and the `SpyGlass`
+- Now using ZeroMQ to rig the IPC signaling mechanism between `Outpost` and the `SpyGlass`.
+  The outpost implements a polling mechanism on the connection to provide for a non-blocking 
+  receieve until results are ready.
 
 ## 0.0.3-alpha - 2022-01-03
 
