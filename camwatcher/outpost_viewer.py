@@ -68,7 +68,7 @@ class VideoStreamSubscriber:
 if __name__ == "__main__":
     hostname = cfg["host"]
     port = cfg["port"]    
-    tfps = FPS(200)
+    viewfps = FPS(200)
     color = (0,255,0)
     receiver = VideoStreamSubscriber(hostname, port) # Start image subscription thread
     try:
@@ -77,9 +77,9 @@ if __name__ == "__main__":
             #image = cv2.imdecode(np.frombuffer(frame, dtype='uint8'), -1)
             image = simplejpeg.decode_jpeg(frame, colorspace='BGR')
             if cfg["showfps"]:
-                tfps.update()
-                text = "FPS: {:.2f}/{:.2f}".format(receiver.velocity.fps(),tfps.fps()) 
-                cv2.putText(image, text, (50, 450),
+                viewfps.update()
+                text = "FPS: {:.2f}/{:.2f}".format(receiver.velocity.fps(),viewfps.fps()) 
+                cv2.putText(image, text, (10, image.shape[0]-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)            
             cv2.imshow(msg, image)
             cv2.waitKey(1)

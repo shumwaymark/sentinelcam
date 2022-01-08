@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Ongoing development
 
-- Continue building out the *sentinel* module. This will become the inference and modeling engine.
+- Continue design of the *Sentinel* module. This will become the inference and modeling engine.
 - Experiment with leveraging the `send_threading` option in **imagenode** to supplement
-  published video capture triggered from a motion event. By dumping the `cam_q` at the start 
+  published image capture triggered from a motion event. By dumping the `cam_q` at the start 
   of a motion event, those frames could theoretically be used to assemble video from just prior 
   to that point in time.
-- Continue refinments to **outpost** implementation. 
-  - Provide for a motion-only option to drive the on-board tracker.
-  - Modernize object detector capbilites with support for newer algorithms.
-  - Implement a filtering mechanism by object type?
+- Continue refinements to `Outpost` implementation. 
+  - Provide for motion-only option for capture/logging sans object detection and tracking.
+  - Modernize object detector capabilites with support for newer algorithms.
+  - Implement filtering mechanism based on object detection results.
+  - Begin designing support for a model deployment framework that can be used
+    to support custom lenses as another layer beneath object detection.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
   - Move configuration into YAML file.
   - Clean up exception handling. 
@@ -25,26 +27,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known bugs
 
-- Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
-  `Outpost` is still under active development, and highly experimental. 
 - `CamData` class fails with bad input values for date/event. Any `DataFeed` request can
   potentially query events that do not exist. Should probably return empty results for
   this condition.
+- Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
+  `Outpost` is still under active development, and highly experimental. 
+
+## 0.0.6-alpha - 2022-01-??
+
+### Added
+
+- Added heartbeat logging from the **outpost**. This simply reports the current image 
+  publishing frame rate once per minute. This will be saved by the **camwatcher**
+  whenever its internal logging level is set to INFO. It may be smarter to direct this 
+  data down to the **imagehub** for access from the **librarian**.
+
+### Changed
+
+- Over-publishing image data with ZMQ is not smart. On a Raspberry Pi 4B, have measured 
+  publishing rates for a (320,240) resolution image, compressed to JPEG, at 150+ frames
+  per second. This is insane. In no universe does that make sense. For a PiCamera, the 
+  hardware chip does not even collect data faster than about 32 frames/second. Moving 
+  data is not free. There is always a price to pay. Implemented an image publishing 
+  throttle for the `Outpost` based on configured frame rate. Better to be kind to such 
+  a nice little box as the Raspberry Pi. High stress for no payback? Always say no to 
+  such antics. 
 
 ## 0.0.5-alpha - 2022-01-05
 
 ### Changed
 
 - Achieved considerably lower latency between `Outpost` and the `SpyGlass` by moving 
-  ZMQ signaling protocol from ``tcp://localhost`` to ``ipc://name`` 
+  ZMQ signaling protocol from `tcp://127.0.0.1` to `ipc://name`. Had to swap the
+  `ImageSender` and `ImageHub` endpoints for this, which also provided for a more 
+  sensible handshake during initialization.  
 
 ## 0.0.4-alpha - 2022-01-05
 
 ### Changed
 
-- Now using ZeroMQ to rig the IPC signaling mechanism between `Outpost` and the `SpyGlass`.
-  The outpost implements a polling mechanism on the connection to provide for a non-blocking 
-  receieve until results are ready.
+- Now using a ZeroMQ REQ/REP pair to rig the IPC signaling mechanism between `Outpost` and 
+  the `SpyGlass`. The outpost implements a polling mechanism on the connection to provide 
+  for a non-blocking receieve until results are ready.
 
 ## 0.0.3-alpha - 2022-01-03
 
@@ -54,20 +78,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intended for running on the same node as a **camwatcher**. This module services access requests 
   to the data and image sinks over *imageZMQ* transport, specifically for use with the `DataFeed`
   class from a process running on another node, such as the *sentinel* itself.
-- Added example **datafeed** module implementing requests to the **datapump**. This is still
-  evolving. 
+- Added example **datafeed** module implementing `DataFeed` requests to the **datapump**. 
+  This is still evolving. 
+- Fleshed out intitial `Outpost` functionality for the **imagenode** project, including an 
+  early version of the `SpyGlass` as a multiprocessing vision analysis pipeline. 
 
 ### Changed
 
 - Image folder path added as argument to CamData initialization.
 - Adopted **simplejpeg** library in place of using **OpenCV** for more efficient frame file
   encoding/decoding.
-- Corrected handling for updating the EventID used by an active **camwatcher** video subscriber.
+- Corrected handling for updating the EventID used by an active **camwatcher** image subscriber.
 - Data model for tracking events revised to substitue bounding rectangles for detected obects rather
   than an object centroid. Classname also added for those events where this can be
   estimated in real time.
-- Fleshed out intitial **outpost** functionality for the **imagenode** project, including an early
-  vesrion of the ``SpyGlass`` as a multiprocessing vision analysis pipeline. 
 
 ## 0.0.2-alpha - 2021-02-20
 
@@ -83,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly from the **imagenode** outpost detector.
 - Complete refactoring of all **imagenode** changes specific to **SentinelCam** outpost functionality
   into a single module.
-- Video capture within the **camwatcher** now includes the frame capture time as a component
+- Image capture within the **camwatcher** now includes the frame capture time as a component
   of the filename. This more accurately associates timestamps with individual frames and improves
   performance of video replay. *Relying on filesystem timestamps for this was a misstep*.
 - Utilization of PostgreSQL as a component of the **camwatcher** data layer replaced with 
@@ -107,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Modified **imagenode** to implement log and video publishing. Sends a camera
+- Modified **imagenode** to implement log and image publishing. Sends a camera
   startup command to the connected **imagehub**. Added an experimental object 
   tracker to exercise **camwatcher** operations.
 - Modified **imagehub** to implement the camera handoff to **camwatcher** from an 

@@ -475,6 +475,11 @@ Provisioning the Outpost
 
 *more to come later regarding model deployment*
 
+SentinelCam deployment
+======================
+
+*placeholder*
+
 =====================
 Notes on imagehub use
 =====================

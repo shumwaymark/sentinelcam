@@ -374,6 +374,12 @@ The ability to easily select and review historical events and then present them 
 player is an obvious requirement. This will ultimately evolve into a set of services to search 
 for, list, and replay events that have been cataloged. 
 
+Librarian
+---------
+
+Begin to explore capitalizing on the functionality of the **librarian**  and its design philosophy 
+as a vehicle to centralize knowledge and state.
+
 Additional documentation
 ========================
 - `Version History and Changelog <HISTORY.md>`_

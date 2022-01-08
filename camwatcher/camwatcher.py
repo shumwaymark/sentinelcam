@@ -154,13 +154,13 @@ class CSVwriter:
         self._today = today
         try:
             with open(os.path.join(date_directory, 'camwatcher.csv'), mode='at') as index:
-                index.write(','.join([nodeView[0], nodeView[1], timestamp, evt, str(fps), 'trk']) + "\n")
+                index.write(','.join([nodeView[0], nodeView[1], timestamp, evt, str(int(fps)), 'trk']) + "\n")
         except Exception as ex:
-            logging.error("CSVwriter failure updating index file: " + str(ex))
+            logging.error(f"CSVwriter failure updating index file: {str(ex)}")
         return date_directory
 
     def _run(self):
-        logging.debug("CSVwriter thread starting within " + self._folder)
+        logging.debug(f"CSVwriter thread starting within {self._folder}")
         while not self._stop:
             if dbLogMsgs.empty():
                 sleep(1)
@@ -178,7 +178,7 @@ class CSVwriter:
                         self._openfiles[ote["id"]].write(','.join([
                             ote['timestamp'],
                             str(ote['obj']),
-                            str(ote['class']),
+                            str(ote['clas']),
                             str(ote['rect'][0]), 
                             str(ote['rect'][1]), 
                             str(ote['rect'][2]), 
@@ -190,10 +190,10 @@ class CSVwriter:
                         del self._openfiles[ote["id"]] # remove from list
                     else:
                         logging.warning("Tracking event {} from {} ignored by CSVwriter".format(ote["evt"], nodeView))
-                except KeyError:
-                    logging.error("CSVWriter event not found in list of writers: " + ote["id"])
+                except KeyError as keyval:
+                    logging.error(f"CSVWriter event {ote['id']} not found in list of writers?, KeyError: {keyval}")
                 except Exception as ex:
-                    logging.error("CSVwriter thread unhandled exception: " + str(ex))
+                    logging.error(f"CSVwriter thread unhandled exception: {str(ex)}")
                 dbLogMsgs.task_done()
         logging.debug("CSVwriter closing")
         for f in self._openfiles:
@@ -222,10 +222,10 @@ async def control_loop(loggers):
                 print_outpost(outpost)
             except Exception as ex:  
                 result = 'FAILED'
-                logging.error('CamWatcher subscription failure ' + ex)
+                logging.error(f'CamWatcher subscription failure {str(ex)}')
         else:
-            logging.info("CamWatcher already connected with " + outpost['node'])
-        logging.debug("CamWatcher control port reply " + result)
+            logging.info(f"CamWatcher already connected with {outpost['node']}")
+        logging.debug(f"CamWatcher control port reply {result}")
         await rep.send(result.encode("ascii"))
             
 def print_outpost(outpost):
@@ -257,14 +257,16 @@ async def process_logs(loggers):
                 category = message[:3] 
                 if category == 'ote':   # object tracking event 
                     await dispatch_ote(topics[0], message[3:])
+                    logging.debug(message)
+                elif category == 'fps':  # Outpost image publishing heartbeat
+                    logging.info(f"Outlook image publishing FPS {message[3:]}")
                 elif category == 'Exi':  # this is the "Exit" message from an imagenode
-                    dispatch_logger(topics, msg)
+                    dispatch_logger(topics, message)
                 else:
                     logging.warning("Unknown message category {} from {}".format(
                         message[:3], ".".join(topics)))
-                logging.debug(message)
             else:
-                dispatch_logger(topics, msg)
+                dispatch_logger(topics, message)
         else:
             await asyncio.sleep(1)
 
