@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
   `Outpost` is still under active development, and highly experimental. 
 
-## 0.0.6-alpha - 2022-01-??
+## 0.0.6-alpha - 2022-01-08
 
 ### Added
 
