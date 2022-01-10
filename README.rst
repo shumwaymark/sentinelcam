@@ -107,7 +107,7 @@ while benefiting from the full feature set offered by that system.
 .. image:: docs/images/Outpost.png
    :alt: High-level sketch of Outpost integration with imagenode
 
-Two key enhancements provide the essential wiring to make this possible. Log and video publishing over 
+Two key enhancements provide the essential wiring to make this possible. Log and image publishing over 
 PyZMQ and imageZMQ respectively.
 
 Video publishing has a twofold benefit.
@@ -176,7 +176,7 @@ design sketch.
    :alt: Sketch of basic camwatcher design
 
 This design exploits two of the enhancements made to the **imagenode** module described
-above supporting **Outpost** functionality: log and video publishing over ZMQ as 
+above supporting **Outpost** functionality: log and image publishing over ZMQ as 
 configurable options.
 
 The **camwatcher** employs a Python ``asyncio`` event loop running a set of coroutines with
@@ -191,12 +191,12 @@ the following tasks.
   *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
 
 - *Dispatcher*. Handles object tracking event data. For each new event, a subprocess is
-  started as a video stream subscriber to begin capturing the video. All event tracking data
+  started as a image stream subscriber to begin capturing images. All event tracking data
   is queued for permanent storage by the *CSV File Writer*.
 
 This design packs a fair amount of network I/O activity into a single thread of execution. To 
 best exploit the multi-core architecture of the Raspberry Pi 4B, a child process is forked to
-capture and store the published video stream from each detected tracking event.
+capture and store the published images from each detected tracking event.
 
 The *CSV File Writer* runs in a separate thread of execution. This component is responsible for
 receiving queued data events and writing them into CSV-format text files based on the following 
@@ -206,7 +206,7 @@ Data model
 ----------
 
 The data model is still in its infancy and continues to evolve. Two types of data are collected
-by the **camwatcher**. Data related to the analysis of the event, and captured video images. All 
+by the **camwatcher**. Data related to the analysis of the event, and captured images. All 
 data is stored in the filesystem, within a separate folder for each category. 
 
 Event tracking data and results from event analysis are written to the filesystem as a set of 

@@ -13,10 +13,10 @@ as an initial foundation to build upon.
 These projects offered already working, readily exploitable, solutions for camera image capture
 and analysis. The hub and spoke architecture dovetails nicely with the **SentinelCam** design.
 The **imagenode** module includes many additional features for handling other types of sensors
-and vision tasks not requiring video capture. 
+and vision tasks not requiring image streaming. 
 
 Only the **imagenode** module has been modified for this project. Significant changes consist of adding
-support for log and video publishing over ZMQ as configurable options. The ``Outpost`` detector is
+support for log and image publishing over ZMQ as configurable options. The ``Outpost`` detector is
 a multiprocessing solution using shared memory for passing image data. Details regarding implementation
 and operation are documented below.
 
@@ -32,7 +32,7 @@ Modifications to imagenode
 ==========================
 
 Modifications to **imagenode** are fully encapsulated by the the ``outpost`` detector. There are
-two aspects to this effort. Providing support for log and video publishing, and developing an object
+two aspects to this effort. Providing support for log and image publishing, and developing an object
 tracker to fuel the **camwatcher** engine.
 
 Example configuration with new options
@@ -65,7 +65,7 @@ options are specified. All **SentinelCam** configuration items are specified as 
       vflip: False
       detectors:
         outpost:
-          publish_cam: 5567            # activates video frame publishing
+          publish_cam: 5567            # activates image frame publishing
           publish_log: 5565            # activates logfile publishing over ZMQ
           camwatcher: tcp://data1:5566 # connect to camwatcher control port
           spyglass: (640, 480)         # important, must match camera "resolution" above
@@ -95,7 +95,7 @@ There are three basic configuration settings related to communication with the *
 
 .. code-block:: yaml
 
-  publish_cam: port nunber to use for video frame publishing 
+  publish_cam: port nunber to use for image frame publishing 
   publish_log: port number to use for log publishing
   camwatcher: connection string to the camwatcher control port
 
@@ -103,7 +103,7 @@ publish_cam
 ------------
 
 The optional ``publish_cam`` setting takes a single argument: a numeric port number. This 
-activates video publishing as an ``imagezmq.ImageSender``, binding to the specified port. 
+activates image publishing as an ``imagezmq.ImageSender``, binding to the specified port. 
 Each image passing through the pipeline for the camera is published. This allows any client
 to subscribe as an ``imagezmq.ImageHub`` for access to a live camera feed as needed.
 
@@ -162,7 +162,7 @@ Publishing with multiple cameras
 --------------------------------
 
 The publishing settings described above are only applied once per **imagenode**. This insures 
-that any given node will have only a single logging publisher, and single video publisher. It
+that any given node will have only a single logging publisher, and single image publisher. It
 may be desirable to have multiple cameras on a single node, each with a different perspective.
 The publising settings described above only need to be supplied once, duplicate entries for
 these will be ignored.
@@ -486,7 +486,7 @@ Notes on imagehub use
 
 There are no modifications needed to the **imagehub** module. All planning and design goals provide 
 for full support and compatibility with Jeff's *Librarian*. Any *outpost* node should be able to 
-provide not only video and log publishing functionality, but also host any other sensors which conform 
+provide not only image and log publishing functionality, but also host any other sensors which conform 
 to the Ying Yang Ranch design pattern.
 
 `Return to main documentation page README <../README.rst>`_

@@ -1,5 +1,5 @@
 """camwatcher: A component of the SentinelCam data layer. 
-Proivides subscriber services for log and video publishing from
+Proivides subscriber services for log and image publishing from
 outpost nodes. Drives a dispatcher to trigger other functionality.
 
 Copyright (c) 2021 by Mark K Shumway, mark.shumway@swanriver.dev
@@ -64,7 +64,7 @@ class VideoStreamSubscriber:
     def close(self):
         self._stop = True
 
-# multiprocessing class implementing a sub-process video writer
+# multiprocessing class implementing a sub-process image writer
 class VideoStreamWriter:
 
     def __init__(self, event, host, port, node, view):
@@ -90,7 +90,7 @@ class VideoStreamWriter:
 
     def _capture_video(self, writeVideo, newEvent, eventID, host, port, view, outdir):
         publisher = "tcp://{}:{}".format(host, port)
-        # start image subscription thread and begin video capture loop
+        # start image subscription thread and begin frame capture loop
         receiver = VideoStreamSubscriber(publisher, view)
         try:
             while writeVideo.value:
@@ -160,7 +160,7 @@ class CSVwriter:
         return date_directory
 
     def _run(self):
-        logging.debug(f"CSVwriter thread starting within {self._folder}")
+        logging.info(f"CSVwriter thread starting within {self._folder}")
         while not self._stop:
             if dbLogMsgs.empty():
                 sleep(1)
