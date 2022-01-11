@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Over-publishing image data with ZMQ is not smart. On a Raspberry Pi 4B, have measured 
+- *Over-publishing image data with ZMQ is not smart*. On a Raspberry Pi 4B, have measured 
   publishing rates for a (320,240) resolution image, compressed to JPEG, at 150+ frames
   per second. This is insane. In no universe does that make sense. For a PiCamera, the 
   hardware chip does not even collect data faster than about 32 frames/second. Moving 

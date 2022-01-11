@@ -149,15 +149,15 @@ These two fields are defined as follows:
   to be passed to a **camwatcher** process. A basic set of values related to the **imagenode** itself. 
   The following camera handoff structure reflects the example YAML configuration file presented earlier.
   The ``host`` field is the actual hostname of the node needed for network addressing.
-  4
+  
   .. code-block:: json
 
-    {
-      "node": "outpost",
-      "host": "lab1",
-      "log": 5565,
-      "video": 5567
-    }
+     {
+       "node": "outpost",
+       "host": "lab1",
+       "log": 5565,
+       "video": 5567
+     }
 
 If this message exchange is successful, an ``OK`` response is returned to the **imagenode** and
 initialization continues. Otherwise, **imagenode** initialization fails.  
