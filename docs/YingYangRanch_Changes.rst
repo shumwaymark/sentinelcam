@@ -86,7 +86,7 @@ options are specified. All **SentinelCam** configuration items are specified as 
           draw_roi: ((255,0,0),1)
           draw_time: ((255,0,0),1)  
           draw_time_org: (5,5)  
-          draw_time_fontScale: 1 
+          draw_time_fontScale: 0.5 
 
 Camwatcher connection settings
 ==============================
