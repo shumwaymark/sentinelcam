@@ -7,23 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Ongoing development
 
-- Continue design of the *Sentinel* module. This will become the inference and modeling engine.
-- Experiment with leveraging the `send_threading` option in **imagenode** to supplement
-  published image capture triggered from a motion event. By dumping the `cam_q` at the start 
-  of a motion event, those frames could theoretically be used to assemble video from just prior 
-  to that point in time.
 - Continue refinements to `Outpost` implementation. 
+  - Streamline the marshalling of results from ``SpyGlass`` back to ``Outpost``, probably
+    with **MessagePack**. 
   - Provide for motion-only option for capture/logging sans object detection and tracking.
   - Modernize object detector capabilites with support for newer algorithms.
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
+- Continue design of the *Sentinel* module. This will become the inference and modeling engine.
+  Much of the tooling for ``SpyGlass`` lays the foundation for how jobs will be managed.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
+  - Rather than terminating subprocess video writers at the end of each event, adapt these
+    with a switch to turn subscriptions on and off as needed. Keep them loaded and ready 
+    for faster startup on subsequent events. Design management controls to end after a 
+    period of inactivity or gauge this based on work load. 
   - Move configuration into YAML file.
-  - Clean up exception handling. 
+  - Confirm exception handling is correct.
 - Continue development of video_review.py
   - Add missing node/view filtering functionality
   - Adapt to use the `DataFeed` for operation from an application server
+- Experiment with leveraging the `send_threading` option in **imagenode** to supplement
+  published image capture triggered from a motion event. By dumping the `cam_q` at the start 
+  of a motion event, those frames could theoretically be used to assemble video from just prior 
+  to that point in time.
 
 ### Known bugs
 
@@ -37,8 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Additional work on the multiprocessing handshake. State management still has a loose
-  tent stake. Somewhere.
+- Additional work on the multiprocessing handshake. State management seems to have a loose
+  tent stake. Somewhere. I'm beginning to think that the object detector is periodically
+  failing and returning bad data. Still looking for the real issue.
 
 ## 0.0.7-alpha - 2022-01-09
 

@@ -112,6 +112,11 @@ length of the vision processing pipeline of the **imagenode**. Multiple cameras,
 sizes, additional detectors, and processing complexity, can each have compounding adverse 
 effects on the velocity out to the client endpoint.
 
+To avoid over-publishing when the pipeline cycle rate exceeds the configured frame rate for
+the camera, a speed limiter is implemented to keep things reasonable. This helps conserve
+system resources on the **imagenode**, and insures that images will not be published at
+speeds higher than the actual camera frame rate.  
+
 publish_log
 -----------
 
@@ -123,7 +128,7 @@ This helps any interested subscriber easily filter messages based on the source 
 camwatcher
 ----------
 
-This configuration option introduces the **imagenode** to the **camwatcher**. The ``publish_log`` option
+This configuration option introduces the outpost to the **camwatcher**. The ``publish_log`` option
 must also be specifed, or this setting will be ignored. For intended use as designed, ``publish_cam`` 
 should also be included. 
 
@@ -138,13 +143,13 @@ publishing services. The format of this startup message is in 2 parts, using the
 
 These two fields are defined as follows:
 
-- ``CameraUp`` - The literal text as shown. Used to indicate that an *outpost* initialization is in
+- ``CameraUp`` - The literal text as shown. Used to indicate that an ``Outpost`` initialization is in
   progress. 
 - ``camera_handoff_msg`` - A dictionary structure in JSON format containing publishing parameters
   to be passed to a **camwatcher** process. A basic set of values related to the **imagenode** itself. 
   The following camera handoff structure reflects the example YAML configuration file presented earlier.
   The ``host`` field is the actual hostname of the node needed for network addressing.
-  
+  4
   .. code-block:: json
 
     {
@@ -154,7 +159,7 @@ These two fields are defined as follows:
       "video": 5567
     }
 
-If this message exchange is successful, an "OK" response is returned to the **imagenode** and
+If this message exchange is successful, an ``OK`` response is returned to the **imagenode** and
 initialization continues. Otherwise, **imagenode** initialization fails.  
 
 --------------------------------
@@ -162,14 +167,18 @@ Publishing with multiple cameras
 --------------------------------
 
 The publishing settings described above are only applied once per **imagenode**. This insures 
-that any given node will have only a single logging publisher, and single image publisher. It
-may be desirable to have multiple cameras on a single node, each with a different perspective.
-The publising settings described above only need to be supplied once, duplicate entries for
-these will be ignored.
+that any given node will have only a single logging publisher and single image publisher, each
+binding to a single port.
 
-Be aware that when simultaneously publishing from multiple cameras on a single node, image frames 
-from each camera will be interleaved in the stream. The **camwatcher** is aware of this, and 
-always filters by ``viewname`` when subscribing to a video stream. 
+It may be desirable to have multiple cameras on a individual node, each with a different perspective. 
+
+When using multiple cameras, only the port number specified for the first entry in the YAML file 
+is used for publishing. Port numbers on any additional entries in the YAML file are ignored. Keep 
+these the same for consistency in such cases to help reduce confusion when reviewing the configuration.
+
+Be aware that when simultaneously publishing from multiple cameras on any individual node, image
+frames from each camera will be interleaved in the stream. The **camwatcher** is aware of this, 
+and always filters by ``viewname`` when subscribing to an image stream. 
 
 This is possible because the **imageZMQ** library is designed to send and receive payloads that 
 are (text, image) tuples where the first element is a string with an application specific value.
@@ -311,8 +320,8 @@ a relatively expensive operation in terms of CPU resources relative to object tr
 
 This setting controls the frequency for which object detection is re-applied to the view, measured by
 a tick count for the **outpost**. The value specified here is not based on the number of frames actually
-analyzed by the ``SpyGlass``.  This trigger is measured against the number of frames which have passed 
-through the outpost for publishing, including those not analyzed.
+analyzed by the ``Outpost``.  This trigger is measured against a cycle count for the image processing 
+pipeline. *This is currently more art than a well-understood factor. Sorry about that*.
 
 .. code-block:: yaml
 
@@ -363,7 +372,7 @@ Logging for tracking events
 There are three tracking events reported by the ``outpost``. There is a single reported item for the
 start of each event, and another at the end. The third reporting point is the tracking data itself, 
 which is published repetitively across multiple frames throughout the lifespan of the event, for 
-each frame reviewded and tracked object within. All of the data being reported for these three 
+each frame reviewed and tracked object within. All of the data being reported for these three 
 conditions is published over the logger in JSON format.
 
 Each tracking message is associated with a specific event and camera view. The ``id`` field serves as the 
@@ -375,9 +384,9 @@ between messages when subscribing to multiple *outpost* nodes simultaneously.
 The third common field is the ``evt`` field, which can contain one of three values as described below. 
 
 For efficiency, a timestamp is not currently included in these messages. Timestamps must be added by the
-receiving system. Admittedly, this is less than accurate. However, as long as the end-to-end pipeline is 
-opertaing efficiently, there should be at most just a few milliseconds of latency between the actual 
-time of the observation, and the logged/reported time. 
+receiving system. Admittedly, this is less than accurate. However, as a general rule there should be at 
+most just a few milliseconds of latency between the actual time of the observation, and the logged/reported 
+time. 
 
 1) Event start, the ``evt`` field contains the text ``start``. This message is sent once, when
    the tracking event begins. The ``fps`` field reflects the velocity of the **outpost** pipeline
