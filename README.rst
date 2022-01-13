@@ -220,32 +220,32 @@ All dates and timestamps reflect Coordinated Universal Time (UTC), not the local
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
 *header row* included in the data. This data structure is fixed, with no further changes expected.
 
-  .. csv-table:: Event Index 
-    :header: "Name", "Type", "Description"
-    :widths: 20, 20, 60
+.. csv-table:: Event Index 
+  :header: "Name", "Type", "Description"
+  :widths: 20, 20, 60
 
-    node, str, node name  
-    viewname, str, camera view name 
-    timestamp, datetime, timestamp at the start of the event
-    event, str, unique identifer for the event 
-    fps, int, pipeline velocity at start of event
-    type, str, event type 
+  node, str, node name  
+  viewname, str, camera view name 
+  timestamp, datetime, timestamp at the start of the event
+  event, str, unique identifer for the event 
+  fps, int, pipeline velocity at start of event
+  type, str, event type 
 
 Event detail files always include a header row, with varying data structures depending on the type 
 of event. There is currently only a single event type defined, the tracking events. The naming
 convention for all detail files is: ``EventID_TypeCode.csv``
 
-  .. csv-table:: Tracking Event Detail
-    :header: "Name", "Type", "Description"
-    :widths: 20, 20, 60
+.. csv-table:: Tracking Event Detail
+  :header: "Name", "Type", "Description"
+  :widths: 20, 20, 60
 
-    timestamp, datetime, timestamp when tracking record written
-    objid, str, object identifier
-    classname, str, classification name
-    rect_x1, int, bounding rectangle X1-coordinate
-    rect_y1, int, bounding rectangle Y1-coordinate
-    rect_x2, int, bounding rectangle X2-coordinate
-    rect_y2, int, bounding rectangle Y2-coordinate
+  timestamp, datetime, timestamp when tracking record written
+  objid, str, object identifier
+  classname, str, classification name
+  rect_x1, int, bounding rectangle X1-coordinate
+  rect_y1, int, bounding rectangle Y1-coordinate
+  rect_x2, int, bounding rectangle X2-coordinate
+  rect_y2, int, bounding rectangle Y2-coordinate
 
 These CSV files are written into the folder specified by the ``csvdir`` configuration 
 setting and organized by date into subfolders with a YYYY-MM-DD naming convention.
@@ -343,10 +343,10 @@ Thus both the ``DataFeed`` and ``DataPump`` classes, along with the **datapump**
 The **datapump** is the stand-alone server process which responds to Data Feed access requests
 over the network. Communication between components is via imageZMQ using a REQ/REP socket pair. 
 
-  .. code-block:: python
+.. code-block:: python
 
-    class DataFeed(imagezmq.ImageSender):  # REQ socket - sends requests to a DataPump 
-    class DataPump(imagezmq.ImageHub):     # REP socket - responds to DataFeed requests
+  class DataFeed(imagezmq.ImageSender):  # REQ socket - sends requests to a DataPump 
+  class DataPump(imagezmq.ImageHub):     # REP socket - responds to DataFeed requests
 
 Any module needing access to **camwatcher** data simply needs to create a ``DataFeed`` instance. 
 The network address for a running **datapump** process is specified at that time.
@@ -364,27 +364,27 @@ Status: working proof of concept, still evolving.
 Internally, the first element of the (text, data) tuple returned to the Data Feed has been 
 reserved for carrying a yet-to-be-implememted response code from the **datapump**. 
 
-  .. code-block:: python
+.. code-block:: python
 
-    DataFeed.get_date_index (date) -> pandas.DataFrame
+  DataFeed.get_date_index (date) -> pandas.DataFrame
 
 The ``get_date_index()`` function returns the content of the Event Index for a date. The date
 parameter is always required and specified in 'YYYY-MM-DD' format. There is no default value.
 The Event Index data is returned as a ``pandas.DataFrame`` obect. Refer to *Data Model* above 
 for further detail.
 
-  .. code-block:: python
+.. code-block:: python
 
-    DataFeed.get_tracking_data (date, event) -> pandas.DataFrame
+  DataFeed.get_tracking_data (date, event) -> pandas.DataFrame
 
 The ``get_tracking_data()`` function requires two arguments, a date and an event identifier. 
 Used to retrieve the full Tracking Event Detail dataset (see *Data Model* above) as a
 ``pandas.DataFrame`` object. Both arguments are required. The date is specified in 'YYYY-MM-DD'
 format, the EventID reference must exist for the indicated date. There is no error-checking.
 
-  .. code-block:: python
+.. code-block:: python
 
-    DataFeed.get_image_list (date, event) -> [timestamp]
+  DataFeed.get_image_list (date, event) -> [timestamp]
 
 This function provides a list of ``datetime.timestamp`` objects that correspond directly 
 to the capture times on images published by the Outpost. These are provided in chronological
@@ -392,9 +392,9 @@ order. Function arguments are identical to what is described above for ``get_tra
 
 All date and time refernces are in Coordinated Universal Time (UTC), not the local timezone.
 
-  .. code-block:: python
+.. code-block:: python
 
-    DataFeed.get_image_jpeg (date, event, timestamp) -> bytes
+  DataFeed.get_image_jpeg (date, event, timestamp) -> bytes
 
 Returns a buffer with the image frame as compressed JPEG data. Always for an existing date, 
 event, and timestamp as descibed above. There is no error checking on this either. 
@@ -474,18 +474,18 @@ imagine an outdoor camera with a view of both an entry into the home and the dri
 
 The occupants and their vehicles will pass in front of that camera multiple times per
 day. Routine events such as these do not require a video record, or even a single image
-to be preserved. All the house needs to do, really, is take note that your car departed 
+be preserved. All the house needs to do, really, is take note that your car departed 
 at 7:12 in the morning and arrived back home at 6:39 that evening. Happens every weekday.
 
 All of those unexpected, unusual, exceptional events are not so disposable. Under certain 
 circumstances, it might be desirable to produce a full archival video immediately. There
-may be situations were such a record should copied off-site as a precaution. Perhaps by 
+may be situations were such a record should be copied off-site as a precaution. Perhaps by 
 policy, a full video record of evey package delivery is always kept for a period of time.
 
 This all needs to be mostly automatic and self-maintaining. The end result should require the 
 bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work. 
 
-*Dream big*.
+*Saying it once more. Dream big*.
 
 Video event playback and retention
 ----------------------------------
