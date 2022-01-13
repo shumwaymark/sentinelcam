@@ -355,14 +355,14 @@ The network address for a running **datapump** process is specified at that time
    :alt: DataPump to DataFeed flow
 
 The ``DataFeed`` and ``DataPump`` subclasses extend the imageZMQ base classes with support 
-for sending and receiving both ``pandas.DataFrame`` objects, and lists of ``timestamps``. This  
-helps keep everything in the same serialization context underpinning imageZMQ, with consistent
+for sending and receiving both pandas DataFrame objects, and lists of timestamps. This helps 
+keep everything in the same serialization context underpinning imageZMQ, with consistent
 image transport technology throughout the system.
-
-Status: working proof of concept, still evolving.  
 
 Internally, the first element of the (text, data) tuple returned to the Data Feed has been 
 reserved for carrying a yet-to-be-implememted response code from the **datapump**. 
+
+  **Status**: working proof of concept, still evolving.  
 
 .. code-block:: python
 
@@ -467,7 +467,7 @@ labeling. This could represent the aggregated results inferred from one or more 
 networks whether collected in real time by an Outpost node, or produced by the Sentinel. 
 Or both.
 
-It adds up in a hurry. *You know what's sad?*
+It adds up in a hurry. *And the rest of the story...*
 
 Much of it can be meaningless, trivial, forgettable, and simply not wanted. For example, 
 imagine an outdoor camera with a view of both an entry into the home and the driveway. 
