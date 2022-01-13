@@ -7,33 +7,33 @@ Changes to imagenode project
 Overview
 ========
 
-The **SentinelCam** project has relied heavily on the **imagenode** and **imagehub** projects
-as an initial foundation to build upon. 
+The **SentinelCam** project has relied heavily on the **imagenode** project as an initial 
+foundation to build upon. 
 
-These projects offered already working, readily exploitable, solutions for camera image capture
-and analysis. The hub and spoke architecture dovetails nicely with the **SentinelCam** design.
-The **imagenode** module includes many additional features for handling other types of sensors
-and vision tasks not requiring image streaming. 
+The **imagenode**, **imagehub**, and **librarian** application suite offers already working, 
+readily exploitable, solutions for camera image capture, analysis, and reporting. The hub and spoke 
+architecture dovetails nicely with the **SentinelCam** design. The **imagenode** module includes 
+many additional features for handling other types of sensors and vision tasks not requiring video 
+production.
 
 Only the **imagenode** module has been modified for this project. Significant changes consist of adding
 support for log and image publishing over ZMQ as configurable options. The ``Outpost`` detector is
 a multiprocessing solution using shared memory for passing image data. Details regarding implementation
 and operation are documented below.
 
-The **imagehub** continues to fulfill its existing role without change.
+Please note that the **imagenode** module must always be paired with an **imagehub**, which continues 
+to fulfill its existing role without change.
 
-For complete details on the use of these two modules, please refer to the baseline documentation.
-
-- `Baseline imagenode documentaiton <https://github.com/shumwaymark/imagenode/blob/master/README.rst>`_
-- `Baseline imagehub documentation <https://github.com/shumwaymark/imagehub/blob/master/README.rst>`_
+   For complete details on the configuration and use of an **imagenode** deployment, please refer 
+   to the `baseline documentation <https://github.com/shumwaymark/imagenode/blob/master/README.rst>`_
 
 ==========================
 Modifications to imagenode
 ==========================
 
-Modifications to **imagenode** are fully encapsulated by the the ``outpost`` detector. There are
-two aspects to this effort. Providing support for log and image publishing, and developing an object
-tracker to fuel the **camwatcher** engine.
+Modifications to **imagenode** are fully encapsulated by the implementation of the ``outpost`` detector.
+There are two aspects to this effort. Providing support for log and image publishing, and developing an 
+object tracker to fuel the **camwatcher** engine.
 
 Example configuration with new options
 ======================================
@@ -70,7 +70,7 @@ options are specified. All **SentinelCam** configuration items are specified as 
           camwatcher: tcp://data1:5566 # connect to camwatcher control port
           spyglass: (640, 480)         # important, must match camera "resolution" above
           tracker: kcf                 # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
-          skip_frames: 30
+          skip_frames: 50
           detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
           mobilenetssd:
             prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
@@ -173,8 +173,8 @@ binding to a single port.
 It may be desirable to have multiple cameras on a individual node, each with a different perspective. 
 
 When using multiple cameras, only the port number specified for the first entry in the YAML file 
-is used for publishing. Port numbers on any additional entries in the YAML file are ignored. Keep 
-these the same for consistency in such cases to help reduce confusion when reviewing the configuration.
+is used for publishing. Port numbers on any additional setup entries are ignored. Keep these the 
+same for consistency in such cases to help reduce confusion when reviewing the configuration.
 
 Be aware that when simultaneously publishing from multiple cameras on any individual node, image
 frames from each camera will be interleaved in the stream. The **camwatcher** is aware of this, 
@@ -216,7 +216,7 @@ an image sized differently than the camera setting. An example of this is the ``
 configuration item. That one should always be avoided when running an ``Outpost`` since it is
 so computationally expensive. 
 
-*Sidebar*. It is always important to understand the performamnce impact of any other detectors
+*Sidebar*. It is always important to understand the performance impact of any other detectors
 configured to run on an **Outpost** node.
 
 *Just be careful out there*.
@@ -488,14 +488,5 @@ SentinelCam deployment
 ======================
 
 *placeholder*
-
-=====================
-Notes on imagehub use
-=====================
-
-There are no modifications needed to the **imagehub** module. All planning and design goals provide 
-for full support and compatibility with Jeff's *Librarian*. Any *outpost* node should be able to 
-provide not only image and log publishing functionality, but also host any other sensors which conform 
-to the Ying Yang Ranch design pattern.
 
 `Return to main documentation page README <../README.rst>`_

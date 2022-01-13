@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     to support custom lenses as another layer beneath object detection.
 - Continue design of the *Sentinel* module. This will become the inference and modeling engine.
   Much of the tooling for `SpyGlass` lays the foundation for how jobs will be managed.
+- Add missing support for **datapump** error codes in reposnse messages using the first 
+  element of the (text,data) tuple carried by *imageZMQ*.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
   - Rather than terminating subprocess video writers at the end of each event, adapt these
     with a switch to turn subscriptions on and off as needed. Keep them loaded and ready 
