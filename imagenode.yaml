@@ -25,7 +25,7 @@ cameras:
         spyglass: (640, 480)         # must match camera "resolution" above
         tracker: kcf                 # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
         detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
-        skip_frames: 30
+        skip_frames: 50
         mobilenetssd:
             prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
             model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
