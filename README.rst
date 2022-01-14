@@ -460,9 +460,10 @@ towards alleviating those concerns.
 Raw data gleaned from an Outpost event can be voluminous and detailed.
 
 SentienlCam endeavors to always capture as much image detail as possible. As noted above 
-in *Data Model* this requires much more space than a compressed video format. A high capture
-rate provdes more data for analysis and modeling, reducing the likelyhood that key details 
-might be missed. This also can allow for generating high quality full motion archival videos. 
+in the *Data Model* discussion, individual image frames require much more space than a compressed 
+video format. A high capture rate provdes more data for analysis and modeling, reducing the 
+likelyhood that key details might be missed. This also can allow for generating high quality 
+full motion archival videos. 
 
 Additionally, there can be multiple objects of interest moving through the field of view 
 simultaneously. Collected logging data includes geometry, classification, and possibly 
@@ -475,10 +476,11 @@ It adds up in a hurry. *And the rest of the story...*
 Much of it can be meaningless, trivial, forgettable, and simply not wanted. For example, 
 imagine an outdoor camera with a view of both an entry into the home and the driveway. 
 
-The occupants and their vehicles will pass in front of that camera multiple times per
-day. Routine events such as these do not require a video record, or even a single image
-be preserved. All the house needs to do, really, is take note that your car departed 
-at 7:12 in the morning and arrived back home at 6:39 that evening. Happens every weekday.
+The occupants and their vehicles will pass in front of that camera multiple times per day.
+Routine events such as these do not require a video record, or even a single image be 
+preserved. All that is really required of the house, is for it to take note that your car 
+departed at 7:12 in the morning and arrived back home at 6:39 that evening. Happens every 
+weekday.
 
 All of those unexpected, unusual, exceptional events are not so disposable. Under certain 
 circumstances, it might be desirable to produce a full archival video immediately. There
