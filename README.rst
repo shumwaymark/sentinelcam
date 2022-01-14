@@ -77,8 +77,8 @@ nodes.
 
 For building out the functionality of the **Outpost**, it quickly became obvious that 
 his **imagenode** project could provide scaffolding that was both structurally sound and 
-already working. This project has been forked as a submodule to the **SentinelCam** 
-project. Additional details regarding enhancements are documented in
+already working. This project has been forked as a submodule here. Additional details 
+regarding the enhancements made to it are documented in 
 `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
 Most significantly, this enhanced **imagenode** module completely encapsulates all the
@@ -142,6 +142,9 @@ The following general strategy provides an overview of this technique.
 - The newest image passing through the pipeline is only provided to the spyglass after results 
   from the prior task have been returned. This signals its availability for new work.
 
+.. image:: docs/images/SpyGlass.png
+   :alt: Outpost to Spyglass inter-process marshalling
+
 This architecture potentially allows for increasingly sophisticated vision analysis models to be
 deployed directly on an **Outpost** node. Specialized lenses could be developed for the ``SpyGlass``
 based on the type of event and results from current analysis. The intent is to support the design
@@ -178,15 +181,15 @@ design sketch.
    :alt: Sketch of basic camwatcher design
 
 This design exploits two of the enhancements made to the **imagenode** module described
-above supporting **Outpost** functionality: log and image publishing over ZMQ as 
+above supporting **Outpost** functionality: log and image publishing over ZeroMQ as 
 configurable options.
 
 The **camwatcher** employs a Python ``asyncio`` event loop running a set of coroutines with
 the following tasks.
 
-- *Control Loop*. Uses a ZMQ Req/Rep port for receiving control commands. This currently 
-  just allows an **Outpost** to route a notification during initialization to insure that
-  a logfile subscription has been established. 
+- *Control Loop*. Uses a ZeroMQ REQ/REP design pattern for receiving control commands. This 
+  currently just allows an **Outpost** to route a notification during initialization to insure 
+  that a logfile subscription has been established. 
 
 - *Log Subscriber*. Subscribes to logging data streamed from one or more **Outpost**
   publishers via ZMQ. Logging data that pertains to a camera event is directed to the 
@@ -386,11 +389,11 @@ format, the EventID reference must exist for the indicated date. There is no err
 
   DataFeed.get_image_list (date, event) -> [timestamp]
 
-This function provides a list of ``datetime.timestamp`` objects that correspond directly 
-to the capture times on images published by the Outpost. These are provided in chronological
-order. Function arguments are identical to what is described above for ``get_tracking_data()``.
+This function provides a list of ``datetime.timestamp`` objects reflecting the capture times 
+on images published by the Outpost. These are provided in chronological order. Function arguments 
+are identical to what is described above for ``get_tracking_data()``.
 
-All date and time refernces are in Coordinated Universal Time (UTC), not the local timezone.
+All date and time references are in Coordinated Universal Time (UTC), not the local timezone.
 
 .. code-block:: python
 
