@@ -90,8 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now using a ZeroMQ REQ/REP pair to rig the IPC signaling mechanism between `Outpost` and 
-  the `SpyGlass`. The outpost implements a polling mechanism on the connection to provide 
+- Now using a ZeroMQ REQ/REP pair to rig the IPC signaling between `Outpost` and the
+  `SpyGlass`. The outpost implements a polling mechanism on the connection to provide 
   for a non-blocking receieve until results are ready.
 
 ## 0.0.3-alpha - 2022-01-03
