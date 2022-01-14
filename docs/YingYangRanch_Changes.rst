@@ -383,10 +383,10 @@ between messages when subscribing to multiple *outpost* nodes simultaneously.
 
 The third common field is the ``evt`` field, which can contain one of three values as described below. 
 
-For efficiency, a timestamp is not currently included in these messages. Timestamps must be added by the
-receiving system. Admittedly, this is less than accurate. However, as a general rule there should be at 
-most just a few milliseconds of latency between the actual time of the observation, and the logged/reported 
-time. 
+To keep messages sizes small, a timestamp is not currently included in these messages. Timestamps must 
+be added by the receiving system. As a general rule there should be, at most, about a half-dozen milliseconds 
+of latency between the actual time of the observation and the logged/reported time. These logging records 
+always reflect current events. i.e. *What is happening right now?*
 
 1) Event start, the ``evt`` field contains the text ``start``. This message is sent once, when
    the tracking event begins. The ``fps`` field reflects the velocity of the **outpost** pipeline
@@ -459,7 +459,7 @@ to the baseline, as detailed below, can be found in ``imagenode/tools/imaging.py
 
 .. code-block:: python
 
-  from sentinelcam.outpost import Outpost # SentineCam outpost support
+  from sentinelcam.outpost import Outpost # SentinelCam outpost support
 
 *initializaton hook for the Detector instance*
 
