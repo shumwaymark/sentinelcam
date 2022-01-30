@@ -1,4 +1,4 @@
-# Settings file imagenode.yaml -- version 3 for sentinelcam testing
+# Settings file imagenode.yaml -- version 4 for sentinelcam testing
 ---
 node:
   name: outpost
@@ -23,14 +23,15 @@ cameras:
         publish_log: 5565            # activate logfile publishing over ZMQ
         camwatcher: tcp://data1:5566 # connect to camwatcher control port
         spyglass: (640, 480)         # must match camera "resolution" above
-        tracker: kcf                 # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
+        accelerator: none            # [none, ncs2, coral]
+        tracker: dlib                # [dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
         detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
-        skip_frames: 50
+        skip_factor: 25
         mobilenetssd:
             prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
             model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
             confidence: 0.5
-            target: cpu      # [cpu, myriad]
+            target: cpu     # [cpu, myriad]
         yolov3:  
             yolo_path: /home/pi/imagenode/outpost/yolo-coco
             confidence: 0.5
@@ -41,3 +42,10 @@ cameras:
         draw_time: ((255,0,0),1)  
         draw_time_org: (5,5)  
         draw_time_fontScale: 0.5  
+sensors:
+  T1:
+    name: Temperature
+    type: DS18B20
+    gpio: 4
+    read_interval_minutes: 10  # check temperature every 10 minutes
+    min_difference: 1          # send reading when changed by 1 degree

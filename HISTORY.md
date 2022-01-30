@@ -11,13 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Streamline the marshalling of results from `SpyGlass` back to `Outpost`, probably
     with **MessagePack**. 
   - Provide for motion-only option for capture/logging sans object detection and tracking.
-  - Modernize object detector capabilites with support for newer algorithms.
+  - Modernize object detector capabilities with support for newer algorithms.
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
 - Continue design of the *Sentinel* module. This will become the inference and modeling engine.
   Much of the tooling for `SpyGlass` lays the foundation for how jobs will be managed.
-- Add missing support for **datapump** error codes in reposnse messages using the first 
+- Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by *imageZMQ*.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
   - Rather than terminating subprocess video writers at the end of each event, adapt these
@@ -43,12 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
   `Outpost` is still under active development, and highly experimental. 
 
+## 0.0.9-alpha - 2022-01-30
+
+### Changed
+
+- Code revised for operation within OpenVINO environment. Tested with an Intel NCS2 accelerator.
+- Changed motion detector to use the OpenCV baseline MOG2 background subtraction library. 
+
+### Added
+
+- Added support for dlib correlation tracker.
+
 ## 0.0.8-alpha - 2022-01-10
 
 ### Fixed
 
 - Additional work on the multiprocessing handshake. State management seems to have a loose
-  tent stake. Somewhere. I'm beginning to think that the object detector is intermitently
+  tent stake. Somewhere. I'm beginning to think that the object detector is intermittently
   failing and returning bad data. Still looking for the real issue.
 
 ## 0.0.7-alpha - 2022-01-09
@@ -70,12 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - *Over-publishing image data with ZMQ is not smart*. On a Raspberry Pi 4B, have measured 
   publishing rates for a (320,240) resolution image, compressed to JPEG, at 150+ frames
-  per second. This is insane. In no universe does that make sense. For a PiCamera, the 
-  hardware chip does not even collect data faster than about 32 frames/second. Moving 
-  data is not free. There is always a price to pay. Implemented an image publishing 
-  throttle for the `Outpost` based on configured frame rate. Better to be kind to such 
-  a nice little box as the Raspberry Pi. High stress for no payback? Always say no to 
-  such antics. 
+  per second. This is insane, at least for the hardware we're running on and any of the
+  intended use cases driving this design. For a PiCamera, the hardware chip does not even 
+  collect data faster than about 32 frames/second. Moving data is not free. There is always 
+  a price to pay. Implemented an image publishing throttle for the `Outpost` based on configured 
+  frame rate. Better to be kind to such a nice little box as the Raspberry Pi. High stress for 
+  no payback? Always say no to such antics. 
 
 ## 0.0.5-alpha - 2022-01-05
 
@@ -90,9 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now using a ZeroMQ REQ/REP pair to rig the IPC signaling between `Outpost` and the
+- Now using am *imageZMQ* REQ/REP pair to rig the IPC signaling between `Outpost` and the
   `SpyGlass`. The outpost implements a polling mechanism on the connection to provide 
-  for a non-blocking receieve until results are ready.
+  for a non-blocking receive until results are ready.
 
 ## 0.0.3-alpha - 2022-01-03
 
@@ -104,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   class from a process running on another node, such as the *sentinel* itself.
 - Added example **datafeed** module implementing `DataFeed` requests to the **datapump**. 
   This is still evolving. 
-- Fleshed out intitial `Outpost` functionality for the **imagenode** project, including an 
+- Fleshed out initial `Outpost` functionality for the **imagenode** project, including an 
   early version of the `SpyGlass` as a multiprocessing vision analysis pipeline. 
 
 ### Changed
@@ -113,8 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adopted **simplejpeg** library in place of using **OpenCV** for more efficient frame file
   encoding/decoding.
 - Corrected handling for updating the EventID used by an active **camwatcher** image subscriber.
-- Data model for tracking events revised to substitue bounding rectangles for detected obects rather
-  than an object centroid. Classname also added for those events where this can be
+- Data model for tracking events revised to substitute bounding rectangles for detected objects rather
+  than an object centroid. Classification also added for those events where this can be
   estimated in real time.
 
 ## 0.0.2-alpha - 2021-02-20
@@ -137,7 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Utilization of PostgreSQL as a component of the **camwatcher** data layer replaced with 
   data tables mapped onto a set of CSV-format files; a simple and efficient capture method.
   Also provides the broadest integration support.
-- Example event wiewer application `video_review.py` revised to conform to the new **camwatcher** 
+- Example event viewer application `video_review.py` revised to conform to the new **camwatcher** 
   data model. Functionality fleshed out to include date and event selection. Demonstrates use of 
   the `CamData` object to retrieve event and image data. 
 
@@ -159,6 +170,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   startup command to the connected **imagehub**. Added an experimental object 
   tracker to exercise **camwatcher** operations.
 - Modified **imagehub** to implement the camera handoff to **camwatcher** from an 
-  **imagenode** intializtion.
+  **imagenode** initialization.
 
 [Return to main documentation page README](README.rst)

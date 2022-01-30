@@ -44,7 +44,7 @@ options are specified. All **SentinelCam** configuration items are specified as 
 
 .. code-block:: yaml
 
-  # Settings file imagenode.yaml -- sentinelcam test #3
+  # Settings file imagenode.yaml -- sentinelcam test #4
   ---
   node:
     name: outpost
@@ -69,8 +69,9 @@ options are specified. All **SentinelCam** configuration items are specified as 
           publish_log: 5565            # activates logfile publishing over ZMQ
           camwatcher: tcp://data1:5566 # connect to camwatcher control port
           spyglass: (640, 480)         # important, must match camera "resolution" above
-          tracker: kcf                 # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
-          skip_frames: 50
+          accelerator: none            # [none, ncs2, coral]
+          tracker: dlib                # [dlib csrt, kcf, boosting, mil, tld, medianflow, mosse]
+          skip_factor: 25
           detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
           mobilenetssd:
             prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
@@ -87,6 +88,13 @@ options are specified. All **SentinelCam** configuration items are specified as 
           draw_time: ((255,0,0),1)  
           draw_time_org: (5,5)  
           draw_time_fontScale: 0.5 
+  sensors:
+    T1:
+      name: Temperature
+      type: DS18B20
+      gpio: 4
+      read_interval_minutes: 10  # check temperature every 10 minutes
+      min_difference: 1          # send reading when changed by 1 degree
 
 Camwatcher connection settings
 ==============================
@@ -274,8 +282,12 @@ which provides additional details and background information.
 tracker
 -------
 
-This setting selects the object tracking algorithm to use. The following subset of the 
-OpenCV legacy contributed object trackers are supported.    
+This setting selects the object tracking algorithm to use. 
+
+``dlib``
+  Use the dlib correlation tracker. *Recommended*.
+
+The following subset of the OpenCV legacy contributed object trackers are also supported.
 
 ``boosting``
   A rather old AdaBoost implementation that has been superceded by faster algorithms.
@@ -311,7 +323,7 @@ in accuracy.
 
   tracker: kcf  # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
 
-skip_frames
+skip_factor
 -----------
 
 Once objects are in view, the correlation tracking alogorithm specified above is used to track 
@@ -325,7 +337,7 @@ pipeline. *This is currently more art than a well-understood factor. Sorry about
 
 .. code-block:: yaml
 
-  skip_frames: 30
+  skip_factor: 25
 
 detectobjects
 -------------
