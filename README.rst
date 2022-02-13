@@ -41,8 +41,8 @@ One or more *data aggregators* are responsible for accumulating reported data an
 video streams. 
 
 Realtime analysis of logged data from each **Outpost** feeds a *dispatcher* responsible for
-submitting tasks to the *sentinel*. Inference and labeling tasks should be prioritized over
-modeling runs. The *sentinel* will need to be provisioned with adequate memory and computing
+submitting tasks to the *Sentinel*. Inference and labeling tasks should be prioritized over
+modeling runs. The *Sentinel* will need to be provisioned with adequate memory and computing
 resources. 
 
 .. image:: docs/images/SentinelCamOverview.png
@@ -166,7 +166,7 @@ Log publishing also offers two benefits.
   are then available as data which can be streamed to multiple interested consumers in real time.
 
 The **Outpost** as currently implemented is still highly experimental, and best represents proof 
-of concept as working draft. Complete details on the design, structure, and operation of
+of concept as working draft. Further detail on the design, structure, and operation of
 the **Outpost** have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
 Camwatcher design
@@ -325,9 +325,12 @@ portrayed below.
 
 It is important to note that the collection of image data occurs independently from the tracking 
 data. Some variation in the rate of capture can be expected. Differences from a perspective in real 
-time are not expected to be signficant. To correlate tracking data back to a captured image, it is 
-helpful to bind these together by estimating an elapsed time from the starting point for each data 
-source, perhaps even with consideration for latency as an additional factor.
+time are not expected to be significant. There can also be minor differences between the clock times 
+from one network node to another.
+
+To correlate tracking data back to a captured image, it is helpful to bind these together by estimating 
+an elapsed time from the starting point for each data source, perhaps even with consideration for latency 
+as an additional factor.
 
 DataPump and DataFeed
 ---------------------
@@ -411,7 +414,7 @@ Research and development roadmap
 
 Development is proceeding along multiple paths simultaneously. The categories below do not
 describe an all-inclusive list, they are simply interrelated areas of current focus. The 
-conceptuaL framework driving the overall project is larger in scope. Updates are published
+conceptual framework driving the overall project is larger in scope. Updates are published
 here on an incremental basis as new functionality is fleshed out, proven, and stabilized. 
 
 Sentinel
@@ -469,15 +472,15 @@ Raw data gleaned from an Outpost event can be voluminous and detailed.
 
 SentienlCam endeavors to always capture as much image detail as possible. As noted above 
 in the *Data Model* discussion, individual image frames require much more space than a compressed 
-video format. A high capture rate provdes more data for analysis and modeling, reducing the 
-likelyhood that key details might be missed. This also can allow for generating high quality 
-full motion archival videos. 
+video format. The computer vision technology underpinning this design is baed on the analysis of
+two-dimensional images. A high capture rate provides more data for analysis and modeling, 
+reducing the likelyhood that key details might be missed. This also allows for generating high
+quality full motion archival videos. 
 
-Additionally, there can be multiple objects of interest moving through the field of view 
-simultaneously. Collected logging data includes geometry, classification, and possibly 
-labeling. This could represent the aggregated results inferred from one or more deep neural 
-networks whether collected in real time by an Outpost node, or produced by the Sentinel. 
-Or both.
+There can be multiple objects of interest moving through the field of view simultaneously. 
+Collected logging data can include geometry, classification, and possibly labeling. This could 
+represent the aggregated results inferred from one or more deep neural networks whether collected 
+in real time by an Outpost node, or produced by the Sentinel. Or both.
 
 It adds up in a hurry. *And the rest of the story...*
 
@@ -492,8 +495,8 @@ weekday.
 
 All of those unexpected, unusual, exceptional events are not so disposable. Under certain 
 circumstances, it might be desirable to produce a full archival video immediately. There
-may be situations were such a record should be copied off-site as a precaution. Perhaps by 
-policy, a full video record of evey package delivery is always kept for a period of time.
+may be situations where such a record should be copied off-site as a precaution. Perhaps by 
+policy, a full video record of every package delivery is always kept for a period of time.
 
 This all needs to be mostly automatic and self-maintaining. The end result should require the 
 bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work. 

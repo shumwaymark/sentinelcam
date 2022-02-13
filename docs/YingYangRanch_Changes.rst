@@ -285,7 +285,7 @@ tracker
 This setting selects the object tracking algorithm to use. 
 
 ``dlib``
-  Use the dlib correlation tracker. *Recommended*.
+  Use the dlib correlation tracker. *Required for operation under OpenVINO*.
 
 The following subset of the OpenCV legacy contributed object trackers are also supported.
 

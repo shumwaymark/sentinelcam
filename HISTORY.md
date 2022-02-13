@@ -8,8 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Ongoing development
 
 - Continue refinements to `Outpost` implementation. 
-  - Streamline the marshalling of results from `SpyGlass` back to `Outpost`, probably
-    with **MessagePack**. 
   - Provide for motion-only option for capture/logging sans object detection and tracking.
   - Modernize object detector capabilities with support for newer algorithms.
   - Implement filtering mechanism based on object detection results.
@@ -42,6 +40,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this condition.
 - Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
   `Outpost` is still under active development, and highly experimental. 
+- Have occasionally encountered entries in the camwatcher index with no corresponding event
+  detail file. Not obvious how this could be happening, need to track down the cause. The
+  DataPump/DataFeed exchange hangs in these cases. The `CamData` class should probably be
+  returning an empty event result set as the response for this. 
+- **imagenode** hangs when `SpyGlass` deployed and SIGTERM sent from `fix_comm_link()` by the
+  `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
+  wire-in a facility to support this. 
+
+## 0.0.10-alpha - 2022-02-12
+
+### Changed
+
+- Now using **MessagePack** for marshalling IPC communications between `SpyGlass` and `Outpost`. 
+
+### Fixed
+
+- Replaced non-sensical approach to state management with something sane, and correct.
 
 ## 0.0.9-alpha - 2022-01-30
 
@@ -73,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added heartbeat logging from the **outpost**. This simply reports the current image 
-  publishing frame rate once per minute. This will be saved by the **camwatcher**
+  publishing frame rate at 5 minute intervals. This will be saved by the **camwatcher**
   whenever its internal logging level is set to INFO. It may be smarter to direct this 
   data down to the **imagehub** for access from the **librarian**.
 
@@ -92,10 +107,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Achieved considerably lower latency between `Outpost` and the `SpyGlass` by moving 
-  ZMQ signaling protocol from `tcp://127.0.0.1` to `ipc://name`. Had to swap the
-  `ImageSender` and `ImageHub` endpoints for this, which also provided for a more 
-  sensible handshake during initialization.  
+- Reduced latency between `Outpost` and the `SpyGlass` by moving ZMQ signaling protocol 
+  from `tcp://127.0.0.1` to `ipc://name`. Had to swap the `ImageSender` and `ImageHub` 
+  endpoints for this, which also provided for a more sensible handshake during initialization.  
 
 ## 0.0.4-alpha - 2022-01-05
 
@@ -112,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First working prototype of the **datapump** module. This is a stand-alone process 
   intended for running on the same node as a **camwatcher**. This module services access requests 
   to the data and image sinks over *imageZMQ* transport, specifically for use with the `DataFeed`
-  class from a process running on another node, such as the *sentinel* itself.
+  class from a process running on another node, such as the *Sentinel* itself.
 - Added example **datafeed** module implementing `DataFeed` requests to the **datapump**. 
   This is still evolving. 
 - Fleshed out initial `Outpost` functionality for the **imagenode** project, including an 
