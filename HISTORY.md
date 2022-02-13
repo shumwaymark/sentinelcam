@@ -52,11 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now using **MessagePack** for marshalling IPC communications between `SpyGlass` and `Outpost`. 
+- Now using **MessagePack** for marshalling IPC exchanges between `SpyGlass` and `Outpost`. 
 
 ### Fixed
 
-- Replaced non-sensical approach to state management with something sane, and correct.
+- Replaced non-sensical approach to Outpost state management with something sane, and correct.
 
 ## 0.0.9-alpha - 2022-01-30
 

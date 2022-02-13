@@ -472,7 +472,7 @@ Raw data gleaned from an Outpost event can be voluminous and detailed.
 
 SentienlCam endeavors to always capture as much image detail as possible. As noted above 
 in the *Data Model* discussion, individual image frames require much more space than a compressed 
-video format. The computer vision technology underpinning this design is baed on the analysis of
+video format. The computer vision technology underpinning this design is based on the analysis of
 two-dimensional images. A high capture rate provides more data for analysis and modeling, 
 reducing the likelyhood that key details might be missed. This also allows for generating high
 quality full motion archival videos. 
