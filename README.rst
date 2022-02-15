@@ -195,7 +195,7 @@ the following tasks.
   *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
 
 - *Dispatcher*. Handles object tracking event data. For each new event, a subprocess is
-  started as a image stream subscriber to begin capturing images. All event tracking data
+  started as an image stream subscriber to begin capturing images. All event tracking data
   is queued for permanent storage by the *CSV File Writer*.
 
 This design packs a fair amount of network I/O activity into a single thread of execution. To 
