@@ -473,9 +473,9 @@ Raw data gleaned from an Outpost event can be voluminous and detailed.
 SentienlCam endeavors to always capture as much image detail as possible. As noted above 
 in the *Data Model* discussion, individual image frames require much more space than a compressed 
 video format. The computer vision technology underpinning this design is based on the analysis of
-two-dimensional images. A high capture rate provides more data for analysis and modeling, 
-reducing the likelyhood that key details might be missed. This also allows for generating high
-quality full motion archival videos. 
+two-dimensional images. The intent is to capture high-resolution ground-truth data, reducing 
+the likelyhood that key details might be missed. This is helpful for analysis and modeling,
+while also allowing for the production of high-quality full-motion archival videos. 
 
 There can be multiple objects of interest moving through the field of view simultaneously. 
 Collected logging data can include geometry, classification, and possibly labeling. This could 
@@ -489,11 +489,10 @@ imagine an outdoor camera with a view of both an entry into the home and the dri
 
 The occupants and their vehicles will pass in front of that camera multiple times per day.
 Routine events such as these do not require a video record, or even a single image be 
-preserved. All that is really required of the house, is for it to take note that your car 
-departed at 7:12 in the morning and arrived back home at 6:39 that evening. Happens every 
-weekday.
+preserved. All that is required of the house, is for it to take note that your car departed 
+at 7:12 in the morning and arrived back home at 6:39 that evening. Happens every weekday.
 
-All of those unexpected, unusual, exceptional events are not so disposable. Under certain 
+Those unexpected, unusual, exceptional events are not so disposable. Under certain 
 circumstances, it might be desirable to produce a full archival video immediately. There
 may be situations where such a record should be copied off-site as a precaution. Perhaps by 
 policy, a full video record of every package delivery is always kept for a period of time.
