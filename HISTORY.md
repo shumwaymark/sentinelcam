@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Ongoing development
 
 - Continue refinements to `Outpost` implementation. 
-  - Provide for motion-only option for capture/logging sans object detection and tracking.
   - Modernize object detector capabilities with support for newer algorithms.
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
@@ -47,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **imagenode** hangs when `SpyGlass` deployed and SIGTERM sent from `fix_comm_link()` by the
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
+
+## 0.0.11-alpha - 2022-04-20
+
+### Added
+
+- Added OAK-1 camera support for running DepthAI pipelines as the primary data collection device.
+
+### Changed
+
+- Support motion-only mode for event logging without object detection or tracking.
+- Integrated object tracking support is now optional.
 
 ## 0.0.10-alpha - 2022-02-12
 
