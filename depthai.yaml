@@ -1,0 +1,34 @@
+# Settings file imagenode.yaml -- sentinalcam settings v5, with OAK-1 integration  
+---
+node:
+  name: east 
+  heartbeat: 10
+  patience: 5
+  REP_watcher: False
+  queuemax: 50
+  send_type: jpg
+  send_threading: True
+  print_settings: False
+hub_address:
+  H1: tcp://data1:5555
+cameras:
+  O1:                                    # OAK-1 camera 
+     viewname: Front
+     resolution: (640, 360)
+     framerate: 30
+     detectors:
+        outpost:
+           encoder: oak                  # encoding workload for image publisher [cpu, oak]
+           publish_cam: 5567             # activate image frame publishing
+           publish_log: 5565             # activate logfile publishing over ZMQ
+           camwatcher: tcp://data1:5566  # connect to camwatcher control port
+           spyglass: (640, 360)          # must match camera "resolution" above
+           accelerator: none             # [none, ncs2, coral]
+           detectobjects: none           # [none, motion, mobilenetssd, yolov3]
+           tracker: none                 # [none, dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
+           depthai:
+              pipeline: MobileNetSSD     # dictionary key to configured pipelines in oak_camera.py module
+              images: frames             # queue name for image messages from camera 
+              jpegs: jpegs               # queue name for JPEG encoding messages from OAK camera 
+              neural_nets:
+                 Q1:  nn                 # queue for neural net results
