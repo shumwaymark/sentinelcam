@@ -152,7 +152,7 @@ class CSVwriter:
                 pass
         # write an entry into the date folder index
         self._today = today
-        try:
+        try: 
             with open(os.path.join(date_directory, 'camwatcher.csv'), mode='at') as index:
                 index.write(','.join([nodeView[0], nodeView[1], timestamp, evt, str(int(fps)), 'trk']) + "\n")
         except Exception as ex:
@@ -214,17 +214,23 @@ async def control_loop(loggers):
         #command = msg[0]
         # CameraUp is only supported command, so must be a new outpost
         # logpublisher handoff as json-encoded Dict in the second field
-        outpost = json.loads(msg[1]) # TODO handoff validation needed here
-        if not outpost['node'] in watchList: 
-            try:
+        try:
+            outpost = json.loads(msg[1])
+            if not outpost['node'] in watchList: 
                 loggers.connect(f"tcp://{outpost['host']}:{outpost['log']}")
                 watchList[outpost['node']] = outpost
                 print_outpost(outpost)
-            except Exception as ex:  
-                result = 'FAILED'
-                logging.error(f'CamWatcher subscription failure {str(ex)}')
-        else:
-            logging.info(f"CamWatcher already connected with {outpost['node']}")
+            else:
+                logging.info(f"CamWatcher already connected with {outpost['node']}")
+        except ValueError as ex:
+            result = 'REJECT'
+            logging.error(f"JSON exception '{str(ex)}' decoding camera handoff message: '{msg[1]}'")
+        except KeyError as keyval:
+            result = 'REJECT'
+            logging.error(f"Invalid camera handoff, missing '{keyval}' in message: '{msg[1]}'")
+        except Exception as ex:  
+            result = 'REJECT'
+            logging.error(f"CamWatcher subscription failure for '{outpost['node']}': {str(ex)}")
         logging.debug(f"CamWatcher control port reply {result}")
         await rep.send(result.encode("ascii"))
             
@@ -259,7 +265,7 @@ async def process_logs(loggers):
                     await dispatch_ote(topics[0], message[3:])
                     logging.debug(message)
                 elif category == 'fps':  # Outpost image publishing heartbeat
-                    logging.info(f"Outlook image publishing FPS {message[3:]}")
+                    logging.info(f"Outpost health '{topics[0]}' {message[3:]}")
                 elif category == 'Exi':  # this is the "Exit" message from an imagenode
                     dispatch_logger(topics, message)
                 else:
