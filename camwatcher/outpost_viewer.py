@@ -1,6 +1,7 @@
 """outpost_viewer.py -- Establish ImageZMQ JPEG image subscription, display in OpenCV """
+import argparse
 import sys
-import datetime
+import time
 import traceback
 import cv2
 import imagezmq
@@ -8,27 +9,16 @@ import simplejpeg
 import threading
 from collections import deque
 
-cfg = {'host': 'lab1.', 
-       'port': 5567,
-       'showfps': True} 
-
 class FPS:
-
-	def __init__(self, history=160):  
-		# default allows for 5 seconds of history at 32 images/sec 
-		self._deque = deque(maxlen=history) 
-
-	def update(self):
-		# capture current timestamp
-		self._deque.append(datetime.datetime.utcnow())
-	
-	def fps(self):
-		# calculate and return estimated frames/sec
+	def __init__(self, history=160) -> None:  
+		self._deque = deque(maxlen=history)  # default allows for 5 seconds of history at 32 images/sec 
+	def update(self) -> None:
+		self._deque.append(time.time())
+	def fps(self) -> float:
 		if len(self._deque) < 2:
 			return 0
 		else:
-			return (len(self._deque) / 
-				(self._deque[-1] - self._deque[0]).total_seconds())
+			return (len(self._deque) / (self._deque[-1] - self._deque[0]))
 
 # Helper class implementing an IO deamon thread
 class VideoStreamSubscriber:
@@ -66,8 +56,14 @@ class VideoStreamSubscriber:
         self._stop = True
 
 if __name__ == "__main__":
-    hostname = cfg["host"]
-    port = cfg["port"]    
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-o", "--outpost", required=True, help="Outpost hostname")
+    ap.add_argument("-p", "--port", default=5567, help="Outpost port for image publishing")
+    args = vars(ap.parse_args())
+    hostname = args["outpost"]
+    port = args["port"]
+    showFPS = True    
+
     viewfps = FPS(200)
     color = (0,255,0)
     receiver = VideoStreamSubscriber(hostname, port) # Start image subscription thread
@@ -76,7 +72,7 @@ if __name__ == "__main__":
             msg, frame = receiver.receive()
             #image = cv2.imdecode(np.frombuffer(frame, dtype='uint8'), -1)
             image = simplejpeg.decode_jpeg(frame, colorspace='BGR')
-            if cfg["showfps"]:
+            if showFPS:
                 viewfps.update()
                 text = "FPS: {:.2f}/{:.2f}".format(receiver.velocity.fps(),viewfps.fps()) 
                 cv2.putText(image, text, (10, image.shape[0]-10),
