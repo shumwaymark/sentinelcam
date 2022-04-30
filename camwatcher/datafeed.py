@@ -98,6 +98,12 @@ class DataFeed(imagezmq.ImageSender):
         (msg, df) = self.recv_DataFrame()
         return df
 
+    def get_date_list(self):
+        req = msgpack.dumps({'cmd': 'dat'})
+        self.zmq_socket.send(req)
+        (msg, result) = self.recv_pickle()
+        return result
+
     def get_image_list(self, date, event):
         req = msgpack.dumps({'cmd': 'img', 'date': date, 'evt': event})
         self.zmq_socket.send(req)

@@ -8,33 +8,33 @@ from flask import Flask
 from flask import Response
 from flask import render_template, g
 import cv2
+import numpy as np
 import simplejpeg
-from camdata import CamData
+from datafeed import DataFeed
 
 app = Flask(__name__) # initialize a flask object
 
-cfg = {'port': 8080, 
-       'address': '0.0.0.0',
-       'imagefolder': '/mnt/usb1/imagedata/video',
-       'datafolder':  '/mnt/usb1/imagedata/camwatcher'} 
+cfg = {'datapump': 'tcp://data1:5556'} 
 
 @app.before_request
 def before_request():
-    g.cwData = CamData(cfg["datafolder"], cfg["imagefolder"])
-    g.date = g.cwData.get_date()
+    g.cwFeed = DataFeed(cfg["datapump"])
+    g.cwIndx = None
+    g.cwEvt = None
+    g.date = None
     g.event = None
 
 def _event_selection(date=None, event=None):
     if date is None:
-        g.date = datetime.utcnow().isoformat()[:10]
+        g.date = g.cwFeed.get_date_list()[0]
     else:
         g.date = date
-    g.cwData.set_date(g.date)
+    g.cwIndx = g.cwFeed.get_date_index(g.date)        
     if event is None:
-        g.event = g.cwData.get_last_event()
+        g.event = g.cwIndx.iloc[0].event
     else:
         g.event = event
-    g.cwData.set_event(g.event)
+    g.cwEvt = g.cwFeed.get_tracking_data(g.date, g.event)
 
 def _generate_event_list(cindx):
     for row in cindx[:].itertuples():
@@ -44,30 +44,46 @@ def _generate_event_list(cindx):
 
 def _setup_form_data():
     if not g.event: 
-        _event_selection()    
-    g.node = g.cwData.get_event_node()
-    g.view = g.cwData.get_event_view()
-    g.start = g.cwData.get_event_start()
-    g.datelist = [(d, date.fromisoformat(d).strftime('%A %B %d, %Y')) for d in g.cwData.get_date_list()]
-    g.eventlist = [(evt, descr) for (evt, descr) in _generate_event_list(g.cwData.get_index())]
+        _event_selection()
+    indxData = g.cwIndx.loc[g.cwIndx["event"] == g.event].iloc[0]
+    g.node = indxData.node
+    g.view = indxData.viewname
+    g.start = indxData.timestamp
+    g.datelist = [(d, date.fromisoformat(d).strftime('%A %B %d, %Y')) for d in g.cwFeed.get_date_list()]
+    g.eventlist = [(evt, descr) for (evt, descr) in _generate_event_list(g.cwIndx)]
 
-def _get_frametime(pathname):
-    return datetime.strptime(pathname[-30:-4],"%Y-%m-%d_%H.%M.%S.%f")
+#def _get_frametime(pathname):
+#    return datetime.strptime(pathname[-30:-4],"%Y-%m-%d_%H.%M.%S.%f")
+
+class TextHelper:
+    def __init__(self, camevt) -> None:
+        self._textColor = (0, 0, 0)
+        self._lineType = cv2.LINE_AA
+        self._textType = cv2.FONT_HERSHEY_SIMPLEX
+        self._bboxColors = {}        
+        for objid in camevt['objid'].unique():
+            self._bboxColors[objid] = np.random.randint(256, size=3)
+    def putText(self, frame, objid, text, x1, y1, x2, y2):
+        color = tuple(int(x) for x in self._bboxColors[objid])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(frame, (x1, (y1 - 28)), ((x1 + 110), y1), color, cv2.FILLED)
+        cv2.putText(frame, text, (x1 + 5, y1 - 10), self._textType, 0.5, self._textColor, 1, self._lineType)
 
 def generate_video(date, event):
     color = (0,255,0)
-    _cwData = CamData(cfg["datafolder"], cfg["imagefolder"], date)
-    _cwData.set_event(event)
-    tracker = _cwData.get_event_data()[:].itertuples()
-    image_list = _cwData.get_event_images()
-    event_start = _cwData.get_event_start()
+    _cwFeed = DataFeed(cfg["datapump"])
+    _cwEvt = _cwFeed.get_tracking_data(date, event)
+    text = TextHelper(_cwEvt)
+    tracker = _cwEvt[:].itertuples()
+    image_list = _cwFeed.get_image_list(date, event)
+    event_start = _cwEvt.iloc[0].timestamp
     objects = {}  # object dictionary for holding last known coordinates
     trk = next(tracker)
     iter_elapsed = trk.elapsed
     playback_begin = datetime.utcnow()
-    for framepath in image_list:
-        frame = cv2.imread(framepath)
-        frame_time = _get_frametime(framepath) 
+    for frame_time in image_list:
+        jpeg = _cwFeed.get_image_jpg(date, event, frame_time)
+        frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
         frame_elaps = frame_time - event_start
         if iter_elapsed < frame_elaps:
             try:
@@ -82,14 +98,10 @@ def generate_video(date, event):
 
         for (objid, (rect_x1, rect_y1, rect_x2, rect_y2, classname, lastknown)) in objects.items():
             # draw last known object tracking data on the output frame
-            cv2.rectangle(frame, (rect_x1, rect_y1), (rect_x2, rect_y2), color, 2)
-            x, y, h = rect_x1, rect_y1, rect_x2 - rect_x1
-            y = (y - 15) if (y - 15) > 0 else h - 15 
-            cv2.putText(frame, classname, (x, y), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            text.putText(frame, objid, classname, rect_x1, rect_y1, rect_x2, rect_y2)
 
         # draw timestamp on image frame
-        tag = "{} UTC".format(framepath[-30:-4].replace('_',' '))
+        tag = "{} UTC".format(frame_time.isoformat())
         cv2.putText(frame, tag, (30, 450),
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
