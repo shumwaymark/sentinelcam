@@ -23,9 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     period of inactivity or gauge this based on work load. 
   - Move configuration into YAML file.
   - Confirm exception handling is correct.
-- Continue development of video_review.py
+- Continue development of video_review_df.py
   - Add missing node/view filtering functionality
-  - Adapt to use the `DataFeed` for operation from an application server
+  - Allow display of neural net results to be optional
 - Experiment with leveraging the `send_threading` option in **imagenode** to supplement
   published image capture triggered from a motion event. By dumping the `cam_q` at the start 
   of a motion event, those frames could theoretically be used to assemble video from just prior 
@@ -46,6 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **imagenode** hangs when `SpyGlass` deployed and SIGTERM sent from `fix_comm_link()` by the
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
+
+## 0.0.12-alpha - 2022-04-30
+
+### Fixed
+
+- Revisions and corrections to OAK camera neural net retrieval.
+
+### Added
+
+- Added video_review_df.py module, leaving original version in place for reference. This uses the 
+  `DataFeed` for operation within a WSGI container, and represents the next logical step in the 
+  evolution of this function.
 
 ## 0.0.11-alpha - 2022-04-20
 
