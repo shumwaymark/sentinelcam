@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Continue development of video_review_df.py
   - Add missing node/view filtering functionality
   - Allow display of neural net results to be optional
+  - Add functionality for real-time display of any camera view
 - Experiment with leveraging the `send_threading` option in **imagenode** to supplement
   published image capture triggered from a motion event. By dumping the `cam_q` at the start 
   of a motion event, those frames could theoretically be used to assemble video from just prior 
@@ -39,13 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this condition.
 - Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
   `Outpost` is still under active development, and highly experimental. 
-- Have occasionally encountered entries in the camwatcher index with no corresponding event
-  detail file. Not obvious how this could be happening, need to track down the cause. The
-  DataPump/DataFeed exchange hangs in these cases. The `CamData` class should probably be
-  returning an empty event result set as the response for this. 
 - **imagenode** hangs when `SpyGlass` deployed and SIGTERM sent from `fix_comm_link()` by the
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
+
+## 0.0.13-alpha - 2022-11-16
+
+### Fixed
+
+- Corrected **camwatcher** filename generation for JPEG files when timestamp has no fractional second.
+- Outpost state machine refinements. Begin adding missing logic to gaps in scene management functionality; 
+  this addresses the runaway spyglass bug.
+
+### Added
+
+- Added an event delete command to **datapump**. This runs as a background task and will purge all 
+  stored data for a specific event.
 
 ## 0.0.12-alpha - 2022-04-30
 
@@ -137,7 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now using am *imageZMQ* REQ/REP pair to rig the IPC signaling between `Outpost` and the
+- Now using an *imageZMQ* REQ/REP pair to rig the IPC signaling between `Outpost` and the
   `SpyGlass`. The outpost implements a polling mechanism on the connection to provide 
   for a non-blocking receive until results are ready.
 
