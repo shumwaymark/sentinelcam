@@ -117,7 +117,12 @@ class DataFeed(imagezmq.ImageSender):
         self.zmq_socket.send(req)
         (msg, img) = self.recv_jpg()
         return img
-    
+
+    def delete_event(self, date, event):
+        req = msgpack.dumps({'cmd': 'del', 'date': date, 'evt': event})
+        self.zmq_socket.send(req)
+        return self.zmq_socket.recv()
+            
     def health_check(self) -> str:
         req = msgpack.dumps({'cmd': 'HC'})
         self.zmq_socket.send(req)

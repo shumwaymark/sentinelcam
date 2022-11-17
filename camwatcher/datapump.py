@@ -3,12 +3,17 @@ import os
 import logging
 import logging.handlers
 import pickle 
+import queue
+import subprocess
+import threading
+import traceback
 import zlib
 import zmq
 import imagezmq
 import msgpack
 import pandas
 from datetime import datetime
+from time import sleep
 #from camwatcher.camdata import CamData
 from camdata import CamData
 
@@ -110,11 +115,58 @@ class DataPump(imagezmq.ImageHub):
         self.zmq_socket.send_json(md, flags | zmq.SNDMORE)
         return self.zmq_socket.send(z, flags, copy=copy, track=track)
 
+class BackgroundTasks:
+    def __init__(self, tasks, csvdir, imgdir):
+        self._tasks = tasks
+        self._csvdir = csvdir
+        self._imgdir = imgdir
+        self._stop = False
+        self._thread = threading.Thread(target=self._run, args=())
+        self._thread.daemon = True
+        self._thread.start()
+
+    def _getDelCmds(self, event) -> list:
+        cmdlist = []
+        # delete event entry from date index
+        cmdlist.append((False, ["sed", "-i", f"/{event[1]}/d", os.path.join(self._csvdir, event[0], 'camwatcher.csv')])) 
+        # purge event data
+        cmdlist.append((True, f"rm {os.path.join(self._csvdir, event[0], ''.join([event[1],'*']))}"))
+        # purge captured image data
+        cmdlist.append((True, f"ls {os.path.join(self._imgdir, event[0], ''.join([event[1],'*']))} | xargs rm"))
+        return cmdlist
+    
+    def _run(self):
+        logging.info("Background Tasks thread started")
+        while not self._stop:
+            if self._tasks.empty():
+                sleep(1)
+                continue
+            while not self._tasks.empty():
+                (cmd, args) = self._tasks.get()
+                logging.info(f"background task '{cmd}': {args}")
+                try:
+                    if cmd == 'del':
+                        for step in self._getDelCmds(args):
+                            logging.debug(f"Event deletion: {step}")
+                            result = subprocess.run(step[1], shell=step[0], capture_output=True, text=True)
+                            if result.returncode != 0:
+                                logging.error(f"Deletion error {result.returncode} for {args[0]}/{args[1]} on {step[0]}: {result.stderr}")
+                except Exception as ex:
+                    logging.error(f"Background Tasks unhandled exception: {str(ex)}")
+                self._tasks.task_done()
+
+    def close(self):
+        self._stop = True
+        self._thread.join()
+
 def main():
     start_logging()
+    taskQueue = queue.Queue()
+    bgTasks = BackgroundTasks(taskQueue, cfg['datafolder'], cfg['imagefolder'])
     cData = CamData(cfg['datafolder'], cfg['imagefolder'])
     pump = DataPump(f"tcp://*:{cfg['control_port']}")
     logging.info("datapump response loop starting")
+    # TODO: Graceful shutdown / termination handling needed 
     while True:  
         msg = pump.zmq_socket.recv()
         request = msgpack.loads(msg)
@@ -149,6 +201,10 @@ def main():
                     jpeg = open(jpegfile, "rb").read()
                     pump.send_jpg(reply, jpeg)
                     continue
+                elif request['cmd'] == 'del':  # delete event data
+                    task = ('del', (request['date'], request['evt']))
+                    taskQueue.put(task)
+                    reply = b'OK'
                 elif request['cmd'] == 'upd':  # event update processing placeholder
                     pass
                 elif request['cmd'] == 'HC':  # health check
@@ -159,10 +215,16 @@ def main():
             except KeyError:
                 logging.warning(f"Malformed request: {request}")
                 reply = b'Error'
+            except Exception as ex:
+                logging.error('unexpected exception:', ex)
+                traceback.print_exc()
+                reply = b'Error'
         else:
             logging.warning(f"Invalid request: {request}")
             reply = b'Error'
         pump.send_reply(reply) 
+
+    bgTasks.close() 
 
 def start_logging():
     log = logging.getLogger()
@@ -171,7 +233,7 @@ def start_logging():
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     log.addHandler(handler)
-    log.setLevel(logging.DEBUG)
+    log.setLevel(logging.INFO)
     return log
 
 if __name__ == "__main__":

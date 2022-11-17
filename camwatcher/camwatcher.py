@@ -99,6 +99,8 @@ class VideoStreamWriter:
                     evt = str(eventID.value,'utf-8')
                     date_directory = self._set_datedir(outdir, dt[:10])
                     newEvent.clear()
+                if len(dt) == 19:
+                    dt = dt + ".000000"
                 jpegframe = "{}_{}_{}.jpg".format(
                     evt, dt[:10], dt[11:].replace(':','.'))
                 jpegfile = os.path.join(date_directory, jpegframe)
@@ -239,15 +241,15 @@ def print_outpost(outpost):
 
 def dispatch_logger(topics, msg):
     if topics[1] == 'ERROR':
-        logging.error(f"[{'.'.join(topics)}]{msg}") 
+        logging.error(f"[{topics[0]}]{msg}") 
     elif topics[1] == 'WARNING':
-        logging.warning(f"[{'.'.join(topics)}]{msg}") 
+        logging.warning(f"[{topics[0]}]{msg}") 
     elif topics[1] == 'CRITICAL':
-        logging.critical(f"[{'.'.join(topics)}]{msg}") 
+        logging.critical(f"[{topics[0]}]{msg}") 
     elif topics[1] == 'INFO':
-        logging.info(f"[{'.'.join(topics)}]{msg}") 
+        logging.info(f"[{topics[0]}]{msg}") 
     elif topics[1] == 'DEBUG':
-        logging.debug(f"[{'.'.join(topics)}]{msg}") 
+        logging.debug(f"[{topics[0]}]{msg}") 
     else:
         logging.error(f"[{'.'.join(topics)}]{'*** Foreign TOPIC *** ' + msg}") 
 
