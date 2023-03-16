@@ -46,7 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
 
-## 0.0.14-alpha - 2023-03-16
+## 0.0.15-alpha - 2023-03-16
+
+### Fixed
+
+- Some early code clean-up of the **sentinel** module. Added a HISTORY command to support dumping
+  complete task history to the logger in JSON format.
+
+
+## 0.0.14-alpha - 2023-03-15
 
 ### Added
 
