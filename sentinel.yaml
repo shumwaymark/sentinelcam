@@ -4,6 +4,7 @@
 control_port: 5566
 default_pump: tcp://data1:5556
 socket_dir: /home/pi/sentinel/sockets
+log_dir: /home/pi/sentinel/logs
 ring_buffers:
    vga: ((640, 480), 5)
    sd: ((640, 360), 5)

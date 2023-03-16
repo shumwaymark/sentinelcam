@@ -32,8 +32,6 @@ CFG = readConfig(os.path.join(os.path.expanduser("~"), "sentinel.yaml"))
 SOCKDIR = CFG["socket_dir"]
 
 ctxAsync = AsyncContext.instance()
-asyncSUB = ctxAsync.socket(zmq.SUB)  # subscriptions for job result publishers
-asyncSUB.subscribe(b'')
 ctxBlocking = zmq.Context.shadow(ctxAsync.underlying)
 jobLock = threading.Lock()
 taskFeed = queue.Queue()
@@ -43,16 +41,16 @@ jobList = {}
  
 class JobRequest:
     
-    Status_UNKNOWN = 0
+    Status_UNDEFINED = 0
     Status_QUEUED = 1
     Status_RUNNING = 2 
     Status_DONE = 3
     Status_FAILED = 4
     Status_CANCELED = 5
 
-    Status = ["Unknown", "Queued", "Running", "Done", "Failed", "Canceled"]
+    Status = ["Undefined", "Queued", "Running", "Done", "Failed", "Canceled"]
 
-    def __init__(self, node, date, event, taskname) -> None:
+    def __init__(self, sink, node, date, event, pump, taskname) -> None:
         self.jobID = uuid.uuid1().hex
         self.jobTask = taskname
         self.jobClass = 1
@@ -60,9 +58,11 @@ class JobRequest:
         self.jobSubmitTime = datetime.utcnow()
         self.jobStartTime = None
         self.jobEndTime = None
+        self.sourceNode = node
+        self.dataSink = sink
         self.eventDate = date
         self.eventID = event
-        self.datapump = node  # datapump connection string
+        self.datapump = pump  # datapump connection string
         self.camsize = (0,0)  # TODO: required per event; learn up front, dynamically
         self.engine = None
         with jobLock:
@@ -81,6 +81,28 @@ class JobRequest:
         with jobLock:
             if self.jobID in jobList:
                 del jobList[self.jobID]
+
+    def summary_JSON(self) -> str:
+        start_time, end_time, elapsed_time = None, None, None
+        if self.jobStartTime is not None:
+            start_time = self.jobStartTime.isoformat()
+            if self.jobEndTime is not None:
+                end_time = self.jobEndTime.isoformat()
+                elapsed_time = str(self.jobEndTime - self.jobStartTime)
+        return json.dumps({
+            'Node': self.sourceNode,
+            'Date': self.eventDate,
+            'Task': self.jobTask,
+            'DataSink': self.dataSink,
+            'Status': JobRequest.Status[self.jobStatus],
+            'SubmitTime': self.jobSubmitTime.isoformat(),
+            'StartTime': start_time,
+            'EndTime': end_time,
+            'ElapsedTime': elapsed_time,
+            'TaskEngine': self.engine,
+            'EventID': self.eventID,
+            'JobID': self.jobID
+        })
 
 class RingWire:
     def __init__(self, socketDir, engineName) -> None:
@@ -106,9 +128,9 @@ class RingWire:
         self._wire.close()
 
 class RingBuffer:
-    def __init__(self, size, length) -> None:
+    def __init__(self, wh, length) -> None:
         dtype = np.dtype('uint8')
-        shape = (size[1], size[0], 3)
+        shape = (wh[1], wh[0], 3)
         self._length = length
         self._buffers = [sharedctypes.RawArray('c', shape[0]*shape[1]*shape[2]) for i in range(length)]
         self._frames = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in self._buffers]
@@ -154,34 +176,32 @@ class RingBuffer:
         self._start %= self._length
 
 class JobTasking:
-    """ Implements a TaskEngine for the JobManager. 
-    
-    Encapsulates a forked child subprocess for the task engine.
+    """ Implements a TaskEngine for the JobManager. Encapsulates a forked child 
+    subprocess to execute job logic on a task engine.
     
     Parameters
     ----------
     engineName : str
-        Name for this engine, and dictionary key for Job Manager reference. Needed
-        by the task engine to establish ZMQ sockets over the ipc:// protocol
+        Identifying name for this engine.
 
     pump : str
         Connection string for the default datapump. Each task engine will need 
-        a DataFeed. Becomes the ZMQ context for other control sockets.
+        a DataFeed. Establishes the ZMQ context for other control sockets.
 
     taskCFG : dict
         This is the task list. A configuration dictionary of available tasks.
 
     taskQ : multiprocessing.Managers.SyncManager.Queue 
-        Used for sending job request blocks to the task engine
+        Used for sending job requests to the task engine.
 
     taskFlag : multiprocessing.Managers.SyncManager.Value 
-        Implements a shared flag that can be used to cancel a running task
+        Implements a shared flag that can be used to cancel a running task.
 
     rawRingbuff : dict
-        A list of shared memory blocks by image size of RingBuffers for this
-        task engine. These are a multiprocessing.sharedctypes.RawArray, each
-        will be redefined as a NumPy array by the child process. 
-    """        
+        The image frame ring buffers for this task engine. Each item is a list of shared 
+        memory blocks keyed by image size. These are a multiprocessing.sharedctypes.RawArray, 
+        each will be redefined as a NumPy array by the child process. 
+    """
 
     def __init__(self, engineName, pump, taskCFG, taskQ, taskFlag, rawRingbuff) -> None:
         self._engine = engineName
@@ -202,15 +222,13 @@ class JobTasking:
     # --------------------------------------------------------------------------------------------------
         try:
             taskpump = pump
-            feed = DataFeed(taskpump)                     # useful for specialized datapump queries
-            ringWire = feed.zmq_context.socket(zmq.REQ)   # IPC signaling for ring buffer control
-            publisher = feed.zmq_context.socket(zmq.PUB)  # job result publication
+            feed = DataFeed(taskpump)                        # useful for task-specific datapump access
+            ringWire = feed.zmq_context.socket(zmq.REQ)      # IPC signaling for ring buffer control
+            publisher = feed.zmq_context.socket(zmq.PUB)     # job result publication
             ringWire.connect(f"ipc://{SOCKDIR}/{engineName}")
             publisher.bind(f"ipc://{SOCKDIR}/{engineName}.PUB")
             ringWire.send(msgpack.packb(0))  # send the ready handshake
-            handshake = ringWire.recv()  # Wait for subscriber to connect. Since taskHost() was forked 
-            # from within this multi-threaded asynchronous beast, a little extra patience won't hurt:
-            time.sleep(1.001)  
+            handshake = ringWire.recv()  # wait for subscriber to connect
 
             def ringStart(frametime) -> int:
                 timestamp = frametime.isoformat()
@@ -241,10 +259,10 @@ class JobTasking:
                     jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
                     try:
+                        taskQ.task_done()
                         if jobreq.datapump != taskpump:
                             taskpump = jobreq.datapump
                             feed.zmq_socket.connect(taskpump)
-
                         if jobreq.camsize != imagesize:
                             imagesize = jobreq.camsize
                             dtype = np.dtype('uint8')
@@ -254,29 +272,27 @@ class JobTasking:
                         taskFlag.value = TaskEngine.TaskSTARTED
                         startMsg = (TaskEngine.TaskSTARTED, jobreq.jobID)
                         publisher.send(msgpack.packb(startMsg))
-                        taskQ.task_done()
 
                         # ----------------------------------------------------------------------
-                        #                   Task Initialization
+                        #   Task Initialization
                         # ----------------------------------------------------------------------
-                        evt_data = feed.get_tracking_data(jobreq.eventDate, jobreq.eventID)
+                        trackingData = feed.get_tracking_data(jobreq.eventDate, jobreq.eventID)
                         taskcfg = taskCFG[jobreq.jobTask]
-                        task = TaskFactory(jobreq, evt_data, feed, taskcfg["config"])
-                        # hang hooks for task references to ring buffer and publisher
+                        task = TaskFactory(jobreq, trackingData, feed, taskcfg["config"])
+                        # Hang hooks for task references to ring buffer and publisher
                         task.ringStart = ringStart
                         task.ringNext = ringNext
                         task.publish = publish
-                        task.dataFeed = feed
 
                         # ----------------------------------------------------------------------
-                        #                   Start the Ring Buffer
+                        #   Start the Ring Buffer
                         # ----------------------------------------------------------------------
-                        frame_start = evt_data.iloc[0].timestamp  # start with the first frame
+                        frame_start = trackingData.iloc[0].timestamp  # default to the first frame
                         bucket = ringStart(frame_start)
                         frame_offset = 0
 
                         # ----------------------------------------------------------------------
-                        #                Frame loop for pipeline task
+                        #   Frame loop for an image pipeline task
                         # ----------------------------------------------------------------------
                         while bucket != JobManager.ReadEOF:
                             if task.pipeline(ringbuff[bucket]):
@@ -316,7 +332,7 @@ class JobTasking:
             publisher.send(msgpack.packb(msg))
 
         except (KeyboardInterrupt, SystemExit):
-            print("JobTasking shutdown.")
+            print(f"JobTasking shutdown {engineName}.")
         except Exception as e:
             msg = (TaskEngine.TaskBOMB, "{}: JobTasking failure, {}".format(engineName, str(e)))
             publisher.send(msgpack.packb(msg))
@@ -341,7 +357,7 @@ class TaskEngine:
     TaskCANCELED = 5
     TaskBOMB = -1
 
-    def __init__(self, engineName, config, ringCFG, taskCFG, manager, pump) -> None:
+    def __init__(self, engineName, config, ringCFG, taskCFG, manager, pump, asyncSUB) -> None:
         self.job_classes = config["classes"]
         self.accelerator = config["accelerator"]
         self.taskCFG = taskCFG
@@ -404,12 +420,12 @@ class JobManager:
     ReadEOF = -1
     ReadNOP = 0
 
-    def __init__(self, engineCFG, ringCFG, taskCFG, default_pump) -> None:
+    def __init__(self, engineCFG, ringCFG, taskCFG, default_pump, _asyncSUB) -> None:
         self.engines = {}
         self.datafeeds = {}
         self.manager = multiprocessing.Manager()
         for engine in engineCFG:
-            self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, self.manager, default_pump)
+            self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, self.manager, default_pump, _asyncSUB)
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -476,16 +492,11 @@ class JobManager:
                 (tag, msg) = taskFeed.get()
                 if tag == TaskEngine.TaskSUBMIT:
                     jobreq = taskList[msg]
-                    taskID = jobreq.jobTask
-                    if not taskID in self.taskmenu:
-                        logging.error(f"No such task: '{taskID}'")
-                        jobreq.deregisterJOB(TaskEngine.TaskFAIL)
-                    else:
-                        task = self.taskmenu[taskID]
-                        for engine in self.engines.items():
-                            if engine[1].jobreq is None and task['class'] in engine[1].job_classes: 
-                                self._releaseJob(jobreq.jobID, engine[0])
-                                break
+                    task = self.taskmenu[jobreq.jobTask]
+                    for engine in self.engines.items():
+                        if engine[1].jobreq is None and task['class'] in engine[1].job_classes: 
+                            self._releaseJob(jobreq.jobID, engine[0])
+                            break
                 elif tag in [TaskEngine.TaskDONE,
                              TaskEngine.TaskFAIL,
                              TaskEngine.TaskCANCELED]:
@@ -494,7 +505,7 @@ class JobManager:
                     engine.taskFlag.value = tag
                     taskList[msg].deregisterJOB(tag)
                 elif tag == TaskEngine.TaskBOMB:
-                    # TODO: Need an engine restart there 
+                    # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{msg}' bombed out.")
                     if msg in self.engines:
                         del self.engines[msg]
@@ -516,7 +527,7 @@ class JobManager:
                     if engine.cursor:
                         self._feedNext(engine)
                 else:
-                    # TODO: Need an engine restart there 
+                    # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{engineName}' found dead.")
                     if engineName in self.engines:
                         del self.engines[engineName]
@@ -526,50 +537,60 @@ class JobManager:
                 with jobLock:
                     for jobreq in taskList.values():
                         if jobreq.jobStatus == JobRequest.Status_QUEUED:
-                            taskFeed.put((JobManager.JobSUBMIT, jobreq.jobID))
+                            taskFeed.put((TaskEngine.TaskSUBMIT, jobreq.jobID))
                             break                        
 
     def close(self):
         self._stop = True
         self._thread.join()
 
-async def task_loop():
-    rep = ctxAsync.socket(zmq.REP)
-    rep.bind(f"tcp://*:{CFG['control_port']}")
+async def task_loop(asyncREP, taskCFG):
     logging.info("Sentinel control port ready.")
     while True:
         reply = 'OK'
-        msg = await rep.recv()
+        msg = await asyncREP.recv()
         payload = msg.decode("ascii")
         try:
             request = json.loads(payload)
             if 'task' in request:
-                # task could be a command, something like: Status, Cancel
-                job = JobRequest(
-                    request['node'],
-                    request['date'],
-                    request['event'],
-                    request['task']
-                )
-                logging.debug(f"Queued job: {job.jobTask}, {job.eventID}")
-                taskFeed.put((JobManager.JobSUBMIT, job.jobID))
+                # task could be a command, something like: STATUS, CANCEL, HISTORY
+                task = request['task']
+                if task == 'HISTORY':
+                    with jobLock:
+                        for jobreq in taskList.values():
+                            logging.info(jobreq.summary_JSON())
+                else:
+                    if task in taskCFG:
+                        job = JobRequest(
+                            request['sink'],
+                            request['node'],
+                            request['date'],
+                            request['event'],
+                            request['pump'],
+                            request['task']
+                        )
+                        logging.debug(f"Queued job: {job.jobTask}, {job.eventID}")
+                        taskFeed.put((JobManager.JobSUBMIT, job.jobID))
+                    else:
+                        logging.error(f"No such task: '{task}'")
+                        jobreq.deregisterJOB(TaskEngine.TaskFAIL)
             else:
                 logging.error(f"Malformed task request: {request}")
                 reply = 'Error'
-        except ValueError as ex:
-            logging.error(f"JSON exception '{str(ex)}' decoding task request: '{payload}'")
+        except ValueError as e:
+            logging.error(f"JSON exception '{str(e)}' decoding task request: '{payload}'")
             reply = 'Error'
         except KeyError:
             logging.error(f"Incomplete request: {request}")
             reply = 'Error'
-        except Exception as ex:
-            logging.exception(f"Unexpected exception: {str(ex)}")
+        except Exception as e:
+            logging.exception(f"Unexpected exception: {str(e)}")
             traceback.print_exc()
             reply = 'Error'
         finally:
-            await rep.send(reply.encode("ascii"))
+            await asyncREP.send(reply.encode("ascii"))
 
-async def task_feedback():
+async def task_feedback(asyncSUB):
     while True:
         payload = await asyncSUB.recv()
         (msgTag, taskMsg) = msgpack.unpackb(payload, use_list=False)
@@ -592,25 +613,33 @@ async def task_feedback():
                 logging.error(f"Unsupported task message: {msgTag}")
 
 async def main():
-    log = start_logging()
+    log = start_logging(CFG["log_dir"])
+    asyncREP = ctxAsync.socket(zmq.REP)  # task loop control socket
+    asyncSUB = ctxAsync.socket(zmq.SUB)  # subscriptions for job result publishers
+    asyncREP.bind(f"tcp://*:{CFG['control_port']}")
+    asyncSUB.subscribe(b'')
     manager = JobManager(CFG["task_engines"], 
                          CFG["ring_buffers"],
                          CFG["task_list"],
-                         CFG["default_pump"])
+                         CFG["default_pump"],
+                         asyncSUB)
     try:
-        await asyncio.gather(task_loop(), task_feedback())
+        await asyncio.gather(task_loop(asyncREP, CFG["task_list"]), 
+                             task_feedback(asyncSUB))
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
-    except Exception as ex:  
-        log.exception(f'Unhandled exception: {str(ex)}')
+    except Exception as e:  
+        log.exception(f'Unhandled exception: {str(e)}')
     finally:
         manager.close()
+        asyncREP.close()
         asyncSUB.close()
         log.info("Sentinel shutdown")
 
-def start_logging():
+def start_logging(logdir):
     log = logging.getLogger()
-    handler = logging.handlers.RotatingFileHandler('sentinel.log',
+    handler = logging.handlers.RotatingFileHandler(
+        os.path.join(logdir, 'sentinel.log'),
         maxBytes=1048576, backupCount=10)
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)

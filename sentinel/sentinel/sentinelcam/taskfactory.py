@@ -19,9 +19,9 @@ class Task:
         pass
 
 class PersonsFaces(Task):
-    def __init__(self, jobreq, evtdata, feed, cfg) -> None:
+    def __init__(self, jobreq, trkdata, feed, cfg) -> None:
         self.jreq = jobreq
-        self.evtData = evtdata
+        self.evtData = trkdata
         self.dataFeed = feed
         self.start_time = time.time()
         self.cfg = cfg
@@ -61,10 +61,10 @@ class PersonsFaces(Task):
         ])
         self.publish(stats)
 
-def TaskFactory(jobreq, evtdata, feed, cfgfile) -> Task:
+def TaskFactory(jobreq, trkdata, feed, cfgfile) -> Task:
     menu = {
         'PersonsFaces' : PersonsFaces
     }
     cfg = readConfig(cfgfile)
-    task = menu[jobreq.jobTask](jobreq, evtdata, feed, cfg)
+    task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg)
     return task 
