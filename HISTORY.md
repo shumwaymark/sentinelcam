@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
-- Continue design of the *Sentinel* module. This will become the inference and modeling engine.
-  Much of the tooling for `SpyGlass` lays the foundation for how jobs will be managed.
+- Continue development and testing of the **sentinel** module. 
+  - Provide inference results for storing with event data. The **datapump** module will
+    need to become a two-way pump, for accepting data updates.
+  - Support result signaling e.g. MQTT to Node-RED, and Twilio.
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by *imageZMQ*.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
@@ -43,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **imagenode** hangs when `SpyGlass` deployed and SIGTERM sent from `fix_comm_link()` by the
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
+
+## 0.0.14-alpha - 2023-03-16
+
+### Added
+
+- First early working prototype of the **sentinel** module. The `Sentinel` accepts job service
+  request over ZMQ. Parallelization is provided by a multi-processing design, allowing multiple 
+  task requests to run at once. Employs a dedicated I/O thread to supply image requests to analysis
+  tasks through a set of ring buffers in shared memory. 
 
 ## 0.0.13-alpha - 2022-11-16
 

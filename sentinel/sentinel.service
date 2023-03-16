@@ -1,0 +1,22 @@
+# sentinel service unit file
+# Mark K Shumway, shumway@blog.swanriver.dev
+# Defines sentinel.py as a systemd service
+# This file should be copied to /etc/systemd/system as root
+#   e.g. sudo cp sentinel.service /etc/systemd/system
+# Use usual systemctl start, stop, status restart, enable commands
+#   e.g. sudo systemctl start sentinel
+
+[Unit]
+Description=Sentinel Service
+After=multi-user.target
+
+[Service]
+Type=idle
+WorkingDirectory=/home/pi/sentinel
+User=pi
+Restart=always
+RestartSec=5
+ExecStart=/home/pi/sentinel/sentinel_ncs2.sh
+
+[Install]
+WantedBy=multi-user.target

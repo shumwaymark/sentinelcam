@@ -1,0 +1,15 @@
+%YAML 1.0
+---
+# PersonsFaces.yaml
+# Review all frames in the event, return count of persons and faces at the end
+mobilenetssd: 
+    prototxt_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5
+faces: True  
+dnn_face: 
+    prototxt_path: /home/pi/sentinel/models/opencv_dnn_face/deploy.prototxt
+    model_path: /home/pi/sentinel/models/opencv_dnn_face/res10_300x300_ssd_iter_140000.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5

@@ -1,0 +1,19 @@
+%YAML 1.0
+---
+# Settings file sentinel.yaml 
+control_port: 5566
+default_pump: tcp://data1:5556
+socket_dir: /home/pi/sentinel/sockets
+ring_buffers:
+   vga: ((640, 480), 5)
+   sd: ((640, 360), 5)
+#
+task_engines:
+  JobSlotA: 
+    classes: [1]
+    accelerator: ncs2  # [none, ncs2, coral]
+#
+task_list:
+  PersonsFaces:
+    class: 1
+    config: /home/pi/sentinel/tasks/PersonsFaces.yaml
