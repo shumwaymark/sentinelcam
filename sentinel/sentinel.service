@@ -12,7 +12,7 @@ After=multi-user.target
 
 [Service]
 Type=idle
-WorkingDirectory=/home/pi/sentinel
+WorkingDirectory=/home/pi/sentinel/sentinel
 User=pi
 Restart=always
 RestartSec=5
