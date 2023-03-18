@@ -1,0 +1,23 @@
+%YAML 1.0
+---
+# DailyCleanup.yaml
+# Review every event for the eventDate, optionally purge events with no faces detected.
+
+face_patience: 60   # After person detected, give up looking for a face for this many frames
+run_deletes: True   # Set this to True to delete the data, otherwise provide a full report
+
+delete_options:     # Event purge criteria
+    face_cnt: 0
+    total_frame_threshold: 100
+
+mobilenetssd: 
+    prototxt_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5
+
+dnn_face: 
+    prototxt_path: /home/pi/sentinel/models/opencv_dnn_face/deploy.prototxt
+    model_path: /home/pi/sentinel/models/opencv_dnn_face/res10_300x300_ssd_iter_140000.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5

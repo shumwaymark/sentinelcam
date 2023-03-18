@@ -39,3 +39,6 @@ task_list:
   PersonsFaces:
     config: /home/pi/sentinel/tasks/PersonsFaces.yaml
     class: 1
+  DailyCleanup:
+    config: /home/pi/sentinel/tasks/DailyCleanup.yaml
+    class: 1

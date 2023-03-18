@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
+import time
 
 class MobileNetSSD:
-    def __init__(self, conf) -> None:
+    def __init__(self, conf, accelerator="cpu") -> None:
         self.conf = conf  # configuration dictionary
         self.CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
             "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
@@ -15,10 +16,13 @@ class MobileNetSSD:
         self.net = cv2.dnn.readNetFromCaffe(self.conf["prototxt_path"],
 	        self.conf["model_path"])
 
+        if accelerator == "cpu":
+            self.conf["target"] = "cpu"
         # check if the target processor is myriad, if so, then set the
         # preferable target to myriad
         if self.conf["target"] == "myriad":
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_MYRIAD)
+            time.sleep(1.001)  #  allow time for Intel NCS2 to become ready?
         else:
             # set the preferable target processor to CPU and preferable
             # backend to OpenCV
@@ -65,16 +69,19 @@ class MobileNetSSD:
         return (objs, labls)
 
 class OpenCV_dnnFace:
-    def __init__(self, conf) -> None:
+    def __init__(self, conf, accelerator="cpu") -> None:
         self.conf = conf  # configuration dictionary
         self.detector = cv2.dnn.readNetFromCaffe(
             self.conf["prototxt_path"],
 	        self.conf["model_path"])
 
+        if accelerator == "cpu":
+            self.conf["target"] = "cpu"
         # check if the target processor is myriad, if so, then set the
         # preferable target to myriad
         if self.conf["target"] == "myriad":
             self.detector.setPreferableTarget(cv2.dnn.DNN_TARGET_MYRIAD)
+            time.sleep(1.001)  #  allow time for Intel NCS2 to become ready?
         else:
             # set the preferable target processor to CPU and preferable
             # backend to OpenCV

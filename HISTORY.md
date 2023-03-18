@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
 
+## 0.0.17-alpha - 2023-03-17
+
+### Fixed
+
+- Provide support for **sentinel** task engines to have complete control over the ring buffer,
+  including issuing start commands, and changing context to a new event. 
+
 ## 0.0.16-alpha - 2023-03-17
 
 ### Fixed

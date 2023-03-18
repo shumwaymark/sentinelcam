@@ -222,9 +222,10 @@ class JobTasking:
         Implements a shared flag that can be used to cancel a running task.
 
     rawRingbuff : dict
-        The image frame ring buffers for this task engine. Each item is a list of shared 
-        memory blocks keyed by image size. These are a multiprocessing.sharedctypes.RawArray, 
-        each will be redefined as a NumPy array by the child process. 
+        The image frame ring buffers for this task engine keyed by image size. 
+        Each item is a list of shared memory blocks. These are references to
+        a multiprocessing.sharedctypes.RawArray. Each will be redefined as a 
+        NumPy array by the child process. 
     """
 
     def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, taskFlag, rawRingbuff) -> None:
@@ -254,16 +255,32 @@ class JobTasking:
             ringWire.send(msgpack.packb(0))  # send the ready handshake
             handshake = ringWire.recv()  # wait for subscriber to connect
 
+            def _selectRingBuffer(wh) -> list:
+                dtype = np.dtype('uint8')
+                shape = (wh[1], wh[0], 3)
+                return [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in _ringbuff[wh]]
+
+            # keep these variables close at hand
+            self.jobreq = None
             self.frame_start = None
             self.frame_offset = 0
+            self.imagesize = (0,0)
+            self.ringbuff = []
 
-            def ringStart(frametime) -> int:
+            def ringStart(frametime, _newEvent=None) -> int:
                 timestamp = frametime.isoformat()
                 self.frame_start = timestamp
                 self.frame_offset = 0
-                start_command = (JobManager.ReadSTART, 
-                                "{}_{}".format(timestamp[:10], timestamp[11:].replace(':','.')))
-                ringWire.send(msgpack.packb(start_command))
+                _start_command = (JobManager.ReadSTART, 
+                        ("{}_{}".format(timestamp[:10], timestamp[11:].replace(':','.')),
+                        _newEvent))
+                ringWire.send(msgpack.packb(_start_command))
+                if _newEvent:
+                    self.jobreq = taskQ.get()
+                    taskQ.task_done()
+                    if self.jobreq.camsize != self.imagesize:
+                        self.imagesize = self.jobreq.camsize
+                        self.ringbuff = _selectRingBuffer(self.imagesize)
                 bucket = msgpack.unpackb(ringWire.recv())
                 return bucket
 
@@ -272,6 +289,9 @@ class JobTasking:
                 ringWire.send(msgpack.packb((JobManager.ReadNEXT, None)))
                 bucket = msgpack.unpackb(ringWire.recv())
                 return bucket
+            
+            def getRing() -> list:
+                return self.ringbuff
 
             def publish(msg, frameref = False) -> None:
                 if frameref:
@@ -281,61 +301,64 @@ class JobTasking:
                 publisher.send(msgpack.packb(envelope))
 
             failCnt = 0
-            jobreq = None
-            imagesize = (0,0)
-            ringbuff = []
-
             while failCnt < TaskEngine.FAIL_LIMIT:
                 if taskQ.empty():
                     time.sleep(1)
                 else:
-                    jobreq = taskQ.get()
+                    self.jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
                     try:
                         taskQ.task_done()
                         self.start_time = time.time()
-                        if jobreq.datapump != taskpump:
-                            taskpump = jobreq.datapump
+                        if self.jobreq.datapump != taskpump:
+                            taskpump = self.jobreq.datapump
                             feed.zmq_socket.connect(taskpump)
-                        if jobreq.camsize != imagesize:
-                            imagesize = jobreq.camsize
-                            dtype = np.dtype('uint8')
-                            shape = (imagesize[1], imagesize[0], 3)
-                            ringbuff = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in _ringbuff[imagesize]]
+                        if self.jobreq.camsize != self.imagesize:
+                            self.imagesize = self.jobreq.camsize
+                            self.ringbuff = _selectRingBuffer(self.imagesize)
 
                         taskFlag.value = TaskEngine.TaskSTARTED
-                        startMsg = (TaskEngine.TaskSTARTED, jobreq.jobID)
+                        startMsg = (TaskEngine.TaskSTARTED, self.jobreq.jobID)
                         publisher.send(msgpack.packb(startMsg))
 
                         # ----------------------------------------------------------------------
                         #   Task Initialization
                         # ----------------------------------------------------------------------
-                        trackingData = feed.get_tracking_data(jobreq.eventDate, jobreq.eventID)
-                        taskcfg = taskCFG[jobreq.jobTask]
-                        task = TaskFactory(jobreq, trackingData, feed, taskcfg["config"], accelerator)
+                        if not self.jobreq.eventID:
+                            trackingData = None
+                        else:
+                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID)
+                        taskcfg = taskCFG[self.jobreq.jobTask]
+                        task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator)
                         # Hang hooks for task references to ring buffer and publisher
                         task.ringStart = ringStart
                         task.ringNext = ringNext
+                        task.getRing = getRing
                         task.publish = publish
 
-                        # ----------------------------------------------------------------------
-                        #   Start the Ring Buffer
-                        # ----------------------------------------------------------------------
-                        frame_start = trackingData.iloc[0].timestamp  # default to the first frame
-                        bucket = ringStart(frame_start)
+                        if not self.jobreq.eventID:
+                            # No starting event? No pipline() loop supported. Have no tracking data, 
+                            # and no starting frame. Will call the pipeline() once for this task.
+                            task.pipeline(None)
+                        else:
+                            # ----------------------------------------------------------------------
+                            #   Start the Ring Buffer
+                            # ----------------------------------------------------------------------
+                            frame_start = trackingData.iloc[0].timestamp  # default to the first frame
+                            bucket = ringStart(frame_start)
 
-                        # ----------------------------------------------------------------------
-                        #   Frame loop for an image pipeline task
-                        # ----------------------------------------------------------------------
-                        while bucket != JobManager.ReadEOF:
-                            if task.pipeline(ringbuff[bucket]):
-                                bucket = ringNext()
-                            else:
-                                bucket = JobManager.ReadEOF
+                            # ----------------------------------------------------------------------
+                            #   Frame loop for an image pipeline task
+                            # ----------------------------------------------------------------------
+                            while bucket != JobManager.ReadEOF:
+                                if task.pipeline(self.ringbuff[bucket]):
+                                    bucket = ringNext()
+                                else:
+                                    bucket = JobManager.ReadEOF
 
-                            if taskFlag.value == TaskEngine.TaskCANCELED:
-                                eoj_status = TaskEngine.TaskCANCELED
-                                break
+                                if taskFlag.value == TaskEngine.TaskCANCELED:
+                                    eoj_status = TaskEngine.TaskCANCELED
+                                    break
 
                         # ----------------------------------------------------------------------
                         #   Publish final results 
@@ -344,12 +367,17 @@ class JobTasking:
 
                     except (KeyboardInterrupt, SystemExit):
                         raise
+                    except KeyError as keyval:
+                        msg = (TaskEngine.TaskSTATUS, "taskHost() internal key error '{}'".format(keyval))
+                        publisher.send(msgpack.packb(msg))
+                        eoj_status = TaskEngine.TaskFAIL
                     except cv2.error as e:
                         msg = (TaskEngine.TaskSTATUS, "OpenCV error, {}".format(str(e)))
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
                     except Exception as e:
+                        traceback.print_exc()
                         msg = (TaskEngine.TaskSTATUS, "taskHost() exception, {}".format(str(e)))
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
@@ -357,7 +385,7 @@ class JobTasking:
                     else:
                         failCnt = 0
                     finally:
-                        publisher.send(msgpack.packb((eoj_status, jobreq.jobID)))
+                        publisher.send(msgpack.packb((eoj_status, self.jobreq.jobID)))
             
             # Limit on successive failures exceeded
             msg = (TaskEngine.TaskBOMB, f"{engineName}: JobTasking failure limit exceeded.")
@@ -390,6 +418,7 @@ class TaskEngine:
     TaskBOMB = -1
 
     def __init__(self, engineName, config, ringCFG, taskCFG, manager, pump, asyncSUB) -> None:
+        self.name = engineName
         self.job_classes = config["classes"]
         self.accelerator = config["accelerator"]
         self.taskCFG = taskCFG
@@ -412,11 +441,25 @@ class TaskEngine:
         asyncSUB.connect(f"ipc://{SOCKDIR}/{engineName}.PUB")
         self.wire.send(handshake)
 
+    def getName(self) -> str:
+        return self.name
+
     def getJobID(self) -> str:
         if self.jobreq:
             return self.jobreq.jobID
         else:
             return None
+        
+    def getJobRequest(self) -> JobRequest:
+        if self.jobreq:
+            return self.jobreq
+        else:
+            return None
+ 
+    def newEvent(self, date, evt, wh) -> None:
+        self.jobreq.eventDate = date
+        self.jobreq.eventID = evt
+        self.jobreq.camsize = wh
 
     def start_job(self, jobreq) -> bool:
         confirm_start = True
@@ -482,8 +525,9 @@ class JobManager:
         jreq = taskList[jobid]
         jreq.registerJOB(engine)
         self.engines[engine].dataFeed = self._setPump(jreq.datapump)
-        framesize = self._getFrameDimensons(jreq)
-        jreq.camsize = (framesize[1], framesize[0])
+        if jreq.eventID:
+            framesize = self._getFrameDimensons(jreq)
+            jreq.camsize = (framesize[1], framesize[0])
         if not self.engines[engine].start_job(jreq):
             jreq.deregisterJOB(TaskEngine.TaskFAIL)
 
@@ -497,20 +541,41 @@ class JobManager:
         return frame.shape
 
     def _feedStart(self, taskEngine, key) -> None:
-        jreq = taskEngine.jobreq
-        datafeed = taskEngine.dataFeed
-        taskEngine.ringBuffer.reset()
-        framestart = datetime.strptime(key, "%Y-%m-%d_%H.%M.%S.%f")
-        frametimes = datafeed.get_image_list(jreq.eventDate, jreq.eventID)
-        taskEngine.cursor = iter(frametimes)
-        logging.debug(f"Feed starting for {framestart}")
-        try:
-            frametime = next(taskEngine.cursor)
-            while frametime < framestart:
-                frametime = next(taskEngine.cursor)
-            self._get_frame(taskEngine, frametime)
-        except StopIteration:
+        jreq = taskEngine.getJobRequest()
+        (startframe, _newEvent) = key
+        if startframe:
+            _valid = True
+        if _newEvent:  
+            # When changing events, potentially select a new set of ring buffers
+            jreq.eventDate = _newEvent[0]
+            jreq.eventID = _newEvent[1]
+            logging.debug(f"_feedStart() {taskEngine.getName()}, {startframe}, {jreq.eventDate}, {jreq.eventID}")
+            framesize = self._getFrameDimensons(jreq)
+            _camsize = (framesize[1], framesize[0])
+            if _camsize != jreq.camsize:
+                if _camsize in taskEngine.ringbuffers:
+                    taskEngine.ringBuffer = taskEngine.ringbuffers[_camsize]
+                else:
+                    logging.error(f"_feedStart() failed. RingBuffer {_camsize} not supported by {taskEngine.getName()}.")
+                    _valid = False
+            taskEngine.newEvent(jreq.eventDate, jreq.eventID, _camsize)
+            taskEngine.taskQ.put(taskEngine.getJobRequest())  # confirm event change with task engine 
+        if not _valid:
+            taskEngine.ringBuffer.reset()
             taskEngine.cursor = None
+        else:
+            framestart = datetime.strptime(startframe, "%Y-%m-%d_%H.%M.%S.%f")
+            frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
+            taskEngine.ringBuffer.reset()
+            taskEngine.cursor = iter(frametimes)
+            logging.debug(f"_feedStart() frames: {len(frametimes)}, date {jreq.eventDate} evt {jreq.eventID}")
+            try:
+                frametime = next(taskEngine.cursor)
+                while frametime < framestart:
+                    frametime = next(taskEngine.cursor)
+                self._get_frame(taskEngine, frametime)
+            except StopIteration:
+                taskEngine.cursor = None
 
     def _feedNext(self, taskEngine) -> None:
         if not taskEngine.ringBuffer.isFull():
@@ -522,8 +587,8 @@ class JobManager:
 
     def _get_frame(self, taskEngine, frametime):
         datafeed = taskEngine.dataFeed
-        task = taskEngine.jobreq
-        jpeg = datafeed.get_image_jpg(task.eventDate, task.eventID, frametime)
+        jreq = taskEngine.getJobRequest()
+        jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametime)
         taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
 
     def _jobThread(self):
