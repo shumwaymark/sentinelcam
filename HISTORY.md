@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Continue development and testing of the **sentinel** module. 
   - Provide inference results for storing with event data. The **datapump** module will
     need to become a two-way pump, for accepting data updates.
-  - Support result signaling e.g. MQTT to Node-RED, and Twilio.
+  - Support result signaling to Twilio, and to Node-RED via MQTT.
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by *imageZMQ*.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
 
+## 0.0.16-alpha - 2023-03-17
+
+### Fixed
+
+- Stress testing the **sentinel** module with multiple task engines. Support a ring buffer
+  model to easily support customization by task engine. Confirm affinity to task engine by
+  job class.
+
 ## 0.0.15-alpha - 2023-03-16
 
 ### Fixed
@@ -53,14 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Some early code clean-up of the **sentinel** module. Added a HISTORY command to support dumping
   complete task history to the logger in JSON format.
 
-
 ## 0.0.14-alpha - 2023-03-15
 
 ### Added
 
 - First early working prototype of the **sentinel** module. The `Sentinel` accepts job service
   request over ZMQ. Parallelization is provided by a multi-processing design, allowing multiple 
-  task requests to run at once. Employs a dedicated I/O thread to supply image requests to analysis
+  tasks to run at once. Employs a dedicated I/O thread to supply image requests for use in analysis
   tasks through a set of ring buffers in shared memory. 
 
 ## 0.0.13-alpha - 2022-11-16

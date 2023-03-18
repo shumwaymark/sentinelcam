@@ -5,16 +5,37 @@ control_port: 5566
 default_pump: tcp://data1:5556
 socket_dir: /home/pi/sentinel/sockets
 log_dir: /home/pi/sentinel/logs
-ring_buffers:
-   vga: ((640, 480), 5)
-   sd: ((640, 360), 5)
-#
+
+# For ring buffer allocations, any potential image size must
+# be known in advance. Each task_engine needs a set of ring
+# buffers. Parameters are ((width, height), buffer_length)
+ring_buffer_models:
+  default:
+    vga: ((640, 480), 5)
+    sd: ((640, 360), 5)
+
+# Probably no more than two of these on a Raspberry Pi 4B?
+# Ideally, one would have a dedicated co-processor for real-time 
+# response, and another for background maintenance tasks requiring
+# only low to moderate CPU resources. Scheduling batch workloads 
+# into idle time periods is helpful. 
 task_engines:
   JobSlotA: 
     classes: [1]
-    accelerator: ncs2  # [none, ncs2, coral]
-#
+    ring_buffers: default
+    accelerator: ncs2      # [none, ncs2, coral]
+  JobSlotB: 
+    classes: [1,2]
+    ring_buffers: default
+    accelerator: none  
+    
+# The list of currently available tasks. These can be configured
+# by job class to have an affinity with a particular task engine.
+# Each name must have a matching class definition in the TaskFactory.
 task_list:
-  PersonsFaces:
+  MobileNetSSD_allFrames:
+    config: /home/pi/sentinel/tasks/MobileNetSSD_allFrames.yaml
     class: 1
+  PersonsFaces:
     config: /home/pi/sentinel/tasks/PersonsFaces.yaml
+    class: 1

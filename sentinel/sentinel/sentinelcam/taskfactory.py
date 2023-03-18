@@ -9,7 +9,7 @@ class Task:
         return -1
     def ringNext(self) -> int:
         return -1
-    def publish(self, msg) -> None:
+    def publish(self, msg, imageref=False) -> None:
         pass
     # Function prototypes, define these for task logic 
     def pipeline(self, frame) -> bool:
@@ -19,14 +19,19 @@ class Task:
         pass
 
 class PersonsFaces(Task):
-    def __init__(self, jobreq, trkdata, feed, cfg) -> None:
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.jreq = jobreq
         self.evtData = trkdata
         self.dataFeed = feed
         self.start_time = time.time()
-        self.cfg = cfg
-        self.od = MobileNetSSD(cfg["mobilenetssd"])
-        self.fd = OpenCV_dnnFace(cfg["dnn_face"])
+        self.detectFaces = cfg['faces'] 
+        odCFG = cfg["mobilenetssd"]
+        fdCFG = cfg["dnn_face"]
+        if accelerator != 'ncs2':
+            odCFG['target'] = 'cpu'
+            fdCFG['target'] = 'cpu'
+        self.od = MobileNetSSD(odCFG)
+        self.fd = OpenCV_dnnFace(fdCFG)
         self.frame_cnt = 0
         self.person_cnt = 0
         self.face_cnt = 0
@@ -40,13 +45,10 @@ class PersonsFaces(Task):
         for det in labels:
             if det.startswith("person"):
                 p += 1
-        if p > self.person_cnt:
-            self.person_cnt = p
-        if p > 0 and self.cfg['faces']:
+        self.person_cnt += p
+        if p > 0 and self.detectFaces:
             faces = self.fd.detect(frame)
-            f = len(faces)
-            if f > self.face_cnt:
-                self.face_cnt = f
+            self.face_cnt += len(faces)
         return continuePipe
                     
     def finalize(self) -> None:
@@ -61,10 +63,31 @@ class PersonsFaces(Task):
         ])
         self.publish(stats)
 
-def TaskFactory(jobreq, trkdata, feed, cfgfile) -> Task:
+class MobileNetSSD_allFrames(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        self.jreq = jobreq
+        self.evtData = trkdata
+        self.dataFeed = feed
+        _cfg = cfg["mobilenetssd"]
+        if accelerator != 'ncs2':
+            _cfg['target'] = 'cpu'
+        self.od = MobileNetSSD(_cfg)
+
+    def pipeline(self, frame) -> bool:
+        continuePipe = True
+        (rects, labels) = self.od.detect(frame)
+        if len(rects) > 0:
+            detections = zip(labels, rects)
+            for objs in detections:
+                result = (objs[0], int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
+                self.publish(result, True)
+        return continuePipe
+
+def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
     menu = {
-        'PersonsFaces' : PersonsFaces
+        'PersonsFaces'           : PersonsFaces,
+        'MobileNetSSD_allFrames' : MobileNetSSD_allFrames
     }
     cfg = readConfig(cfgfile)
-    task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg)
+    task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg, accelerator)
     return task 
