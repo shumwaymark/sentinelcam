@@ -1,0 +1,9 @@
+%YAML 1.0
+---
+# MobileNetSSD_allFrames.yaml
+# Review all frames in the event, log the (rects and labels) results for each 
+mobilenetssd: 
+    prototxt_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5
