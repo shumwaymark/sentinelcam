@@ -487,7 +487,7 @@ Essentially, this could enable a camera to provide data in real time for discern
 expected/routine events and unexpected/new activity deserving of a closer look.
 
   Support for using an OAK camera from *Luxonis* as the primary data collection device has 
-  recently been incorparated into the **Outpost**. These devices are an "AI-included" camera 
+  recently been incorporated into the **Outpost**. These devices are an "AI-included" camera 
   with an on-board VPU co-processor. 
   
   The ``DepthAI`` software libraries provide for model upload and customizable pipelines. The 
@@ -498,9 +498,12 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   3. The same image data as an JPEG encoded frame, ready for publication to the **camwatcher**
   
   All 3 of these outputs are provided by the camera at 30 frames/second. The **Outpost** can easily 
-  consume this, and publish tracking results and captured JPEG data for storage by the
-  **camwatcher**. If desired, the ``SpyGlass`` could be employed as a vehicle for supplemental 
-  analysis of an event in progress. 
+  consume this, and publish all tracking results and captured JPEG data for storage by the
+  **camwatcher**. 
+  
+  In a perfect world, the ``SpyGlass`` could be further employed as a vehicle for specialized 
+  supplemental vision processing of a camera event in progress. There are a number of interesting
+  possibilities.
   
   No detailed documentaion yet. See the `depthai.yaml <depthai.yaml>`_ file for the prototype.
 
