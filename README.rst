@@ -503,10 +503,10 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   consume this, and publish all tracking results and captured JPEG data for storage by the
   **camwatcher**. 
   
-  In a perfect world, the ``SpyGlass`` could be further employed as a vehicle for specialized 
-  supplemental vision processing of a camera event in progress. There are a number of interesting
-  possibilities. Further provisioning with a vision co-processor provides for an incredible amount
-  of analytical performance directly on an embedded low-voltage device. 
+  In a perfect world, the ``SpyGlass`` could be employed as a vehicle for specialized supplemental 
+  vision processing during a camera event in progress. There are a number of interesting possibilities. 
+  Further provisioning with a vision co-processor provides for an incredible amount of analytical
+  performance directly on an embedded low-voltage device. 
   
   No detailed documentaion yet. See the `depthai.yaml <depthai.yaml>`_ file for the prototype.
 
