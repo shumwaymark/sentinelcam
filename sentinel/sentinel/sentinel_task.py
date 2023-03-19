@@ -1,4 +1,8 @@
-# sentinel_task.py 
+'''sentinel_task: Example task submission to Sentinel
+
+Copyright (c) 2023 by Mark K Shumway, mark.shumway@swanriver.dev
+License: MIT, see the sentinelcam LICENSE for more details.
+'''
 
 import argparse
 import json
@@ -12,8 +16,6 @@ args = vars(ap.parse_args())
 event_date = args["date"]
 event_id = args["event"]
 task_id = args["task"]
-
-# Example task submission to the Sentinel
 
 request = {'sink': 'data1', 
            'node': 'testMonster',
