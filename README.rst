@@ -500,7 +500,7 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   3. The same image data as an JPEG encoded frame, ready for publication to the **camwatcher**
   
   All 3 of these outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily 
-  consume this, and publish all tracking results and captured JPEG data for storage by the
+  consume this, and publish all object detection results and captured JPEG data for storage by the
   **camwatcher**. 
   
   In a perfect world, the ``SpyGlass`` could be employed as a vehicle for specialized supplemental 
