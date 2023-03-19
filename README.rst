@@ -492,8 +492,9 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   recently been incorporated into the ``Outpost``. These devices are an "AI-included" camera 
   with an on-board VPU co-processor. 
   
-  The **DepthAI** software libraries provide for model upload and customizable pipelines. The 
-  prototype definition provided here produces the following outputs from the camera.
+  The **DepthAI** `software libraries <https://docs.luxonis.com/projects/sdk>`_
+  provide for model upload and customizable pipelines. The prototype definition provided here 
+  produces the following outputs from the camera.
 
   1. MobileNet object detection on every frame
   2. The 640x360 RGB image data ready for OpenCV and passed into the **imagnode** pipeline as the main camera source
