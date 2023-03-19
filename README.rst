@@ -463,7 +463,7 @@ Outputs from **sentinel** task results can be applied in multiple ways.
 
 - Final storage of results from event analysis as supplemental to the original tracking data
   is in design. Leaning heavily towards the use of HDF5 as the vehicle for that. This will 
-  also likely expand **datapump** functionality into a two-way data transfer device. 
+  also likely expand **datapump** functionality into a bi-directional data transfer device. 
 
 - Multiple methods for addressing event publication needs out to the larger world will also 
   be important.
