@@ -425,7 +425,7 @@ requests for use in analysis tasks through a set of ring buffers in shared memor
 .. image:: docs/images/Sentinel.png
    :alt: Sketch of Sentinel internal architecture
 
-The **sentinel** module is conceived as the primary inference and singaling center; the very 
+The **sentinel** module is conceived as the primary inference and signaling center; the very 
 heartbeat of the larger system. One or more *dispatchers* are responsible for firing events 
 that are deemed worthy of deeper analysis by the **sentinel**. 
 
