@@ -41,8 +41,8 @@ One or more *data aggregators* are responsible for accumulating reported data an
 video streams. 
 
 Realtime analysis of logged data from each **Outpost** feeds a *dispatcher* responsible for
-submitting tasks to the **sentinel**. Inference and labeling tasks should be prioritized over
-modeling runs. The **sentinel** will need to be provisioned with adequate memory and computing
+submitting tasks to the **Sentinel**. Inference and labeling tasks should be prioritized over
+modeling runs. The **Sentinel** will need to be provisioned with adequate memory and computing
 resources. 
 
 .. image:: docs/images/SentinelCamOverview.png
@@ -97,12 +97,12 @@ the paths leading towards the inner fortifications. Sentries are tasked with obs
 and reporting anything of interest or concern. Such reports should be sent back to central command
 for analysis and descision making.
 
-This analogy represents the underlying concept behind the **Outpost** design. Each node monitors the
+This analogy represents the underlying concept behind the ``Outpost`` design. Each node monitors the
 field of view, watching for motion. Once motion has occured a ``SpyGlass`` is deployed for a closer
 look. Whenever one or more recognizable objects have been detected, this is reported and motion through
 the field of view tracked and logged.
 
-The **Outpost** is implemented as a ``Detector`` for an **imagenode** camera. This allows it to easily
+The ``Outpost`` is implemented as a ``Detector`` for an **imagenode** camera. This allows it to easily
 slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as supplemental functionality.
 
 .. image:: docs/images/Outpost.png
@@ -123,7 +123,7 @@ close to 30 frames per second, ideally.
 Obtaining this goal on a Raspberry Pi can quickly become a signficant challenge when building out 
 the pipeline with CPU-intensive tasks such as object identifcation and tracking.
 
-To achieve the highest publishing frame rate possible, an **Outpost** node can employ a ``SpyGlass`` 
+To achieve the highest publishing frame rate possible, an ``Outpost`` node can employ a ``SpyGlass`` 
 for closer analysis of motion events. The idea is to keep the pipeline lean for quickly publishing 
 each frame, while processing a subset of the images in parallel to drive a feeedback loop. 
 This is a multiprocessing solution. 
@@ -147,7 +147,7 @@ The following general strategy provides an overview of this technique.
    :alt: Outpost to Spyglass inter-process marshalling
 
 This architecture potentially allows for increasingly sophisticated vision analysis models to be
-deployed directly on an **Outpost** node. Specialized lenses could be developed for the ``SpyGlass``
+deployed directly on an ``Outpost`` node. Specialized lenses could be developed for the ``SpyGlass``
 based on the type of event and results from current analysis. The intent is to support the design
 of a cascading algorithm to first inspect, then analyze a subset of selected frames and regions of
 interest as efficiently as possible on multi-core hardware.
@@ -168,9 +168,9 @@ Log publishing also offers two benefits.
 - More importantly, logged event notifications including information related to an event in progress
   are then available as data which can be streamed to multiple interested consumers in real time.
 
-The **Outpost** as currently implemented is still highly experimental, and best represents proof 
+The ``Outpost`` as currently implemented is still highly experimental, and best represents proof 
 of concept as working draft. Further detail on the design, structure, and operation of
-the **Outpost** have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
+the ``Outpost`` have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
 Camwatcher design
 -----------------
@@ -192,10 +192,10 @@ The **camwatcher** employs a Python ``asyncio`` event loop running a set of coro
 the following tasks.
 
 - *Control Loop*. Uses a ZeroMQ REQ/REP design pattern for receiving control commands. This 
-  currently just allows an **Outpost** to route a notification during initialization to insure 
+  currently just allows an ``Outpost`` to route a notification during initialization to insure 
   that a logfile subscription has been established. 
 
-- *Log Subscriber*. Subscribes to logging data streamed from one or more **Outpost**
+- *Log Subscriber*. Subscribes to logging data streamed from one or more ``Outpost``
   publishers via ZMQ. Logging data that pertains to a camera event is directed to the 
   *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
 
@@ -205,7 +205,7 @@ the following tasks.
 
 This design packs a fair amount of network I/O activity into a single thread of execution. To 
 best exploit the multi-core architecture of the Raspberry Pi 4B, a child process is forked to
-capture and store the published images from **Outpost** nodes while an event is in progress.
+capture and store the published images from ``Outpost`` nodes while an event is in progress.
 
 The *CSV File Writer* runs in the main process within a separate thread of execution. This component 
 is responsible for receiving queued data events and writing them into CSV-format text files based 
@@ -345,7 +345,7 @@ for analysis. Once tasked with event review, the **sentinel** will be hungry for
 any tracking records generated by the outpost.
 
 This potentially ravenous fast-food style appetite is to be fed with requests to a 
-**Data Feed**. The Data Feed was conceived as a library to provide application programs with 
+``DataFeed``. The Data Feed was conceived as a library to provide application programs with 
 functions for accessing any desired set of images and tracking data produced from an outpost 
 and collected by a **camwatcher**.
 
@@ -487,17 +487,17 @@ Essentially, this could enable a camera to provide data in real time for discern
 expected/routine events and unexpected/new activity deserving of a closer look.
 
   Support for using an OAK camera from *Luxonis* as the primary data collection device has 
-  recently been incorporated into the **Outpost**. These devices are an "AI-included" camera 
+  recently been incorporated into the ``Outpost``. These devices are an "AI-included" camera 
   with an on-board VPU co-processor. 
   
-  The ``DepthAI`` software libraries provide for model upload and customizable pipelines. The 
+  The **DepthAI** software libraries provide for model upload and customizable pipelines. The 
   prototype definition provided here produces the following outputs from the camera.
 
   1. MobileNet object detection on every frame
   2. The 640x360 RGB image data ready for OpenCV and passed into the **imagnode** pipeline as the main camera source
   3. The same image data as an JPEG encoded frame, ready for publication to the **camwatcher**
   
-  All 3 of these outputs are provided by the camera at 30 frames/second. The **Outpost** can easily 
+  All 3 of these outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily 
   consume this, and publish all tracking results and captured JPEG data for storage by the
   **camwatcher**. 
   
@@ -583,15 +583,17 @@ and libraries.
 
 - Raspberry Pi 4B
 - Raspbian Buster
-- picamera
-- Python 3
+- Python 3.7
 - OpenCV 4
-- dlib
+- picamera
+- Luxonis OAK-1
+- Intel NCS2
 - imageZMQ
 - imutils
 - MessagePack
 - NumPy
 - pandas
+- dlib
 - PyZMQ
 - simplejpeg
   
