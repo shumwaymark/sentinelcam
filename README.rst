@@ -196,7 +196,7 @@ the following tasks.
   that a logfile subscription has been established. 
 
 - *Log Subscriber*. Subscribes to logging data streamed from one or more ``Outpost``
-  publishers via ZMQ. Logging data that pertains to a camera event is directed to the 
+  publishers via ZeroMQ. Logging data that pertains to a camera event is directed to the 
   *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
 
 - *Dispatcher*. Handles object tracking event data. For each new event, a subprocess is
@@ -441,6 +441,8 @@ inference co-processor and is kept ready for real-time supplemental event analys
 - Workloads can be reconfigured during idle time periods, such as at night. With fewer camera
   events occuring, co-processors can be re-tasked for larger batch analytical sweeps of the data. 
 
+See `sentinel.yaml <sentinel.yaml>`_ for an example of how this is configured. 
+
 Research and development roadmap
 ================================
 
@@ -503,7 +505,8 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   
   In a perfect world, the ``SpyGlass`` could be further employed as a vehicle for specialized 
   supplemental vision processing of a camera event in progress. There are a number of interesting
-  possibilities.
+  possibilities. Further provisioning with a vision co-processor provides for an incredible amount
+  of analytical performance directly on an embedded low-voltage device. 
   
   No detailed documentaion yet. See the `depthai.yaml <depthai.yaml>`_ file for the prototype.
 
@@ -589,12 +592,12 @@ and libraries.
 - Luxonis OAK-1
 - Intel NCS2
 - imageZMQ
-- imutils
+- ZeroMQ
 - MessagePack
 - NumPy
 - pandas
 - dlib
-- PyZMQ
+- imutils
 - simplejpeg
   
 Acknowledgements
