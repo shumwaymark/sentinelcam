@@ -499,7 +499,9 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   
   The **Outpost** can succesfully consume, and deliver to the **camwatcher** for storage, all 
   three of the above, at 30 frames/second. If desired, the ``SpyGlass`` could be employed as  
-  a vehicle for supplemental analysis of an event in progress. See the ``deptai.yaml`` file.
+  a vehicle for supplemental analysis of an event in progress. 
+  
+  No detailed documentaion yet. See the `depthai.yaml <depthai.yaml>`_ file for the prototype.
 
 Data management
 ---------------
