@@ -41,8 +41,8 @@ One or more *data aggregators* are responsible for accumulating reported data an
 video streams. 
 
 Realtime analysis of logged data from each **Outpost** feeds a *dispatcher* responsible for
-submitting tasks to the *Sentinel*. Inference and labeling tasks should be prioritized over
-modeling runs. The *Sentinel* will need to be provisioned with adequate memory and computing
+submitting tasks to the **sentinel**. Inference and labeling tasks should be prioritized over
+modeling runs. The **sentinel** will need to be provisioned with adequate memory and computing
 resources. 
 
 .. image:: docs/images/SentinelCamOverview.png
@@ -76,7 +76,7 @@ library authored by Jeff Bass. This was key to resolving data transport issues b
 nodes. 
 
 For building out the functionality of the **Outpost**, it quickly became obvious that 
-his **imagenode** project could provide scaffolding that was both structurally sound and 
+Jeff's **imagenode** project could provide scaffolding that was both structurally sound and 
 already working. This project has been forked as a submodule here. Additional details 
 regarding enhancements are documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
@@ -128,6 +128,8 @@ for closer analysis of motion events. The idea is to keep the pipeline lean for 
 each frame, while processing a subset of the images in parallel to drive a feeedback loop. 
 This is a multiprocessing solution. 
 
+  **Status**: stable working prototype.  
+
 The following general strategy provides an overview of this technique.
 
 - Motion detection is applied continually whenever there is nothing of interest within the field
@@ -155,13 +157,14 @@ package delivery or a postal carrier? If the object of interest is a vehicle, ca
 deterimined? The color? Is there a license plate visible?
 
 As a general rule, in-depth analysis tasks such as these are assigned to batch jobs running on the
-**Sentinel** itself.
+**sentinel** itself.
 
 Log publishing also offers two benefits.
 
 - Allows error and warning conditions to be accumulated in a centralized repository as they occur.
   This avoids reliance on SD cards with limited storage capacity which could be dispersed across 
   potentially dozens of individual camera nodes.
+
 - More importantly, logged event notifications including information related to an event in progress
   are then available as data which can be streamed to multiple interested consumers in real time.
 
@@ -182,6 +185,8 @@ design sketch.
 This design exploits two of the enhancements made to the **imagenode** module described
 above supporting **Outpost** functionality: log and image publishing over ZeroMQ as 
 configurable options.
+
+  **Status**: stable working prototype.  
 
 The **camwatcher** employs a Python ``asyncio`` event loop running a set of coroutines with
 the following tasks.
@@ -360,9 +365,9 @@ The network address for a running **datapump** process is specified at that time
    :alt: DataPump to DataFeed flow
 
 The ``DataFeed`` and ``DataPump`` subclasses extend the imageZMQ base classes with support 
-for sending and receiving both pandas DataFrame objects, and lists of timestamps. This helps 
-keep everything in the same serialization context underpinning imageZMQ, with consistent
-image transport technology throughout the system.
+for sending and receiving both pandas DataFrame objects, and lists of timestamps. Built upon 
+the same serialization context underpinning imageZMQ, this helps maintain consistent image 
+transport technology throughout the system.
 
 Internally, the first element of the (text, data) tuple returned to the Data Feed has been 
 reserved for carrying a yet-to-be-implememted response code from the **datapump**. 
@@ -404,10 +409,37 @@ All date and time references are in Coordinated Universal Time (UTC), not the lo
 Returns a buffer with the image frame as compressed JPEG data. Always for an existing date, 
 event, and timestamp as descibed above. There is no error checking on this either. 
 
-Presenting **camwatcher** data in this fashion provides the *Sentinel* with direct access to 
+Presenting **camwatcher** data in this fashion provides the **sentinel** with direct access to 
 specific subsets of captured image data. For example, perhaps the images of interest are  
 not available until 3 seconds after the start of the event. This facilitates skipping
 over the first 90-100 frames, for fast efficient access to the point of interest. 
+
+Sentinel design
+---------------
+
+A working prototype of the **sentinel** module is up and running in production. The **sentinel** 
+accepts job service requests as JSON over ZeroMQ. Parallelization is provided by a multi-processing 
+design, allowing multiple tasks to run at once. Employs a dedicated I/O thread to supply image 
+requests for use in analysis tasks through a set of ring buffers in shared memory. 
+
+.. image:: docs/images/Sentinel.png
+   :alt: Sketch of Sentinel internal architecture
+
+The **sentinel** module is conceived as the primary inference and singaling center; the very 
+heartbeat of the larger system. One or more *dispatchers* are responsible for firing events 
+that are deemed worthy of deeper analysis by the **sentinel**. 
+
+  **Status**: working proof of concept, functionality still evolving.  
+
+Workloads are configured through a set of YAML files. Tasks can be configured by job class to 
+have an affinity for a certain task engine. Perhaps one of the task engines has a dedicated 
+inference co-processor and is kept ready for real-time supplemental event analysis.
+
+- A separate engine can be used for work that only requries CPU, such as background 
+  maintenance tasks.
+
+- Workloads can be reconfigured during idle time periods, such as at night. With fewer camera
+  events occuring, co-processors can be re-tasked for larger batch analytical sweeps of the data. 
 
 Research and development roadmap
 ================================
@@ -420,13 +452,21 @@ here on an incremental basis as new functionality is fleshed out, proven, and st
 Sentinel
 --------
 
-The *sentinel* module is conceived as the inference and modeling engine. This will ultimately
-be the heart of the system. One or more *dispatchers* are responsible for firing events that
-are deemed worthy of deeper analysis by the *sentinel*. 
+Additional development is in the works with regard to task configuration. This will include
+another level of abstraction for the task list in the main YAML file. Ideally, ``TaskFactory`` 
+definitions should be useable as standard models in a workload definition. These pipeline models
+could be set up for multiple use simultaneously, each with a differernt configuration file. 
 
-Dynamic task scheduling of batch jobs is a critcal aspect of this. The ability to analyze 
-ongoing events in something close to real time is of utmost importance. Therefore, inference
-and labeling tasks are the highest priority; modeling and reinforcement more secondary. 
+Outputs from **sentinel** task results can be applied in multiple ways. 
+
+- Final storage of results from event analysis as supplemental to the original tracking data
+  is in design. Leaning heavily towards the use of HDF5 as the vehcile for that. This will 
+  also likely expand on the **datapump** as a two-way data transfer device. 
+
+- Multiple methods for addressomg event publication needs out to the larger world will also 
+  be important.
+  - `MQTT` for use in applications such as Node-RED
+  - `Twilio` for SMS messaging
 
 Outpost
 -------
@@ -434,24 +474,31 @@ Outpost
 Beyond simple object detection and tracking, some inference tasks can be pushed out to the
 edge where appropriate and helpful. Applying more sophisticated models across a sampling
 of incoming frames could help determine whether a motion event should be prioritized for
-closer analysis by the *sentinel*. 
+closer analysis by the **sentinel**. 
 
 Additional performance gains can be achieved here by equipping selected outpost nodes with
 a coprocessor, such as the Google Coral USB Accelerator or Intel Neural Compute Stick. Proper
 hardware provisioning can allow for running facial and vehicle recognition models directly on
 the camera node. When focused on an entry into the house, any face immediately recognized would
-not require engaging the *sentinel* for further analysis.
+not require engaging the **sentinel** for further analysis.
 
 Essentially, this could enable a camera to provide data in real time for discerning between
 expected/routine events and unexpected/new activity deserving of a closer look.
 
-  *Noteworthy that as of right now, there are a couple of new commercially available 
-  kick-starter driven "AI-included" camera solutions which should fit right into this 
-  framework as the eyes for an Outpost* 
+  Support for using an OAK camera from *Luxonis* as the primary data collection device has 
+  recently been incorparated into the **Outpost**. These devices are an *AI-included* camera 
+  with an on-board VPU co-processor. 
+  
+  The ``DepthAI`` software libarues provide for model upload and customizable pipelines. The 
+  prototype definition provided here produces the following outputs from the camera.
 
-The reality check, is that this design asks a lot of a *bare bones* Raspberry Pi 4B. To 
-successfully hit performance and design goals, the current implementation could benefit 
-from more CPU. There are a numnber of contributing, and often, interrleated reasons for this. 
+  1. MobileNet object detection on every frame
+  2. The 640x360 RGB image data ready for OpenCV and passed into the **imagnode** pipeline as the main camera source
+  3. The same image data as an JPEG encoded frame, ready for publication to the **camwatcher**
+  
+  The **Outpost** can succesfully consume, and deliver to the **camwatcher** for storage, all 
+  three of the above, at 30 frames/second. If desired, the ``SpyGlass`` could be employed as  
+  a vehicle for supplemental analysis of an event in progress. See the ``deptai.yaml`` file.
 
 Data management
 ---------------
