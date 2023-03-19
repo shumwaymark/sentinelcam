@@ -27,6 +27,20 @@ class Task:
     def finalize(self) -> None:
         pass
 
+class MobileNetSSD_allFrames(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
+
+    def pipeline(self, frame) -> bool:
+        continuePipe = True
+        (rects, labels) = self.od.detect(frame)
+        if len(rects) > 0:
+            detections = zip(labels, rects)
+            for objs in detections:
+                result = (objs[0], int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
+                self.publish(result, True)
+        return continuePipe
+
 class PersonsFaces(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.jreq = jobreq
@@ -66,22 +80,7 @@ class PersonsFaces(Task):
         ])
         self.publish(stats)
 
-class MobileNetSSD_allFrames(Task):
-    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
-        self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
-
-    def pipeline(self, frame) -> bool:
-        continuePipe = True
-        (rects, labels) = self.od.detect(frame)
-        if len(rects) > 0:
-            detections = zip(labels, rects)
-            for objs in detections:
-                result = (objs[0], int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
-                self.publish(result, True)
-        return continuePipe
-
 class DailyCleanup(Task):
-
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.jreq = jobreq
         self.dataFeed = feed
