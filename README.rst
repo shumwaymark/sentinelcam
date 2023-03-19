@@ -108,6 +108,8 @@ slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as
 .. image:: docs/images/Outpost.png
    :alt: High-level sketch of Outpost integration with imagenode
 
+  **Status**: stable working prototype.  
+
 Two key enhancements provide the essential wiring to make this possible. Log and image publishing over 
 PyZMQ and imageZMQ respectively.
 
@@ -127,8 +129,6 @@ To achieve the highest publishing frame rate possible, an **Outpost** node can e
 for closer analysis of motion events. The idea is to keep the pipeline lean for quickly publishing 
 each frame, while processing a subset of the images in parallel to drive a feeedback loop. 
 This is a multiprocessing solution. 
-
-  **Status**: stable working prototype.  
 
 The following general strategy provides an overview of this technique.
 
@@ -460,11 +460,12 @@ could be set up for multiple use simultaneously, each with a differernt configur
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
 - Final storage of results from event analysis as supplemental to the original tracking data
-  is in design. Leaning heavily towards the use of HDF5 as the vehcile for that. This will 
-  also likely expand on the **datapump** as a two-way data transfer device. 
+  is in design. Leaning heavily towards the use of HDF5 as the vehicle for that. This will 
+  also likely expand **datapump** functionality into a two-way data transfer device. 
 
-- Multiple methods for addressomg event publication needs out to the larger world will also 
+- Multiple methods for addressing event publication needs out to the larger world will also 
   be important.
+
   - `MQTT` for use in applications such as Node-RED
   - `Twilio` for SMS messaging
 
