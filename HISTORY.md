@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by *imageZMQ*.
 - Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
-  - Rather than terminating subprocess video writers at the end of each event, adapt these
+  - Rather than terminating sub process video writers at the end of each event, adapt these
     with a switch to turn subscriptions on and off as needed. Keep them loaded and ready 
     for faster startup on subsequent events. Design management controls to end after a 
     period of inactivity or gauge this based on work load. 
@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
   wire-in a facility to support this. 
 
-## 0.0.17-alpha - 2023-03-17
+## 0.0.17-alpha - 2023-03-18
 
 ### Fixed
 
@@ -58,24 +58,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Stress testing the **sentinel** module with multiple task engines. Support a ring buffer
-  model to easily support customization by task engine. Confirm affinity to task engine by
-  job class.
+  model for customization by task engine if desired. Confirm affinity to task engine by job class.
 
 ## 0.0.15-alpha - 2023-03-16
 
 ### Fixed
 
-- Some early code clean-up of the **sentinel** module. Added a HISTORY command to support dumping
-  complete task history to the logger in JSON format.
+- Some early code clean-up of the **sentinel** module. Added a HISTORY command to dump the
+  current comprehensive list of job request status details to the logger in JSON format.
 
 ## 0.0.14-alpha - 2023-03-15
 
 ### Added
 
-- First early working prototype of the **sentinel** module. The `Sentinel` accepts job service
-  request over ZMQ. Parallelization is provided by a multi-processing design, allowing multiple 
-  tasks to run at once. Employs a dedicated I/O thread to supply image requests for use in analysis
-  tasks through a set of ring buffers in shared memory. 
+- First early working prototype of the **sentinel** module. This is an image analytical engine that 
+  accepts job service requests over ZeroMQ. Parallelization is provided by a multi-processing design,
+  allowing multiple tasks to run at once. Employs a dedicated I/O thread to supply image requests for 
+  use in analysis tasks through a set of ring buffers in shared memory. 
 
 ## 0.0.13-alpha - 2022-11-16
 
