@@ -223,10 +223,9 @@ Event tracking data and results from event analysis are written to the filesyste
 CSV-format text files. For each date, there is an event index file and a separate file with
 the detailed data for each event.
 
-All dates and timestamps reflect Coordinated Universal Time (UTC), not the local timezone.
-
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
-*header row* included in the data.
+header row included in the data. All dates and timestamps reflect Coordinated Universal Time (UTC), 
+not the local timezone.
 
 .. csv-table:: Event Index 
   :header: "Name", "Type", "Description"
