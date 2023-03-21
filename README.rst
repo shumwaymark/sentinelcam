@@ -462,9 +462,10 @@ could be set up for multiple use simultaneously, each with a differernt configur
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
 - Final storage of results from event analysis, as supplemental to the original tracking data
-  is currently in design. A log publishing service will be added. The **camwatcher** already 
-  understands how to subscribe to publihsed log data and write into CSV files, so will be adapted
-  to subscribe to the **sentinel** for any task results needing storage with the event data.
+  is currently in design. A log publishing service will be added for this. The **camwatcher** 
+  already understands how to subscribe to published log data and write to CSV files. This
+  module will be adapted to subscribe to the **sentinel** for any task results needing storage 
+  with the event data.
 
 - Multiple methods for addressing event publication needs that go out to the larger world will 
   also be important.
