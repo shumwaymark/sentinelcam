@@ -464,8 +464,8 @@ Outputs from **sentinel** task results can be applied in multiple ways.
 
 - Final storage of results from event analysis, as supplemental to the original tracking data
   is currently in design. A log publishing service will be added. The **camwatcher** already 
-  understands how to subscribed to publihsed log data write into CSV files, so will be adapted
-  to subscribe to the **sentinel** for task results needing storage. 
+  understands how to subscribe to publihsed log data and write into CSV files, so will be adapted
+  to subscribe to the **sentinel** for any task results needing storage with the event data.
 
 - Multiple methods for addressing event publication needs that go out to the larger world will 
   also be important.
@@ -562,7 +562,7 @@ occupants and their vehicles will pass in front of that camera multiple times pe
 
   Jeff's Librarian simply uses Unix utilities to periodically keep a central storage hub updated.
   A great idea. If desired, the SentinelCam data sinks could simply be hosted on a larger high-capacity 
-  system. Though again, that should not be a requirement for SentielCam.
+  system. Though again, that should not be a requirement.
 
   What to keep, and why. That's the real question to be answered. Isn't it always?
 
@@ -570,7 +570,7 @@ occupants and their vehicles will pass in front of that camera multiple times pe
     often the first order of business. 
   - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
   - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
-  - For unexpected and unusual events, maybe that data is kept longer. Perhaps even copied off-site immediately.
+  - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
   - The beauty of SentinelCam, is that it knows the difference.
 
 This all needs to be mostly automatic and self-maintaining. The end result should require the 
