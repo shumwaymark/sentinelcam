@@ -49,7 +49,7 @@ class CamData:
     get_event_types() -> pandas.DataFrame
         Returns the event types available for this event
     get_event_pathname(event, type) -> str
-        Retruns filesystem pathname to event detail file
+        Retruns filesystem pathname to event detail CSV file
     get_event_data(type) -> pandas.DataFrame
         Returns reference to tracking detail for current event and type
     get_event_images() -> List
@@ -57,10 +57,11 @@ class CamData:
     """
 
     IDXFILE = "camwatcher.csv"
-    IDXCOLS = ["node","viewname","timestamp","event","fps","type"]
     IDXTYPES = ["trk"]
+    IDXCOLS = ["node","viewname","timestamp","event","fps","type"]
+    TRKCOLS = ["timestamp","elapsed","objid","classname","rect_x1","rect_x2","rect_y1","rect_y2"]
 
-    def set_date(self, date):
+    def set_date(self, date) -> None:
         """ Initialize CamData objet to the given date 
 
         Loads the camwatcher index data for the given date. Clears any existing
@@ -97,7 +98,7 @@ class CamData:
             # if no index file, provide an empty DataFrame 
             self._index = pd.DataFrame(columns=CamData.IDXCOLS)
 
-    def get_date(self):
+    def get_date(self) -> str:
         """ Return current index date
         
         Returns
@@ -108,7 +109,7 @@ class CamData:
 
         return self._ymd
 
-    def get_index_name(self, date):
+    def get_index_name(self, date) -> str:
         """ Return filename reference to camwatcher index
 
         Based on the supplied date parameter, return the pathname to 
@@ -132,7 +133,7 @@ class CamData:
             indexname = None
         return indexname
 
-    def get_index(self):
+    def get_index(self) -> pd.DataFrame:
         """ Return reference to the current camwatcher index as a pandas DataFrame 
         
         Returns
@@ -143,7 +144,7 @@ class CamData:
 
         return self._index
 
-    def get_last_event(self):
+    def get_last_event(self) -> str:
         """ Return most recent Event ID 
         
         Returns
@@ -154,7 +155,7 @@ class CamData:
 
         return self._lastEvent
 
-    def set_event(self, event):
+    def set_event(self, event) -> None:
         """ Set camwatcher index to the specified Event ID
 
         Sets index to the specified event. Establishes references to event detail 
@@ -174,7 +175,7 @@ class CamData:
         self._event_start = self._event_subset["timestamp"].min()
         self._event_types = self._event_subset["type"]
 
-    def get_event_node(self):
+    def get_event_node(self) -> str:
         """ Return node name from event
             
         Must have first invoked `set_event()` to load camera detail for the event.
@@ -187,7 +188,7 @@ class CamData:
 
         return self._event_node
 
-    def get_event_view(self):
+    def get_event_view(self) -> str:
         """ Return view name from the event
             
         Must have first invoked `set_event()` to load camera detail for the event.
@@ -200,7 +201,7 @@ class CamData:
 
         return self._event_view
 
-    def get_event_start(self):
+    def get_event_start(self) -> datetime.timestamp:
         """ Return view name from the event
             
         Must have first invoked `set_event()` to load camera detail for the event.
@@ -213,7 +214,7 @@ class CamData:
 
         return self._event_start
 
-    def get_event_types(self):
+    def get_event_types(self) -> pd.DataFrame():
         """ Return the event types for the selected event. 
         
         Must have first invoked `set_event()` to load camera detail for the event.
@@ -226,7 +227,7 @@ class CamData:
         
         return self._event_types
     
-    def get_event_pathname(self, event, type='trk'):
+    def get_event_pathname(self, event, type='trk') -> str:
         """ Return pathname to the camera event detail file
                 
         Parameters
@@ -242,9 +243,12 @@ class CamData:
             Pathname to camwatcher detail for specified event and type
         """
 
-        return os.path.join(self._index_path, self._ymd, event + "_" + type + ".csv")
+        indexname = os.path.join(self._index_path, self._ymd, event + "_" + type + ".csv")
+        if not os.path.exists(indexname):
+            indexname = None
+        return indexname
 
-    def get_event_data(self, type='trk'):
+    def get_event_data(self, type='trk') -> pd.DataFrame:
         """ Return reference to selected event tracking data as a pandas DataFrame 
         
         Must have first invoked `set_event()` to load camera detail for the event.
@@ -260,14 +264,16 @@ class CamData:
             Reference to event detail data as a pandas.DataFrame
         """
 
-        self._event_data = pd.read_csv(
-            self.get_event_pathname(self._event_id, type),
-            parse_dates=['timestamp']
-        )
-        self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
+        csvFile = self.get_event_pathname(self._event_id, type)
+        if csvFile is not None:
+            self._event_data = pd.read_csv(csvFile, parse_dates=['timestamp'])
+            self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
+        else:
+            # return an empty result set when no CSV file
+            self._event_data = pd.DataFrame(columns=CamData.TRKCOLS)
         return self._event_data
 
-    def get_date_list(self):
+    def get_date_list(self) -> list:
         """ Returns list of available YYYY-MM-DD date folders from most recent to oldest
         
         Returns
@@ -277,7 +283,7 @@ class CamData:
         """
         return sorted([d[-10:] for d in list(self._list_date_folders())], reverse=True)
             
-    def get_event_images(self):
+    def get_event_images(self) -> list:
         """ Returns list of pathnames to individual image frame files in chronological order
         
         Returns

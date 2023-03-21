@@ -13,12 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
 - Continue development and testing of the **sentinel** module. 
-  - Provide inference results for storing with event data. The **datapump** module will
-    need to become a two-way pump, for accepting data updates.
+  - Provide inference results for storing with event data.
   - Support result signaling to Twilio, and to Node-RED via MQTT.
 - Add missing support for **datapump** error codes in response messages using the first 
-  element of the (text,data) tuple carried by *imageZMQ*.
-- Continue monitoring the **camwatcher** module. Still have a few items on the TODO list.
+  element of the (text,data) tuple carried by imageZMQ.
+- Continue monitoring the **camwatcher** module. Still have a few items on the ToDo list.
   - Rather than terminating sub process video writers at the end of each event, adapt these
     with a switch to turn subscriptions on and off as needed. Keep them loaded and ready 
     for faster startup on subsequent events. Design management controls to end after a 
@@ -28,23 +27,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Continue development of video_review_df.py
   - Add missing node/view filtering functionality
   - Allow display of neural net results to be optional
-  - Add functionality for real-time display of any camera view
-- Experiment with leveraging the `send_threading` option in **imagenode** to supplement
-  published image capture triggered from a motion event. By dumping the `cam_q` at the start 
-  of a motion event, those frames could theoretically be used to assemble video from just prior 
-  to that point in time. *Low priority*. Not sure the payoff is worth the effort and additional
-  complexity.
+  - Add functionality for real-time display of any camera view, maybe
 
 ### Known bugs
 
-- `CamData` class fails with bad input values for date/event. Any `DataFeed` request can
-  potentially query events that do not exist. Should probably return empty results for
-  this condition.
-- Just a general note of caution. Run this at your own risk. The `SpyGlass` task on the
-  `Outpost` is still under active development, and highly experimental. 
-- **imagenode** hangs when `SpyGlass` deployed and SIGTERM sent from `fix_comm_link()` by the
-  `REP_watcher()`. This signal is not received by the child process. Need to devise a way to
-  wire-in a facility to support this. 
+- Just a general note of caution. Run this at your own risk. All major components are under 
+  active development. SentinelCam is an on-going research experiment which may, at times, 
+  be somewhat unstable around the edges.
+
+## 0.0.18-alpha - 2023-03-21
+
+### Fixed
+
+- Data layer resilience. `CamData` class was failing when event detail CSV files were missing. 
+  Now properly returns an empty `pandas.DataFrame` for this condition.
+- Additional tightening of the **sentinel** for efficiency and stability. Fixed a bug in the
+  start logic when task has no eventID.
 
 ## 0.0.17-alpha - 2023-03-18
 
@@ -158,7 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- *Over-publishing image data with ZMQ is not smart*. On a Raspberry Pi 4B, have measured 
+- *Over-publishing image data with 0MQ is not smart*. On a Raspberry Pi 4B, have measured 
   publishing rates for a (320,240) resolution image, compressed to JPEG, at 150+ frames
   per second. This is insane, at least for the hardware we're running on and any of the
   intended use cases driving this design. For a PiCamera, the hardware chip does not even 
@@ -171,7 +169,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Reduced latency between `Outpost` and the `SpyGlass` by moving ZMQ signaling protocol 
+- Reduced latency between `Outpost` and the `SpyGlass` by moving 0MQ signaling protocol 
   from `tcp://127.0.0.1` to `ipc://name`. Had to swap the `ImageSender` and `ImageHub` 
   endpoints for this, which also provided for a more sensible handshake during initialization.  
 
@@ -179,7 +177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now using an *imageZMQ* REQ/REP pair to rig the IPC signaling between `Outpost` and the
+- Now using an imageZMQ REQ/REP pair to rig the IPC signaling between `Outpost` and the
   `SpyGlass`. The outpost implements a polling mechanism on the connection to provide 
   for a non-blocking receive until results are ready.
 
@@ -189,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First working prototype of the **datapump** module. This is a stand-alone process 
   intended for running on the same node as a **camwatcher**. This module services access requests 
-  to the data and image sinks over *imageZMQ* transport, specifically for use with the `DataFeed`
+  to the data and image sinks over imageZMQ transport, specifically for use with the `DataFeed`
   class from a process running on another node, such as the *Sentinel* itself.
 - Added example **datafeed** module implementing `DataFeed` requests to the **datapump**. 
   This is still evolving. 

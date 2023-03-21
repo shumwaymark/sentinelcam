@@ -32,14 +32,13 @@ class MobileNetSSD_allFrames(Task):
         self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
 
     def pipeline(self, frame) -> bool:
-        continuePipe = True
         (rects, labels) = self.od.detect(frame)
         if len(rects) > 0:
             detections = zip(labels, rects)
             for objs in detections:
                 result = (objs[0], int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
                 self.publish(result, True)
-        return continuePipe
+        return True  # process every frame 
 
 class PersonsFaces(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -72,7 +71,7 @@ class PersonsFaces(Task):
         stats = ",".join([
             str(self.jreq.eventDate),
             str(self.jreq.eventID),
-            str(len(self.evtData)),
+            str(len(self.evtData.index)),
             str(self.person_cnt),
             str(self.face_cnt),
             str(self.frame_cnt),
@@ -137,7 +136,7 @@ class DailyCleanup(Task):
                     stats = ",".join([
                         'Delete',
                         str(event),
-                        str(len(trkData)),
+                        str(len(trkData.index)),
                         str(person_cnt),
                         str(face_cnt),
                         str(limit),
@@ -149,7 +148,7 @@ class DailyCleanup(Task):
                 stats = ",".join([
                     str(event_date),
                     str(event),
-                    str(len(trkData)),
+                    str(len(trkData.index)),
                     str(person_cnt),
                     str(face_cnt),
                     str(limit),

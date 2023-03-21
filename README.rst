@@ -55,7 +55,8 @@ use of the limited resources available.
 This is best served by a "divide and conquer" approach. Spread out the workload for efficiency,
 employing parallelization where helpful for processing incoming data sets. Keep overhead to a 
 minimum. Each node in the network should serve a distinct purpose. Take care, do not overburden 
-any individual node, while watching out for untapped idle capacity. Orchestration is key.
+any individual node, while watching out for untapped idle capacity. Orchestration is key. Balance
+is required.
 
 Although each **Outpost** node operates independently, any detected event could be directly
 related to an event being simultaneously processed by another node with an overlapping or 
@@ -109,7 +110,7 @@ slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as
    :alt: High-level sketch of Outpost integration with imagenode
 
 Two key enhancements provide the essential wiring to make this possible. Log and image publishing over 
-PyZMQ and imageZMQ respectively.
+ZeroMQ and imageZMQ respectively.
 
 Image publishing has a twofold benefit.
 
@@ -200,7 +201,7 @@ the following tasks.
   *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
 
 - *Dispatcher*. Handles object tracking event data. For each new event, a subprocess is
-  started as an image stream subscriber to begin capturing images. All event tracking data
+  started as an image subscriber to begin capturing images. All event tracking data
   is queued for permanent storage by the *CSV File Writer*.
 
 This design packs a fair amount of network I/O activity into a single thread of execution. To 
@@ -225,7 +226,7 @@ the detailed data for each event.
 All dates and timestamps reflect Coordinated Universal Time (UTC), not the local timezone.
 
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
-*header row* included in the data. This data structure is fixed, with no further changes expected.
+*header row* included in the data.
 
 .. csv-table:: Event Index 
   :header: "Name", "Type", "Description"
@@ -461,12 +462,13 @@ could be set up for multiple use simultaneously, each with a differernt configur
 
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
-- Final storage of results from event analysis as supplemental to the original tracking data
-  is in design. Leaning heavily towards the use of HDF5 as the vehicle for that. This will 
-  also likely expand **datapump** functionality into a bi-directional data transfer device. 
+- Final storage of results from event analysis, as supplemental to the original tracking data
+  is currently in design. A log publishing service will be added. The **camwatcher** already 
+  understands how to subscribed to publihsed log data write into CSV files, so will be adapted
+  to subscribe to the **sentinel** for task results needing storage. 
 
-- Multiple methods for addressing event publication needs out to the larger world will also 
-  be important.
+- Multiple methods for addressing event publication needs that go out to the larger world will 
+  also be important.
   
   - `MQTT` for use in applications such as Node-RED
   - `Twilio` for SMS messaging
@@ -507,9 +509,11 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   In a perfect world, the ``SpyGlass`` could be employed as a vehicle for specialized supplemental 
   vision processing during a camera event in progress. There are a number of interesting possibilities. 
   Further provisioning with a vision co-processor provides for an incredible amount of analytical
-  performance directly on an embedded low-voltage device. 
+  performance directly on an embedded low-voltage edge device. 
   
-  No detailed documentaion yet. See the `depthai.yaml <depthai.yaml>`_ file for the prototype.
+  The prototype pipeline definition can be found in 
+  `imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
+  See the `depthai.yaml <depthai.yaml>`_ file for the setups.
 
 Data management
 ---------------
@@ -525,11 +529,13 @@ towards alleviating those concerns.
   such as CPU resources, memory utilization, disk I/O, storage capacity, and network traffic. 
   Each impact the others. The penalties incurred due to missteps always seem to hit harder than 
   anticipated. 
+  
+  As more and more Outpost nodes are added, additional data sinks will be required to support them.
 
 Raw data gleaned from an Outpost event can be voluminous and detailed.
 
-SentienlCam endeavors to always capture as much image detail as possible. As noted above 
-in the *Data Model* discussion, individual image frames require much more space than a compressed 
+SentinelCam endeavors to always capture as much image detail as possible. As noted above 
+in the data model discussion, individual image frames require much more space than a compressed 
 video format. The computer vision technology underpinning this design is based on the analysis of
 two-dimensional images. The intent is to capture high-resolution ground-truth data, reducing 
 the likelyhood that key details might be missed. This is helpful for analysis and modeling,
@@ -543,17 +549,29 @@ in real time by an Outpost node, or produced by the Sentinel. Or both.
 It adds up in a hurry. *And the rest of the story...*
 
 Much of it can be meaningless, trivial, forgettable, and simply not wanted. For example, 
-imagine an outdoor camera with a view of both an entry into the home and the driveway. 
+imagine an outdoor camera with a view of both an entry into the home and the driveway. The 
+occupants and their vehicles will pass in front of that camera multiple times per day.
 
-The occupants and their vehicles will pass in front of that camera multiple times per day.
-Routine events such as these do not require a video record, or even a single image be 
-preserved. All that is required of the house, is for it to take note that your car departed 
-at 7:12 in the morning and arrived back home at 6:39 that evening. Happens every weekday.
+  SentinelCam was conceived as a system providing real-time analysis of various camera events 
+  as they are occuring. Not a long-term video archival and retrieval engine. 
 
-Those unexpected, unusual, exceptional events are not so disposable. Under certain 
-circumstances, it might be desirable to produce a full archival video immediately. There
-may be situations where such a record should be copied off-site as a precaution. Perhaps by 
-policy, a full video record of every package delivery is always kept for a period of time.
+  *Built to operate exclusively on low-voltage embedded devices like the Raspberry Pi*, there
+  are a few assumptions baked-in to the design. One of these is that the primary data sinks 
+  are assumed to be something simple, like a permanently mounted SSD card over USB3. More
+  exotic options, e.g. a high-capacity NAS system, are certainly available. Just not assumed.
+
+  Jeff's Librarian simply uses Unix utilities to periodically keep a central storage hub updated.
+  A great idea. If desired, the SentinelCam data sinks could simply be hosted on a larger high-capacity 
+  system. Though again, that should not be a requirement for SentielCam.
+
+  What to keep, and why. That's the real question to be answered. Isn't it always?
+
+  - All of these collected images, incredibly valuable for model-building. Generally speaking. This is
+    often the first order of business. 
+  - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
+  - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
+  - For unexpected and unusual events, maybe that data is kept longer. Perhaps even copied off-site immediately.
+  - The beauty of SentinelCam, is that it knows the difference.
 
 This all needs to be mostly automatic and self-maintaining. The end result should require the 
 bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work. 

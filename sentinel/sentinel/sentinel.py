@@ -78,9 +78,9 @@ class JobRequest:
     def deregisterJOB(self, status) -> None:
         self.jobEndTime = datetime.utcnow()
         self.jobStatus = status
-        logging.info(self.eoj_Message())
-        with jobLock:
-            if self.jobID in jobList:
+        logging.info(self.status_Message('EOJ'))
+        if self.jobID in jobList:
+            with jobLock:
                 del jobList[self.jobID]
 
     def _timeVals(self) -> tuple:
@@ -93,10 +93,10 @@ class JobRequest:
                 elapsed_time = str(self.jobEndTime - self.jobStartTime)
         return (start_time, end_time, elapsed_time)  
 
-    def eoj_Message(self) -> tuple:
+    def status_Message(self, reason) -> tuple:
         (start_time, end_time, elapsed_time) = self._timeVals()
         result = (
-            'EOJ',
+            reason,
             self.jobTask,
             self.sourceNode,
             JobRequest.Status[self.jobStatus],
@@ -215,26 +215,22 @@ class JobTasking:
     accelerator : str
         The co-processor configured for this task engine.
 
-    taskQ : multiprocessing.Managers.SyncManager.Queue 
+    taskQ : multiprocessing.Queue 
         Used for sending job requests to the task engine.
-
-    taskFlag : multiprocessing.Managers.SyncManager.Value 
-        Implements a shared flag that can be used to cancel a running task.
 
     rawRingbuff : dict
         The image frame ring buffers for this task engine keyed by image size. 
-        Each item is a list of shared memory blocks. These are references to
+        The items are a list of shared memory blocks. These are references to
         a multiprocessing.sharedctypes.RawArray. Each will be redefined as a 
         NumPy array by the child process. 
     """
 
-    def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, taskFlag, rawRingbuff) -> None:
+    def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff) -> None:
         self._engine = engineName
         self._taskQ = taskQ
-        self._taskFlag = taskFlag
         self._rawRingBuffer = rawRingbuff
         self.process = multiprocessing.Process(target=self.taskHost, args=(
-            engineName, pump, taskCFG, accelerator, taskQ, taskFlag, rawRingbuff))
+            engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff))
         self.process.start()
 
     def terminate(self) -> None:
@@ -243,7 +239,7 @@ class JobTasking:
             self.process.join()
 
     # --------------------------------------------------------------------------------------------------
-    def taskHost(self, engineName, pump, taskCFG, accelerator, taskQ, taskFlag, _ringbuff):
+    def taskHost(self, engineName, pump, taskCFG, accelerator, taskQ, _ringbuff):
     # --------------------------------------------------------------------------------------------------
         try:
             taskpump = pump
@@ -253,14 +249,15 @@ class JobTasking:
             ringWire.connect(f"ipc://{SOCKDIR}/{engineName}")
             publisher.bind(f"ipc://{SOCKDIR}/{engineName}.PUB")
             ringWire.send(msgpack.packb(0))  # send the ready handshake
-            handshake = ringWire.recv()  # wait for subscriber to connect
-
-            def _selectRingBuffer(wh) -> list:
+            ringbuffers = {}
+            for wh in _ringbuff:
                 dtype = np.dtype('uint8')
                 shape = (wh[1], wh[0], 3)
-                return [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in _ringbuff[wh]]
+                ringbuffers[wh] = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in _ringbuff[wh]]
+            handshake = ringWire.recv()  # wait for subscriber to connect
 
-            # keep these variables close at hand
+            # Hang tight on the scoping here, best to keep these variables close at hand 
+            # for the four local function definitions below
             self.jobreq = None
             self.frame_start = None
             self.frame_offset = 0
@@ -277,10 +274,9 @@ class JobTasking:
                 ringWire.send(msgpack.packb(_start_command))
                 if _newEvent:
                     self.jobreq = taskQ.get()
-                    taskQ.task_done()
                     if self.jobreq.camsize != self.imagesize:
                         self.imagesize = self.jobreq.camsize
-                        self.ringbuff = _selectRingBuffer(self.imagesize)
+                        self.ringbuff = ringbuffers[self.imagesize]
                 bucket = msgpack.unpackb(ringWire.recv())
                 return bucket
 
@@ -308,16 +304,14 @@ class JobTasking:
                     self.jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
                     try:
-                        taskQ.task_done()
                         self.start_time = time.time()
                         if self.jobreq.datapump != taskpump:
                             taskpump = self.jobreq.datapump
                             feed.zmq_socket.connect(taskpump)
-                        if self.jobreq.camsize != self.imagesize:
+                        if self.jobreq.eventID and self.jobreq.camsize != self.imagesize:
                             self.imagesize = self.jobreq.camsize
-                            self.ringbuff = _selectRingBuffer(self.imagesize)
+                            self.ringbuff = ringbuffers[self.imagesize]
 
-                        taskFlag.value = TaskEngine.TaskSTARTED
                         startMsg = (TaskEngine.TaskSTARTED, self.jobreq.jobID)
                         publisher.send(msgpack.packb(startMsg))
 
@@ -336,29 +330,31 @@ class JobTasking:
                         task.getRing = getRing
                         task.publish = publish
 
+                        # ----------------------------------------------------------------------
+                        #   Execute task
+                        # ----------------------------------------------------------------------
                         if not self.jobreq.eventID:
-                            # No starting event? No pipline() loop supported. Have no tracking data, 
-                            # and no starting frame. Will call the pipeline() once for this task.
+                            # ------------------------------------------------------------------------
+                            #   No starting event? No pipline() loop supported. Have no tracking data, 
+                            #   and no starting frame. Will call the pipeline() once for this task.
+                            # ------------------------------------------------------------------------
                             task.pipeline(None)
+
                         else:
-                            # ----------------------------------------------------------------------
+                            # ------------------------------------------------------------------------
                             #   Start the Ring Buffer
-                            # ----------------------------------------------------------------------
+                            # ------------------------------------------------------------------------
                             frame_start = trackingData.iloc[0].timestamp  # default to the first frame
                             bucket = ringStart(frame_start)
 
-                            # ----------------------------------------------------------------------
+                            # ------------------------------------------------------------------------
                             #   Frame loop for an image pipeline task
-                            # ----------------------------------------------------------------------
+                            # ------------------------------------------------------------------------
                             while bucket != JobManager.ReadEOF:
                                 if task.pipeline(self.ringbuff[bucket]):
                                     bucket = ringNext()
                                 else:
                                     bucket = JobManager.ReadEOF
-
-                                if taskFlag.value == TaskEngine.TaskCANCELED:
-                                    eoj_status = TaskEngine.TaskCANCELED
-                                    break
 
                         # ----------------------------------------------------------------------
                         #   Publish final results 
@@ -368,17 +364,17 @@ class JobTasking:
                     except (KeyboardInterrupt, SystemExit):
                         raise
                     except KeyError as keyval:
-                        msg = (TaskEngine.TaskSTATUS, "taskHost() internal key error '{}'".format(keyval))
+                        msg = (TaskEngine.TaskSTATUS, f"taskHost() internal key error '{keyval}'")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                     except cv2.error as e:
-                        msg = (TaskEngine.TaskSTATUS, "OpenCV error, {}".format(str(e)))
+                        msg = (TaskEngine.TaskSTATUS, f"OpenCV error, {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
                     except Exception as e:
                         traceback.print_exc()
-                        msg = (TaskEngine.TaskSTATUS, "taskHost() exception, {}".format(str(e)))
+                        msg = (TaskEngine.TaskSTATUS, f"taskHost() exception, {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
@@ -394,7 +390,7 @@ class JobTasking:
         except (KeyboardInterrupt, SystemExit):
             print(f"JobTasking shutdown {engineName}.")
         except Exception as e:
-            msg = (TaskEngine.TaskBOMB, "{}: JobTasking failure, {}".format(engineName, str(e)))
+            msg = (TaskEngine.TaskBOMB, f"{engineName}: JobTasking failure, {str(e)}")
             publisher.send(msgpack.packb(msg))
             traceback.print_exc()  # see syslog for traceback
         finally:
@@ -417,13 +413,12 @@ class TaskEngine:
     TaskCANCELED = 5
     TaskBOMB = -1
 
-    def __init__(self, engineName, config, ringCFG, taskCFG, manager, pump, asyncSUB) -> None:
+    def __init__(self, engineName, config, ringCFG, taskCFG, pump, asyncSUB) -> None:
         self.name = engineName
         self.job_classes = config["classes"]
         self.accelerator = config["accelerator"]
         self.taskCFG = taskCFG
-        self.taskQ = manager.Queue()
-        self.taskFlag = manager.Value('i', TaskEngine.TaskDONE)
+        self.taskQ = multiprocessing.Queue()
         self.wire = RingWire(SOCKDIR, engineName)
         ringmodel = ringCFG[config["ring_buffers"]]
         ringsetups = [literal_eval(ring) for ring in ringmodel.values()]
@@ -435,7 +430,7 @@ class TaskEngine:
         self.ringBuffer = None  # current RingBuffer 
         self.dataFeed = None    # current DataFeed
         # Ready to fork() the child subprocess for this task engine:
-        self._engine = JobTasking(engineName, pump, taskCFG, self.accelerator, self.taskQ, self.taskFlag, self.rawBuffers)
+        self._engine = JobTasking(engineName, pump, taskCFG, self.accelerator, self.taskQ, self.rawBuffers)
         # establish handshake with child, connect to result publisher before continuing
         handshake = self.wire.recv()
         asyncSUB.connect(f"ipc://{SOCKDIR}/{engineName}.PUB")
@@ -463,17 +458,19 @@ class TaskEngine:
 
     def start_job(self, jobreq) -> bool:
         confirm_start = True
-        if self.imagesize != jobreq.camsize:
+        if jobreq.eventID and self.imagesize != jobreq.camsize:
             if jobreq.camsize in self.ringbuffers:
                 self.imagesize = jobreq.camsize
                 self.ringBuffer = self.ringbuffers[self.imagesize]
             else:
-                logging.error(f"RingBuffer definition for {jobreq.camsize} not supported by task engine {jobreq.engine}.")
+                logging.error("{}: RingBuffer definition {} not supported ({},{},{})".format(
+                    jobreq.engine, jobreq.camsize, jobreq.dataSink, jobreq.eventDate, jobreq.eventID)
+                )
                 confirm_start = False
         if confirm_start:
+            logging.debug(f"{jobreq.engine}: starting job {jobreq.jobID}")
             self.jobreq = jobreq
             self.taskQ.put(jobreq)
-            logging.debug(f"Queued job start {jobreq.jobID}")
         return confirm_start
 
     def have_request(self) -> bool:
@@ -489,7 +486,9 @@ class TaskEngine:
         return self._engine.process.is_alive()
 
     def cancel(self) -> None:
-        self.taskFlag.value = TaskEngine.TaskCANCELED
+        # TODO: kill the child process here 
+        #self.taskFlag.value = TaskEngine.TaskCANCELED
+        pass
 
 class JobManager:
 
@@ -506,9 +505,8 @@ class JobManager:
     def __init__(self, engineCFG, ringCFG, taskCFG, default_pump, _asyncSUB) -> None:
         self.engines = {}
         self.datafeeds = {}
-        self.manager = multiprocessing.Manager()
         for engine in engineCFG:
-            self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, self.manager, default_pump, _asyncSUB)
+            self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, default_pump, _asyncSUB)
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -559,7 +557,7 @@ class JobManager:
                     logging.error(f"_feedStart() failed. RingBuffer {_camsize} not supported by {taskEngine.getName()}.")
                     _valid = False
             taskEngine.newEvent(jreq.eventDate, jreq.eventID, _camsize)
-            taskEngine.taskQ.put(taskEngine.getJobRequest())  # confirm event change with task engine 
+            taskEngine.taskQ.put(taskEngine.getJobRequest())  # confirm event change readiness with task engine 
         if not _valid:
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = None
@@ -608,7 +606,6 @@ class JobManager:
                              TaskEngine.TaskCANCELED]:
                     engine = self.engines[taskList[msg].engine]
                     engine.jobreq = None
-                    engine.taskFlag.value = tag
                     taskList[msg].deregisterJOB(tag)
                 elif tag == TaskEngine.TaskBOMB:
                     # TODO: Need an engine restart here 
@@ -638,8 +635,7 @@ class JobManager:
                 else:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{engineName}' found dead.")
-                    if engineName in self.engines:
-                        del self.engines[engineName]
+                    del self.engines[engineName]
 
             if runningTasks < len(self.engines):
                 # Have available capacity, any queued jobs awaiting release?  
@@ -712,8 +708,10 @@ async def task_feedback(asyncSUB):
                           TaskEngine.TaskDONE,
                           TaskEngine.TaskFAIL,
                           TaskEngine.TaskCANCELED]:
-                if msgTag != TaskEngine.TaskSTARTED:
-                    logging.debug(f"{taskMsg}: job task {JobRequest.Status[msgTag]}.")
+                logging.debug(f"{taskMsg}: status update {JobRequest.Status[msgTag]}.")
+                if msgTag == TaskEngine.TaskSTARTED:
+                    logging.info(taskList[taskMsg].status_Message('START'))
+                else:
                     taskFeed.put((msgTag, taskMsg))
             elif msgTag == TaskEngine.TaskBOMB:
                 msg = taskMsg.split(':')
