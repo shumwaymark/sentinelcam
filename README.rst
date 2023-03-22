@@ -380,15 +380,15 @@ reserved for carrying a yet-to-be-implemented response code from the **datapump*
 
 The ``get_date_index()`` function returns the content of the Event Index for a date. The date
 parameter is always required and specified in 'YYYY-MM-DD' format. There is no default value.
-The Event Index data is returned as a ``pandas.DataFrame`` obect. Refer to *Data Model* above 
-for further detail.
+The Event Index data is returned as a ``pandas.DataFrame`` obect. Refer to the description of
+the data model above for further detail.
 
 .. code-block:: python
 
   DataFeed.get_tracking_data (date, event) -> pandas.DataFrame
 
 The ``get_tracking_data()`` function requires two arguments, a date and an event identifier. 
-Used to retrieve the full Tracking Event Detail dataset (see *Data Model* above) as a
+Used to retrieve the full Tracking Event Detail dataset (see *Data model* above) as a
 ``pandas.DataFrame`` object. Both arguments are required. The date is specified in 'YYYY-MM-DD'
 format, the EventID reference must exist for the indicated date. There is no error-checking.
 
@@ -481,7 +481,7 @@ edge where appropriate and helpful. Applying more sophisticated models across a 
 of incoming frames could help determine whether a motion event should be prioritized for
 closer analysis by the **sentinel**. 
 
-Additional performance gains can be achieved here by equipping selected outpost nodes with
+Additional performance gains can be achieved here by equipping selected ``Outpost`` nodes with
 a coprocessor, such as the Google Coral USB Accelerator or Intel Neural Compute Stick. Proper
 hardware provisioning can allow for running facial and vehicle recognition models directly on
 the camera node. When focused on an entry into the house, any face immediately recognized would
@@ -559,9 +559,9 @@ occupants and their vehicles will pass in front of that camera multiple times pe
   are assumed to be something simple, like a permanently mounted SSD card over USB3. More
   exotic options, such as high-capacity NAS systems, are certainly available. Just not assumed.
 
-  Jeff's Librarian simply uses Unix utilities to periodically keep a central storage hub updated.
-  A great idea. If desired, the SentinelCam data sinks could simply be hosted on a larger high-capacity 
-  system. Though again, that should not be a requirement.
+  Jeff's Librarian capitalizes on Unix utilities to periodically keep a central storage hub updated.
+  A great idea. If desired, the SentinelCam data sinks could simply be hosted directly on a larger 
+  high-capacity system. Though again, that should not be a requirement.
 
   What to keep, and why. That's the real question to be answered. Isn't it always?
 
@@ -571,8 +571,8 @@ occupants and their vehicles will pass in front of that camera multiple times pe
   - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
   - The beauty of SentinelCam, is that it knows the difference.
 
-This all needs to be mostly automatic and self-maintaining. The result should require the 
-bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work. 
+This all needs to be mostly automatic and self-maintaining. The goal is to build a system requiring only
+the bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work. 
 
 *Saying it once more. Dream big*.
 
