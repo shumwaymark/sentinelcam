@@ -498,12 +498,12 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   provide for model upload and customizable pipelines. The prototype definition provided here 
   produces the following outputs from the camera.
 
-  1. MobileNet object detection on every frame
+  1. MobileNetSSD object detection on every frame
   2. The 640x360 RGB image data ready for OpenCV and passed into the **imagenode** pipeline as the main camera source
-  3. The same image data as an JPEG encoded frame, ready for publication to the **camwatcher**
+  3. The same image data encoded into JPEG, ready for publication to the **camwatcher**
   
   All 3 of these outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily 
-  consume this and publish all object detection results and captured JPEG data for storage by the
+  consume this and publish complete object detection results and captured JPEG data for storage by the
   **camwatcher**. 
   
   In a perfect world, the ``SpyGlass`` could be employed as a vehicle for specialized supplemental 
@@ -557,7 +557,7 @@ occupants and their vehicles will pass in front of that camera multiple times pe
   *Built to operate exclusively on low-voltage embedded devices like the Raspberry Pi*, there
   are a few assumptions baked-in to the design. One of these is that the primary data sinks 
   are assumed to be something simple, like a permanently mounted SSD card over USB3. More
-  exotic options, such aa high-capacity NAS systems, are certainly available. Just not assumed.
+  exotic options, such as high-capacity NAS systems, are certainly available. Just not assumed.
 
   Jeff's Librarian simply uses Unix utilities to periodically keep a central storage hub updated.
   A great idea. If desired, the SentinelCam data sinks could simply be hosted on a larger high-capacity 
