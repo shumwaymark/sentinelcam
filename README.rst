@@ -559,7 +559,7 @@ occupants and their vehicles will pass in front of that camera multiple times pe
   are assumed to be something simple, like a permanently mounted SSD card over USB3. More
   exotic options, such as high-capacity NAS systems, are certainly available. Just not assumed.
 
-  Jeff's Librarian capitalizes on Unix utilities to periodically keep a central storage hub updated.
+  Jeff's Librarian capitalizes on Unix utilities to periodically keep a central data store updated.
   A great idea. If desired, the SentinelCam data sinks could simply be hosted directly on a larger 
   high-capacity system. Though again, that should not be a requirement.
 
