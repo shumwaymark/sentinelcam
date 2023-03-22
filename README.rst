@@ -96,10 +96,10 @@ Outpost design
 Imagine a lonely sentry standing guard at a remote outpost. Each outpost is positioned to watch over
 the paths leading towards the inner fortifications. Sentries are tasked with observing, monitoring,
 and reporting anything of interest or concern. Such reports should be sent back to central command
-for analysis and descision making.
+for analysis and decision making.
 
 This analogy represents the underlying concept behind the ``Outpost`` design. Each node monitors the
-field of view, watching for motion. Once motion has occured a ``SpyGlass`` is deployed for a closer
+field of view, watching for motion. Once motion has occurred a ``SpyGlass`` is deployed for a closer
 look. Whenever one or more recognizable objects have been detected, this is reported and motion through
 the field of view tracked and logged.
 
@@ -118,15 +118,15 @@ Image publishing has a twofold benefit.
 - A live stream can simultaneously feed one or more monitors for on-demand real time display.
 
 Images are transported as individual full-sized frames, each compressed into JPEG format. For 
-smooth realistic video playback, the pipeline needs to run with a target thoughput of somewhere 
+smooth realistic video playback, the pipeline needs to run with a target throughput of somewhere 
 close to 30 frames per second, ideally.
 
-Obtaining this goal on a Raspberry Pi can quickly become a signficant challenge when building out 
-the pipeline with CPU-intensive tasks such as object identifcation and tracking.
+Obtaining this goal on a Raspberry Pi can quickly become a significant challenge when building out 
+the pipeline with CPU-intensive tasks such as object identification and tracking.
 
 To achieve the highest publishing frame rate possible, an ``Outpost`` node can employ a ``SpyGlass`` 
 for closer analysis of motion events. The idea is to keep the pipeline lean for quickly publishing 
-each frame, while processing a subset of the images in parallel to drive a feeedback loop. 
+each frame, while processing a subset of the images in parallel to drive a feedback loop. 
 This is a multiprocessing solution. 
 
   **Status**: stable working prototype.  
@@ -155,7 +155,7 @@ interest as efficiently as possible on multi-core hardware.
 
 For example, if a person was detected, is there a face in view? If so, can it be recognized? Was it
 package delivery or a postal carrier? If the object of interest is a vehicle, can the make/model be
-deterimined? The color? Is there a license plate visible?
+determined? The color? Is there a license plate visible?
 
 As a general rule, in-depth analysis tasks such as these are assigned to batch jobs running on the
 **sentinel** itself.
@@ -193,7 +193,7 @@ The **camwatcher** employs a Python ``asyncio`` event loop running a set of coro
 the following tasks.
 
 - *Control Loop*. Uses a ZeroMQ REQ/REP design pattern for receiving control commands. This 
-  currently just allows an ``Outpost`` to route a notification during initialization to insure 
+  currently just allows an ``Outpost`` to route a notification during initialization to ensure 
   that a logfile subscription has been established. 
 
 - *Log Subscriber*. Subscribes to logging data streamed from one or more ``Outpost``
@@ -216,7 +216,7 @@ Data model
 ----------
 
 The data model is still in its infancy and continues to evolve. Two types of data are collected
-by the **camwatcher**. Data related to the analysis of the event, and captured images. All 
+by the **camwatcher**. Data related to the analysis of the event and captured images. All 
 data is stored in the filesystem, within a separate folder for each category. 
 
 Event tracking data and results from event analysis are written to the filesystem as a set of 
@@ -225,7 +225,7 @@ the detailed data for each event.
 
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
 header row included in the data. All dates and timestamps reflect Coordinated Universal Time (UTC), 
-not the local timezone.
+not the local time zone.
 
 .. csv-table:: Event Index 
   :header: "Name", "Type", "Description"
@@ -370,7 +370,7 @@ the same serialization context underpinning imageZMQ, this helps maintain consis
 transport technology throughout the system.
 
 Internally, the first element of the (text, data) tuple returned to the Data Feed has been 
-reserved for carrying a yet-to-be-implememted response code from the **datapump**. 
+reserved for carrying a yet-to-be-implemented response code from the **datapump**. 
 
   **Status**: working proof of concept, still evolving.  
 
@@ -400,14 +400,14 @@ This function provides a list of ``datetime.timestamp`` objects reflecting the c
 on images published by the Outpost. These are provided in chronological order. Function arguments 
 are identical to what is described above for ``get_tracking_data()``.
 
-All date and time references are in Coordinated Universal Time (UTC), not the local timezone.
+All date and time references are in Coordinated Universal Time (UTC), not the local time zone.
 
 .. code-block:: python
 
   DataFeed.get_image_jpeg (date, event, timestamp) -> bytes
 
 Returns a buffer with the image frame as compressed JPEG data. Always for an existing date, 
-event, and timestamp as descibed above. There is no error checking on this either. 
+event, and timestamp as described above. There is no error checking on this either. 
 
 Presenting **camwatcher** data in this fashion provides the **sentinel** with direct access to 
 specific subsets of captured image data. For example, perhaps the images of interest are  
@@ -435,11 +435,11 @@ Workloads are configured through a set of YAML files. Tasks can be configured by
 have an affinity for a certain task engine. Perhaps one of the task engines has a dedicated 
 inference co-processor and is kept ready for real-time supplemental event analysis.
 
-- A separate engine can be used for work that only requries CPU, such as background 
+- A separate engine can be used for work that only requires CPU, such as background 
   maintenance tasks.
 
 - Workloads can be reconfigured during idle time periods, such as at night. With fewer camera
-  events occuring, co-processors can be re-tasked for larger batch analytical sweeps of the data. 
+  events occurring, co-processors can be re-tasked for larger batch analytical sweeps of the data. 
 
 See `sentinel.yaml <sentinel.yaml>`_ for an example of how this is configured. 
 
@@ -457,7 +457,7 @@ Sentinel
 Additional development is in the works with regard to task configuration. This will include
 another level of abstraction for the task list in the main YAML file. Ideally, ``TaskFactory`` 
 definitions should be useable as standard models in a workload definition. These pipeline models
-could be set up for multiple use simultaneously, each with a differernt configuration file. 
+could be set up for multiple use simultaneously, each with a different configuration file. 
 
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
@@ -499,15 +499,15 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   produces the following outputs from the camera.
 
   1. MobileNet object detection on every frame
-  2. The 640x360 RGB image data ready for OpenCV and passed into the **imagnode** pipeline as the main camera source
+  2. The 640x360 RGB image data ready for OpenCV and passed into the **imagenode** pipeline as the main camera source
   3. The same image data as an JPEG encoded frame, ready for publication to the **camwatcher**
   
   All 3 of these outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily 
-  consume this, and publish all object detection results and captured JPEG data for storage by the
+  consume this and publish all object detection results and captured JPEG data for storage by the
   **camwatcher**. 
   
   In a perfect world, the ``SpyGlass`` could be employed as a vehicle for specialized supplemental 
-  vision processing during a camera event in progress. There are a number of interesting possibilities. 
+  vision processing during a camera event in progress. There are several interesting possibilities. 
   Further provisioning with a vision co-processor provides for an incredible amount of analytical
   performance directly on an embedded low-voltage edge device. 
   
@@ -523,12 +523,11 @@ embedded devices are not generally regarded as high-performing data movers. Prov
 with Gigabit Ethernet network cabling and low power SSD storage over USB3 go a long way 
 towards alleviating those concerns. 
 
-  Complaceny should be avoided here, it is easy to be deceived. These are still small devices
-  and generally speaking, this design has a way of keeping most nodes fully tasked. Always 
-  keep the basics in mind. It is critically important to give due consideration to key factors
-  such as CPU resources, memory utilization, disk I/O, storage capacity, and network traffic. 
-  Each impact the others. The penalties incurred due to missteps always seem to hit harder than 
-  anticipated. 
+  Complacency should be avoided here, it is easy to be deceived. These are still small devices,
+  and this design has a way of keeping most nodes fully tasked. Always keep the basics in mind. 
+  It is critically important to give due consideration to key factors such as CPU resources, 
+  memory utilization, disk I/O, storage capacity, and network traffic. Each impact the others. 
+  The penalties incurred due to missteps always seem to hit harder than anticipated. 
   
   As more and more Outpost nodes are added, additional data sinks will be required to support them.
 
@@ -538,13 +537,13 @@ SentinelCam endeavors to always capture as much image detail as possible. As not
 in the data model discussion, individual image frames require much more space than a compressed 
 video format. The computer vision technology underpinning this design is based on the analysis of
 two-dimensional images. The intent is to capture high-resolution ground-truth data, reducing 
-the likelyhood that key details might be missed. This is helpful for analysis and modeling,
+the likelihood that key details might be missed. This is helpful for analysis and modeling,
 while also allowing for the production of high-quality full-motion archival videos. 
 
 There can be multiple objects of interest moving through the field of view simultaneously. 
 Collected logging data can include geometry, classification, and possibly labeling. This could 
 represent the aggregated results inferred from one or more deep neural networks whether collected 
-in real time by an Outpost node, or produced by the Sentinel. Or both.
+in real time by an Outpost node or produced by the Sentinel. Or both.
 
 It adds up in a hurry. *And the rest of the story...*
 
@@ -553,12 +552,12 @@ imagine an outdoor camera with a view of both an entry into the home and the dri
 occupants and their vehicles will pass in front of that camera multiple times per day.
 
   SentinelCam was conceived as a system providing real-time analysis of various camera events 
-  as they are occuring. Not a long-term video archival and retrieval engine. 
+  as they are occurring. Not a long-term video archival and retrieval engine. 
 
   *Built to operate exclusively on low-voltage embedded devices like the Raspberry Pi*, there
   are a few assumptions baked-in to the design. One of these is that the primary data sinks 
   are assumed to be something simple, like a permanently mounted SSD card over USB3. More
-  exotic options, e.g. a high-capacity NAS system, are certainly available. Just not assumed.
+  exotic options, such aa high-capacity NAS systems, are certainly available. Just not assumed.
 
   Jeff's Librarian simply uses Unix utilities to periodically keep a central storage hub updated.
   A great idea. If desired, the SentinelCam data sinks could simply be hosted on a larger high-capacity 
@@ -566,14 +565,13 @@ occupants and their vehicles will pass in front of that camera multiple times pe
 
   What to keep, and why. That's the real question to be answered. Isn't it always?
 
-  - All of these collected images, incredibly valuable for model-building. Generally speaking. This is
-    often the first order of business. 
+  - All these collected images: incredibly valuable for model-building. This is often the first order of business. 
   - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
   - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
   - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
   - The beauty of SentinelCam, is that it knows the difference.
 
-This all needs to be mostly automatic and self-maintaining. The end result should require the 
+This all needs to be mostly automatic and self-maintaining. The result should require the 
 bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work. 
 
 *Saying it once more. Dream big*.
