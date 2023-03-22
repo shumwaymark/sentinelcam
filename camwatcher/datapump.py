@@ -136,14 +136,14 @@ class BackgroundTasks:
         return cmdlist
     
     def _run(self):
-        logging.info("Background Tasks thread started")
+        logging.debug("Background Tasks thread started")
         while not self._stop:
             if self._tasks.empty():
                 sleep(1)
                 continue
             while not self._tasks.empty():
                 (cmd, args) = self._tasks.get()
-                logging.info(f"background task '{cmd}': {args}")
+                logging.debug(f"background task '{cmd}': {args}")
                 try:
                     if cmd == 'del':
                         for step in self._getDelCmds(args):
@@ -198,7 +198,10 @@ def main():
                 elif request['cmd'] == 'pic':  # retrieve image frame 
                     jpegfile = os.path.join(cfg['imagefolder'], request['date'],
                         request['evt'] + '_' + request['frametime'] + '.jpg')
-                    jpeg = open(jpegfile, "rb").read()
+                    if os.path.exists(jpegfile):
+                        jpeg = open(jpegfile, "rb").read()
+                    else:
+                        jpeg = None
                     pump.send_jpg(reply, jpeg)
                     continue
                 elif request['cmd'] == 'del':  # delete event data
@@ -215,8 +218,8 @@ def main():
             except KeyError:
                 logging.warning(f"Malformed request: {request}")
                 reply = b'Error'
-            except Exception as ex:
-                logging.error('unexpected exception:', ex)
+            except Exception as e:
+                logging.error(f'unexpected exception: {str(e)}')
                 traceback.print_exc()
                 reply = b'Error'
         else:
@@ -233,7 +236,7 @@ def start_logging():
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     log.addHandler(handler)
-    log.setLevel(logging.INFO)
+    log.setLevel(logging.WARN)
     return log
 
 if __name__ == "__main__":

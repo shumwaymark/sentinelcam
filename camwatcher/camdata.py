@@ -93,7 +93,8 @@ class CamData:
                           ).sort_values(
                              by="timestamp", ascending=False)
             # retrive the event_id for the most recent event in the index
-            self._lastEvent = self._index.iloc[0].event
+            if len(self._index.index) > 0:
+                self._lastEvent = self._index.iloc[0].event
         else:
             # if no index file, provide an empty DataFrame 
             self._index = pd.DataFrame(columns=CamData.IDXCOLS)

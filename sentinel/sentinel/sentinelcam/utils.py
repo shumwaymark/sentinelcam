@@ -1,3 +1,4 @@
+import os
 import datetime
 from collections import deque
 import yaml
@@ -22,6 +23,7 @@ class FPS:
 
 def readConfig(path):
 	cfg = {}
-	with open(path) as f:
-		cfg = yaml.safe_load(f)
+	if os.path.exists(path):
+		with open(path) as f:
+			cfg = yaml.safe_load(f)
 	return cfg

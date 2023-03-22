@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support result signaling to Twilio, and to Node-RED via MQTT.
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by imageZMQ.
+- Need maintenance shell script to clear out empty **camwatcher** data folders after last
+  event has been purged for a given date.
 - Continue monitoring the **camwatcher** module. Still have a few items on the ToDo list.
   - Rather than terminating sub process video writers at the end of each event, adapt these
     with a switch to turn subscriptions on and off as needed. Keep them loaded and ready 
@@ -34,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.0.19-alpha - 2023-03-22
+
+### Fixed
+
+- More hardening in the data layer. Improved exception handling, with a more graceful failover from 
+  the **datapump** to a `DataFeed` requester. 
 
 ## 0.0.18-alpha - 2023-03-21
 

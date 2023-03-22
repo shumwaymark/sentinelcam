@@ -5,6 +5,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 """
 
 import time
+import simplejpeg
 from sentinelcam.utils import readConfig
 from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace
 
@@ -69,6 +70,7 @@ class PersonsFaces(Task):
                     
     def finalize(self) -> None:
         stats = ",".join([
+            'PERSONS',
             str(self.jreq.eventDate),
             str(self.jreq.eventID),
             str(len(self.evtData.index)),
@@ -159,11 +161,98 @@ class DailyCleanup(Task):
 
         return False
 
+class CollectImageSizes(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:    
+        self.startDate = jobreq.eventDate
+        self.feed = feed
+
+    def pipeline(self, frame) -> bool:
+        # Get the complete list of available dates available through the DataFeed
+        event_dates = self.feed.get_date_list()
+        # ...and begin with the oldest date.
+        event_dates.reverse()  
+        for evtDate in event_dates:  
+            if evtDate < self.startDate:
+                continue
+            dateTag = ('IMGSZ', evtDate)
+            try:
+                # Get the camwatcher event index for a given date
+                cwIndx = self.feed.get_date_index(evtDate)
+                if len(cwIndx.index) > 0:
+                    # Process every event for this date
+                    for _evt in cwIndx[:].itertuples():
+                        event = _evt.event
+                        node = _evt.node
+                        view = _evt.viewname
+                        imgs = self.feed.get_image_list(evtDate, event)
+                        if len(imgs) > 0:
+                            try:
+                                jpeg = self.feed.get_image_jpg(evtDate, event, imgs[0])
+                                if jpeg is not None:
+                                    frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
+                                    imgSize = (frame.shape[1], frame.shape[0])
+                                    result = dateTag + (event, imgSize, node, view, len(imgs))
+                                else:
+                                    result = dateTag + (event, (-1,-1), node, view, len(imgs), "unable to retrieve image")
+                            except Exception as e:
+                                result = dateTag + (event, (-1,-1), node, view, len(imgs), str(e))
+                        else:
+                            result = dateTag + (event, (0,0), node, view, 0)
+                        self.publish(result)
+                else:
+                    result = dateTag + ("ERROR", "camwatcher index is empty")
+                    self.publish(result)
+            except Exception as e:
+                result = dateTag + ("ERROR", f"exception retrieving event data: {str(e)}")
+                self.publish(result)
+        return False
+
+class MeasureRingLatency(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        self.jreq = jobreq
+        self.dataFeed = feed
+        self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
+
+    def pipeline(self, frame) -> bool:
+        event_date = self.jreq.eventDate
+        cwIndx = self.dataFeed.get_date_index(event_date)
+        for cwEvt in cwIndx[:].itertuples():
+            # For every event in the date...
+            start_time = time.time()
+            event = cwEvt.event
+            eventKey = (event_date, event)
+            event_start = cwEvt.timestamp
+            bucket = self.ringStart(event_start, eventKey)
+            ringbuff = self.getRing()
+            frame_cnt, ring_wait, net_time = 0,0,0
+            while bucket != -1:
+                frame_cnt += 1
+                _net_started = time.time()
+                _nn = self.od.detect(ringbuff[bucket])
+                _wait_started = time.time()
+                bucket = self.ringNext()
+                ring_wait += time.time() - _wait_started
+                net_time += _wait_started - _net_started 
+            elapsed = round(time.time() - start_time, 2)
+            if frame_cnt > 0:
+                result = ('RINGSTATS',
+                          elapsed,                          # total_elapsed_time
+                          frame_cnt,                        # frame_count
+                          round(net_time,2),                # total_neuralnet_time
+                          round(net_time / frame_cnt, 4),   # neuralnet_framerate 
+                          round(ring_wait, 6),              # total_ring_latency
+                          round(ring_wait / frame_cnt, 6),  # ringwait_per_frame
+                          round(frame_cnt / elapsed, 2))    # frames_per_second 
+                self.publish(result)
+        return False
+
 def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
     menu = {
         'PersonsFaces'           : PersonsFaces,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
         'DailyCleanup'           : DailyCleanup,
+        'CollectImageSizes'      : CollectImageSizes,
+        'MeasureRingLatency'     : MeasureRingLatency
     }
     cfg = readConfig(cfgfile)
     task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg, accelerator)
