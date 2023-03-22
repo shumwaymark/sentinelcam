@@ -1,0 +1,19 @@
+%YAML 1.0
+---
+# MeasureRingLatency.yaml
+# Run MobileNetSSD for all frames in every event for the date.
+# Report the following statistics per event
+# -----------------------------------------
+#   total_elapsed_time
+#   frame_count
+#   total_neuralnet_time
+#   neuralnet_framerate
+#   total_ring_latency
+#   ringwait_per_frame
+#   frames_second
+
+mobilenetssd: 
+    prototxt_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5
