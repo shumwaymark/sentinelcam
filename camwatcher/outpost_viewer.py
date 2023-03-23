@@ -2,12 +2,12 @@
 import argparse
 import sys
 import time
+import threading
 import traceback
+from collections import deque
 import cv2
 import imagezmq
 import simplejpeg
-import threading
-from collections import deque
 
 class FPS:
 	def __init__(self, history=160) -> None:  
@@ -16,7 +16,7 @@ class FPS:
 		self._deque.append(time.time())
 	def fps(self) -> float:
 		if len(self._deque) < 2:
-			return 0
+			return 0.0
 		else:
 			return (len(self._deque) / (self._deque[-1] - self._deque[0]))
 
@@ -50,7 +50,7 @@ class VideoStreamSubscriber:
                 self.velocity.update()
             receiver.close()
         except Exception as ex:
-            print("VideoStreamSubscriber failure: " + ex)
+            print("VideoStreamSubscriber failure: " + str(ex))
 
     def close(self):
         self._stop = True
@@ -83,7 +83,7 @@ if __name__ == "__main__":
         print('Exit due to keyboard interrupt')
     except Exception as ex:
         print('Python error with no Exception handler:')
-        print('Traceback error:', ex)
+        print('Traceback error:', str(ex))
         traceback.print_exc()
     finally:
         receiver.close()
