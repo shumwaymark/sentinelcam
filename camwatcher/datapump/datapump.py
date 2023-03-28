@@ -2,6 +2,8 @@ import io
 import os
 import logging
 import logging.handlers
+from datetime import datetime
+from time import sleep
 import pickle 
 import queue
 import subprocess
@@ -9,12 +11,11 @@ import threading
 import traceback
 import zlib
 import zmq
+import numpy as np
 import imagezmq
 import msgpack
 import pandas
-from datetime import datetime
-from time import sleep
-#from camwatcher.camdata import CamData
+import simplejpeg
 from camdata import CamData
 
 class DataPump(imagezmq.ImageHub):
@@ -159,14 +160,21 @@ class BackgroundTasks:
         self._stop = True
         self._thread.join()
 
+def create_tiny_jpeg() -> bytes:
+    tiny_image = np.zeros((3, 3, 3), dtype="uint8")  # tiny blank image
+    buffer = simplejpeg.encode_jpeg(tiny_image, quality=95, colorspace='BGR')
+    return buffer
+
 def main():
     start_logging()
+    tinyJPG = create_tiny_jpeg()
     taskQueue = queue.Queue()
     bgTasks = BackgroundTasks(taskQueue, cfg['datafolder'], cfg['imagefolder'])
     cData = CamData(cfg['datafolder'], cfg['imagefolder'])
     pump = DataPump(f"tcp://*:{cfg['control_port']}")
     logging.info("datapump response loop starting")
     # TODO: Graceful shutdown / termination handling needed 
+    # Need a policy for sending meaningful response codes back to the DataFeed
     while True:  
         msg = pump.zmq_socket.recv()
         request = msgpack.loads(msg)
@@ -201,7 +209,7 @@ def main():
                     if os.path.exists(jpegfile):
                         jpeg = open(jpegfile, "rb").read()
                     else:
-                        jpeg = None
+                        jpeg = tinyJPG
                     pump.send_jpg(reply, jpeg)
                     continue
                 elif request['cmd'] == 'del':  # delete event data
@@ -242,6 +250,7 @@ def start_logging():
 if __name__ == "__main__":
 
     cfg = {'control_port': 5556, 
-           'imagefolder': '/mnt/usb1/imagedata/video',
-           'datafolder':  '/mnt/usb1/imagedata/camwatcher'} 
+           'imagefolder' : '/mnt/usb1/sentinelcam/images',
+           'datafolder'  : '/mnt/usb1/sentinelcam/camwatcher',
+           'logfile'     : '/mnt/usb1/sentinelcam/logs/datapump.log'} 
     main()

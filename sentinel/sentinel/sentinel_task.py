@@ -7,11 +7,13 @@ License: MIT, see the sentinelcam LICENSE for more details.
 import argparse
 import json
 import zmq
+from datetime import datetime
 
+today = datetime.utcnow().isoformat()[:10]
 ap = argparse.ArgumentParser()
-ap.add_argument("-d", "--date", required=True, help="Date (YYYY-MM-DD)")
+ap.add_argument("-t", "--task", default="STATUS", help="Task name")
+ap.add_argument("-d", "--date", default=today, help="Date (YYYY-MM-DD)")
 ap.add_argument("-e", "--event", help="Event ID")
-ap.add_argument("-t", "--task", default="MobileNetSSD_allFrames", help="Task name")
 args = vars(ap.parse_args())
 event_date = args["date"]
 event_id = args["event"]

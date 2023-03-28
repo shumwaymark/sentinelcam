@@ -1,0 +1,41 @@
+%YAML 1.0
+---
+# Settings file camwatcher.yaml 
+control_port: 5566
+
+# The list of known outpost nodes. Subscriptions to these are established 
+# at start-up. New nodes may also be added dynamically whenever introduced
+# through a camera handoff over the control_port. Dynamically added nodes 
+# are cleared by a restart. 
+outpost_nodes:
+  #  Each outpost should match the node["name"] setting for the imagenode 
+  east:
+    view: Front
+    logger: tcp://east:5565
+    images: tcp://east:5567
+  outpost:            
+    view: PiCamera                 # view name for the camera
+    logger: tcp://lab1:5565        # log publisher subscriptions for node
+    images: tcp://lab1:5567        # image publisher subscriptions for node
+
+# Defines camwatcher to sentinel communication channels. The datapump connection 
+# specified below is provided to the sentinel for DataFeed queries. Must match the 
+# datapump configuration for this host. 
+sentinel:
+   requests: tcp://sentinel:5566       # task requests to sentinel
+   publisher: tcp://sentinel:5565      # for subscriptions to sentinel publisher 
+   post_event: MobileNetSSD_allFrames  # camwatcher post-event task request
+   datapump: tcp://data1:5556          # datapump connection for use by sentinel
+   datasink: data1                     # tag identifying this data sink
+
+      ##   Data storage locations  ##
+data:  
+  images: /mnt/usb1/sentinelcam/images        # JPG file storage
+  csvfiles: /mnt/usb1/sentinelcam/camwatcher  # CSV file storage
+
+# Log file directories. The sentinel does not write to a logfile on disk. All logging 
+# activity, including full task results along with internal warnings and errors, 
+# are published over 0MQ. See the sentinel settings above for this connection.
+logs: 
+  camwatcher: /mnt/usb1/sentinelcam/logs
+  sentinel: /mnt/usb1/sentinelcam/logs

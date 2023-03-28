@@ -22,6 +22,7 @@ import queue
 import uuid
 import zmq
 from zmq.asyncio import Context as AsyncContext
+from zmq.log.handlers import PUBHandler
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.taskfactory import TaskFactory
 from sentinelcam.utils import readConfig
@@ -36,8 +37,8 @@ ctxBlocking = zmq.Context.shadow(ctxAsync.underlying)
 jobLock = threading.Lock()
 taskFeed = queue.Queue()
 
-taskList = {}
-jobList = {}
+taskList = {}  # All JobRequest objects by JobID
+jobList = {}   # Those task requests which should currently be running
  
 class JobRequest:
     
@@ -65,6 +66,7 @@ class JobRequest:
         self.datapump = pump  # datapump connection string
         self.camsize = (0,0)  # TODO: required per event; learn up front, dynamically
         self.engine = None
+        logging.info(str(self.start_Message('SUBMIT')))
         with jobLock:
             taskList[self.jobID] = self
 
@@ -72,15 +74,16 @@ class JobRequest:
         self.jobStartTime = datetime.utcnow()
         self.jobStatus = JobRequest.Status_RUNNING
         self.engine = engine
+        logging.info(str(self.start_Message('START')))
         with jobLock:
             jobList[self.jobID] = self
 
     def deregisterJOB(self, status) -> None:
         self.jobEndTime = datetime.utcnow()
         self.jobStatus = status
-        logging.info(self.status_Message('EOJ'))
-        if self.jobID in jobList:
-            with jobLock:
+        logging.info(str(self.stop_Message()))
+        with jobLock:
+            if self.jobID in jobList:
                 del jobList[self.jobID]
 
     def _timeVals(self) -> tuple:
@@ -93,20 +96,28 @@ class JobRequest:
                 elapsed_time = str(self.jobEndTime - self.jobStartTime)
         return (start_time, end_time, elapsed_time)  
 
-    def status_Message(self, reason) -> tuple:
+    def start_Message(self, stage) -> str:
+        return json.dumps({
+            'flag': stage,
+            'jobid': self.jobID,
+            'task': self.jobTask,
+            'from': self.sourceNode,
+            'sink': self.dataSink,
+            'date': self.eventDate,
+            'event': self.eventID
+        })
+
+    def stop_Message(self) -> str:
         (start_time, end_time, elapsed_time) = self._timeVals()
-        result = (
-            reason,
-            self.jobTask,
-            self.sourceNode,
-            JobRequest.Status[self.jobStatus],
-            elapsed_time,
-            self.engine,
-            self.dataSink,
-            self.eventDate,
-            self.eventID
-        )
-        return result
+        return json.dumps({
+            'flag': 'EOJ',
+            'jobid': self.jobID,
+            'task': self.jobTask,
+            'from': self.sourceNode,
+            'sink': self.dataSink,
+            'status': JobRequest.Status[self.jobStatus],
+            'elapsed': elapsed_time
+        })
 
     def summary_JSON(self) -> str:
         (start_time, end_time, elapsed_time) = self._timeVals()
@@ -124,6 +135,11 @@ class JobRequest:
             'EventID': self.eventID,
             'JobID': self.jobID
         })
+    
+    def full_history_report() -> None:
+        with jobLock:
+            for jobreq in taskList.values():
+                logging.info(jobreq.summary_JSON())
 
 class RingWire:
     def __init__(self, socketDir, engineName) -> None:
@@ -221,8 +237,8 @@ class JobTasking:
     rawRingbuff : dict
         The image frame ring buffers for this task engine keyed by image size. 
         The items are a list of shared memory blocks. These are references to
-        a multiprocessing.sharedctypes.RawArray. Each will be redefined as a 
-        NumPy array by the child process. 
+        a multiprocessing.sharedctypes.RawArray. Each will be redefined as an 
+        appropriate NumPy array by the child process. 
     """
 
     def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff) -> None:
@@ -265,16 +281,14 @@ class JobTasking:
             self.ringbuff = []
 
             def ringStart(frametime, _newEvent=None) -> int:
-                timestamp = frametime.isoformat()
-                self.frame_start = timestamp
+                self.frame_start = frametime.isoformat()
                 self.frame_offset = 0
-                _start_command = (JobManager.ReadSTART, 
-                        ("{}_{}".format(timestamp[:10], timestamp[11:].replace(':','.')),
-                        _newEvent))
+                _start_command = (JobManager.ReadSTART, (self.frame_start, _newEvent))
                 ringWire.send(msgpack.packb(_start_command))
                 if _newEvent:
-                    self.jobreq = taskQ.get()
-                    if self.jobreq.camsize != self.imagesize:
+                    # wait here for confirmation of ring buffer assignment
+                    self.jobreq = taskQ.get()  
+                    if self.jobreq.camsize != self.imagesize and self.jobreq.camsize != (0,0):
                         self.imagesize = self.jobreq.camsize
                         self.ringbuff = ringbuffers[self.imagesize]
                 bucket = msgpack.unpackb(ringWire.recv())
@@ -289,10 +303,20 @@ class JobTasking:
             def getRing() -> list:
                 return self.ringbuff
 
-            def publish(msg, frameref = False) -> None:
-                if frameref:
-                    frame = (self.frame_start, self.frame_offset)
+            def publish(msg, frameref=None, cwUpd=False) -> None:
+                if frameref is not None:
+                    frame = (self.jobreq.jobID, frameref, self.frame_start, self.frame_offset)
                     msg = frame + msg
+                    if cwUpd:
+                        cwUpdate = {
+                            "jobid": msg[0],
+                            "refkey": msg[1],
+                            "start": msg[2],
+                            "offset": msg[3],
+                            "clas": msg[4],
+                            'rect': [int(msg[5]), int(msg[6]), int(msg[7]), int(msg[8])]
+                        }
+                        msg = json.dumps(cwUpdate)
                 envelope = (TaskEngine.TaskSTATUS, msg)
                 publisher.send(msgpack.packb(envelope))
 
@@ -373,7 +397,7 @@ class JobTasking:
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
                     except Exception as e:
-                        traceback.print_exc()
+                        traceback.print_exc()  # see syslog for traceback
                         msg = (TaskEngine.TaskSTATUS, f"taskHost() exception, {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
@@ -398,7 +422,7 @@ class JobTasking:
             ringWire.close()
             publisher.close()
         # ----------------------------------------------------------------------
-        #   End of TaskEngine
+        #                         End of TaskEngine
         # ----------------------------------------------------------------------
 
 class TaskEngine:
@@ -531,12 +555,15 @@ class JobManager:
 
     def _getFrameDimensons(self, jreq) -> tuple:
         # TODO: Eliminate this stupid hack. Image dimsensions should be carried in the camera event data.
+        _shape = (0,0)
         datafeed = self.datafeeds[jreq.datapump]
         frametimes = datafeed.get_image_list(jreq.eventDate, jreq.eventID)
-        jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametimes[0])
-        frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
-        logging.debug(f"Learned image dimensions: {frame.shape}")
-        return frame.shape
+        if len(frametimes) > 0:
+            jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametimes[0])
+            frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
+            _shape = frame.shape
+        logging.debug(f"Learned image dimensions: {_shape}")
+        return _shape
 
     def _feedStart(self, taskEngine, key) -> None:
         jreq = taskEngine.getJobRequest()
@@ -544,7 +571,7 @@ class JobManager:
         if startframe:
             _valid = True
         if _newEvent:  
-            # When changing events, potentially select a new set of ring buffers
+            # When changing events, potentially assign a different ring buffer
             jreq.eventDate = _newEvent[0]
             jreq.eventID = _newEvent[1]
             logging.debug(f"_feedStart() {taskEngine.getName()}, {startframe}, {jreq.eventDate}, {jreq.eventID}")
@@ -562,7 +589,7 @@ class JobManager:
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = None
         else:
-            framestart = datetime.strptime(startframe, "%Y-%m-%d_%H.%M.%S.%f")
+            framestart = datetime.fromisoformat(startframe)
             frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = iter(frametimes)
@@ -583,13 +610,13 @@ class JobManager:
             except StopIteration:
                 taskEngine.cursor = None
 
-    def _get_frame(self, taskEngine, frametime):
+    def _get_frame(self, taskEngine, frametime) -> None:
         datafeed = taskEngine.dataFeed
         jreq = taskEngine.getJobRequest()
         jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametime)
         taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
 
-    def _jobThread(self):
+    def _jobThread(self) -> None:
         logging.debug(f"Job Manager thread started.")
         while not self._stop:
             if not taskFeed.empty():
@@ -659,12 +686,14 @@ async def task_loop(asyncREP, taskCFG):
         try:
             request = json.loads(payload)
             if 'task' in request:
-                # task could be a command, something like: STATUS, CANCEL, HISTORY
                 task = request['task']
-                if task == 'HISTORY':
-                    with jobLock:
-                        for jobreq in taskList.values():
-                            logging.info(jobreq.summary_JSON())
+                if task == 'HISTORY':   JobRequest.full_history_report()
+                elif task == 'STATUS':  
+                    pass
+                    #   Stats:  Job Count, Failures, average run time
+                    #   Pending jobs,  Running, Queued, Failures?
+                    #       Task, Status, start time, elapsed, sink, date, event
+                    #       stats grouped by task?  sink? 
                 else:
                     if task in taskCFG:
                         job = JobRequest(
@@ -675,8 +704,8 @@ async def task_loop(asyncREP, taskCFG):
                             request['pump'],
                             request['task']
                         )
-                        logging.debug(f"Queued job: {job.jobTask}, {job.eventID}")
                         taskFeed.put((JobManager.JobSUBMIT, job.jobID))
+                        reply = job.jobID
                     else:
                         logging.error(f"No such task: '{task}'")
                         reply = 'Error'
@@ -686,12 +715,11 @@ async def task_loop(asyncREP, taskCFG):
         except ValueError as e:
             logging.error(f"JSON exception '{str(e)}' decoding task request: '{payload}'")
             reply = 'Error'
-        except KeyError:
-            logging.error(f"Incomplete request: {request}")
+        except KeyError as keyval:
+            logging.error(f"Incomplete request, '{keyval}' missing: {request}")
             reply = 'Error'
-        except Exception as e:
-            logging.exception(f"Unexpected exception: {str(e)}")
-            traceback.print_exc()
+        except Exception:
+            logging.exception(f"Unexpected exception processing task request")
             reply = 'Error'
         finally:
             await asyncREP.send(reply.encode("ascii"))
@@ -701,7 +729,7 @@ async def task_feedback(asyncSUB):
         payload = await asyncSUB.recv()
         (msgTag, taskMsg) = msgpack.unpackb(payload, use_list=False)
         if msgTag == TaskEngine.TaskSTATUS:
-            logging.info(taskMsg)
+            logging.info(str(taskMsg))
         else: 
             # These TaskEngine conditions have an equivalent mapping to JobRequest status flags
             if msgTag in [TaskEngine.TaskSTARTED,
@@ -709,9 +737,7 @@ async def task_feedback(asyncSUB):
                           TaskEngine.TaskFAIL,
                           TaskEngine.TaskCANCELED]:
                 logging.debug(f"{taskMsg}: status update {JobRequest.Status[msgTag]}.")
-                if msgTag == TaskEngine.TaskSTARTED:
-                    logging.info(taskList[taskMsg].status_Message('START'))
-                else:
+                if msgTag != TaskEngine.TaskSTARTED:
                     taskFeed.put((msgTag, taskMsg))
             elif msgTag == TaskEngine.TaskBOMB:
                 msg = taskMsg.split(':')
@@ -721,7 +747,7 @@ async def task_feedback(asyncSUB):
                 logging.error(f"Unsupported task message: {msgTag}")
 
 async def main():
-    log = start_logging(CFG["log_dir"])
+    log = start_logging(CFG["logging_port"])
     log.info("Sentinel started.")
     asyncREP = ctxAsync.socket(zmq.REP)  # task loop control socket
     asyncSUB = ctxAsync.socket(zmq.SUB)  # subscriptions for job result publishers
@@ -737,24 +763,22 @@ async def main():
                              task_feedback(asyncSUB))
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
-    except Exception as e:  
-        log.exception(f'Unhandled exception: {str(e)}')
+    except Exception as e:  # traceback will appear in log 
+        log.exception('Unanticipated error with no exception handler')
     finally:
         manager.close()
         asyncREP.close()
         asyncSUB.close()
         log.info("Sentinel shutdown")
 
-def start_logging(logdir):
+def start_logging(publish):
     log = logging.getLogger()
-    handler = logging.handlers.RotatingFileHandler(
-        os.path.join(logdir, 'sentinel.log'),
-        maxBytes=1048576, backupCount=10)
-    formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
-    handler.setFormatter(formatter)
-    log.addHandler(handler)
+    zmq_log_handler = PUBHandler(f"tcp://*:{publish}")
+    zmq_log_handler.setFormatter(logging.Formatter(fmt='{message}', style='{'))
+    zmq_log_handler.root_topic = 'Sentinel'
+    log.addHandler(zmq_log_handler)
     log.setLevel(logging.INFO)
     return log
 
-if __name__ == '__main__' :
+if __name__ == '__main__':
     asyncio.run(main())
