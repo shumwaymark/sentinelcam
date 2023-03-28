@@ -2,9 +2,9 @@
 ---
 # Settings file sentinel.yaml 
 control_port: 5566
+logging_port: 5565
 default_pump: tcp://data1:5556
 socket_dir: /home/pi/sentinel/sockets
-log_dir: /home/pi/sentinel/logs
 
 # For ring buffer allocations, any potential image size must
 # be known in advance. Each task_engine needs a set of ring
@@ -41,4 +41,10 @@ task_list:
     class: 1
   DailyCleanup:
     config: /home/pi/sentinel/tasks/DailyCleanup.yaml
+    class: 1
+  CollectImageSizes:
+    config: None
+    class: 2
+  MeasureRingLatency:
+    config: /home/pi/sentinel/tasks/MeasureRingLatency.yaml
     class: 1
