@@ -12,6 +12,7 @@ import imagezmq
 import msgpack
 import pandas
 from datetime import datetime
+import logging
 
 class DataFeed(imagezmq.ImageSender):
 
@@ -107,7 +108,11 @@ class DataFeed(imagezmq.ImageSender):
     def get_image_list(self, date, event):
         req = msgpack.dumps({'cmd': 'img', 'date': date, 'evt': event})
         self.zmq_socket.send(req)
-        (msg, result) = self.recv_pickle()
+        result = []
+        try:
+            (msg, result) = self.recv_pickle()
+        except Exception as e:
+            logging.error(f"DataFeed.get_image_list({date},{event}) exception {str(e)}")
         return result
 
     def get_image_jpg(self, date, event, frametime):
@@ -122,7 +127,7 @@ class DataFeed(imagezmq.ImageSender):
         req = msgpack.dumps({'cmd': 'del', 'date': date, 'evt': event})
         self.zmq_socket.send(req)
         return self.zmq_socket.recv()
-            
+
     def health_check(self) -> str:
         req = msgpack.dumps({'cmd': 'HC'})
         self.zmq_socket.send(req)
