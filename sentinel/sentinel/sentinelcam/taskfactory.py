@@ -18,7 +18,7 @@ class Task:
         return -1
     def getRing(self) -> list:
         return []
-    def publish(self, msg, imageref=False) -> None:
+    def publish(self, msg, imageLogRef=None) -> None:
         pass
     # Function prototypes, define these for task logic 
     def pipeline(self, frame) -> bool:
@@ -31,6 +31,8 @@ class Task:
 class MobileNetSSD_allFrames(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
+        self.cwUpd = cfg["camwatcher_update"]
+        self.refkey = cfg["trk_type"]
 
     def pipeline(self, frame) -> bool:
         (rects, labels) = self.od.detect(frame)
@@ -38,7 +40,7 @@ class MobileNetSSD_allFrames(Task):
             detections = zip(labels, rects)
             for objs in detections:
                 result = (objs[0], int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
-                self.publish(result, True)
+                self.publish(result, self.refkey, self.cwUpd)
         return True  # process every frame 
 
 class PersonsFaces(Task):
@@ -69,6 +71,7 @@ class PersonsFaces(Task):
         return continuePipe
                     
     def finalize(self) -> None:
+        # this writes CSV data to the logger
         stats = ",".join([
             'PERSONS',
             str(self.jreq.eventDate),
