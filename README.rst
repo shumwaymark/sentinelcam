@@ -112,7 +112,7 @@ slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as
 Two key enhancements provide the essential wiring to make this possible. Log and image publishing over 
 ZeroMQ and imageZMQ respectively.
 
-Image publishing has a twofold benefit.
+  *Image publishing has a twofold benefit*
 
 - Image capture from another node can be quickly initiated by an event in progress.
 - A live stream can simultaneously feed one or more monitors for on-demand real time display.
@@ -160,7 +160,7 @@ determined? The color? Is there a license plate visible?
 As a general rule, in-depth analysis tasks such as these are assigned to batch jobs running on the
 **sentinel** itself.
 
-Log publishing also offers two benefits.
+  *Log publishing also offers two benefits*
 
 - Allows error and warning conditions to be accumulated in a centralized repository as they occur.
   This avoids reliance on SD cards with limited storage capacity which could be dispersed across 
@@ -169,53 +169,39 @@ Log publishing also offers two benefits.
 - More importantly, logged event notifications including information related to an event in progress
   are then available as data which can be streamed to multiple interested consumers in real time.
 
-The ``Outpost`` as currently implemented is still highly experimental, and best represents proof 
-of concept as working draft. Further detail on the design, structure, and operation of
+The ``Outpost`` as currently implemented is still considered experimental, and best represents proof 
+of concept as an evolving work in progress. Further detail on the design, structure, and operation of
 the ``Outpost`` have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
 Camwatcher design
 -----------------
 
-A prototype of the **camwatcher** functionality is up and running in production. In its current
-state, this is best evaluated as working proof of concept. The diagram below presents a high-level 
-design sketch.
+A prototype of the **camwatcher** functionality is up and running in production. Early design goals 
+for this module have been met. This key component has proven to be a stable proof of concept. 
+See below for a high-level design sketch.
 
 .. image:: docs/images/CamWatcher.png
    :alt: Sketch of basic camwatcher design
 
-This design exploits two of the enhancements made to the **imagenode** module described
-above supporting **Outpost** functionality: log and image publishing over ZeroMQ as 
-configurable options.
-
   **Status**: stable working prototype.  
 
-The **camwatcher** employs a Python ``asyncio`` event loop running a set of coroutines with
-the following tasks.
+- Image publishing over imageZMQ supports multiple subscribers concurrently. Event analysis and 
+  image capture can occur, while simultaneously supporting a live camera feed on one or more video 
+  displays. 
 
-- *Control Loop*. Uses a ZeroMQ REQ/REP design pattern for receiving control commands. This 
-  currently just allows an ``Outpost`` to route a notification during initialization to ensure 
-  that a logfile subscription has been established. 
+- Log publishing over ZeroMQ has also proven to be very effective. The **camwatcher** design
+  uses this in a couple of ways. One is for responding to activity being reported from the
+  ``Outpost`` nodes in a real time manner. Additonally, task results from analysis running on 
+  the **sentinel** are collected using this same technique. See the ``sentinel`` setting in the 
+  `camwatcher.yaml <camwatcher.yaml>`_ file for how this is configured.
 
-- *Log Subscriber*. Subscribes to logging data streamed from one or more ``Outpost``
-  publishers via ZeroMQ. Logging data that pertains to a camera event is directed to the 
-  *Dispatcher* for handling. Any other data is passed to the **camwatcher** internal logger.
-
-- *Dispatcher*. Handles object tracking event data. For each new event, a subprocess is
-  started as an image subscriber to begin capturing images. All event tracking data
-  is queued for permanent storage by the *CSV File Writer*.
-
-This design packs a fair amount of network I/O activity into a single thread of execution. To 
-best exploit the multi-core architecture of the Raspberry Pi 4B, a child process is forked to
-capture and store the published images from ``Outpost`` nodes while an event is in progress.
-
-The *CSV File Writer* runs in the main process within a separate thread of execution. This component 
-is responsible for receiving queued data events and writing them into CSV-format text files based 
-on the following data model.
+The *CSV File Writers* run as dedicated I/O threads. This component is responsible for receiving 
+queued data events and writing them into CSV-format text files based on the following data model.
 
 Data model
 ----------
 
-The data model is still in its infancy and continues to evolve. Two types of data are collected
+The data model is beginning to stabilize, though continues to evolve. Two types of data are collected
 by the **camwatcher**. Data related to the analysis of the event and captured images. All 
 data is stored in the filesystem, within a separate folder for each category. 
 
@@ -239,8 +225,7 @@ not the local time zone.
   type, str, event type 
 
 Event detail files always include a header row, with varying data structures depending on the type 
-of event. There is currently only a single event type defined, the tracking events. The naming
-convention for all detail files is: ``EventID_TypeCode.csv``
+of event. The naming convention for all detail files is: ``EventID_TypeCode.csv``
 
 .. csv-table:: Tracking Event Detail
   :header: "Name", "Type", "Description"
@@ -254,15 +239,16 @@ convention for all detail files is: ``EventID_TypeCode.csv``
   rect_x2, int, bounding rectangle X2-coordinate
   rect_y2, int, bounding rectangle Y2-coordinate
 
-These CSV files are written into the folder specified by the ``csvdir`` configuration 
-setting and organized by date into subfolders with a YYYY-MM-DD naming convention.
+These CSV files are written into the folder specified by the ``csvfiles`` configuration 
+setting in the `camwatcher.yaml <camwatcher.yaml>`_ file, and organized by date into subfolders 
+with a YYYY-MM-DD naming convention.
 
 Although identifiers are unique, event data is always referenced by date. There is no event 
 index crossing date boundaries. 
 
 .. code-block:: 
 
-  csvdir
+  camwatcher
   ├── 2021-02-11
   │   ├── camwatcher.csv
   │   ├── 0b98da686cbf11ebb942dca63261a32e_trk.csv
@@ -287,8 +273,8 @@ index crossing date boundaries.
 
 Captured images are written to the filesystem as individual full-sized frames 
 compressed into JPEG files. These files are written into the folder specified 
-by the ``outdir`` configuration setting and organized by date into subfolders 
-with a YYYY-MM-DD naming convention.
+by the ``images`` configuration setting int the `camwatcher.yaml <camwatcher.yaml>`_ 
+file, and organized by date into subfolders with a YYYY-MM-DD naming convention.
 
 This convention allows for retrieval and storage that is both fast and efficient 
 on such small devices. Analysis tasks have speedy direct access to any desired 
@@ -301,7 +287,7 @@ portrayed below.
 
 .. code-block:: 
 
-  outdir
+  images
   ├── 2021-02-11
   │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.542141.jpg
   │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.572958.jpg
@@ -461,14 +447,8 @@ could be set up for multiple use simultaneously, each with a different configura
 
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
-- Final storage of results from event analysis, as supplemental to the original tracking data
-  is currently in design. A log publishing service will be added for this. The **camwatcher** 
-  already understands how to subscribe to published log data and write to CSV files. This
-  module will be adapted to subscribe to the **sentinel** for any task results needing storage 
-  with the event data.
-
-- Multiple methods for addressing event publication needs that go out to the larger world will 
-  also be important.
+  Multiple methods for addressing those event publication needs which  go out to the larger 
+  world will also be important.
   
   - `MQTT` for use in applications such as Node-RED
   - `Twilio` for SMS messaging
