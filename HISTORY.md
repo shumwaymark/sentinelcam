@@ -12,21 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
-- Continue development and testing of the **sentinel** module. 
-  - Provide inference results for storing with event data.
-  - Support result signaling to Twilio, and to Node-RED via MQTT.
+- Continue development and testing of the **sentinel** module. Support result signaling 
+  to Twilio, and to Node-RED via MQTT.
+- Implement internal housekeeping on the **sentinel** to periodically dump old job history.
+  Needed to avoid an obvious memory leak. Perhaps daily at midnight? 
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by imageZMQ.
 - Need maintenance shell script to clear out empty **camwatcher** data folders after last
-  event has been purged for a given date.
+  event has been purged for a date.
 - Continue monitoring the **camwatcher** module. Still have a few items on the ToDo list.
-  - Rather than terminating sub process video writers at the end of each event, adapt these
-    with a switch to turn subscriptions on and off as needed. Keep them loaded and ready 
-    for faster startup on subsequent events. Design management controls to end after a 
-    period of inactivity or gauge this based on work load. 
-  - Move configuration into YAML file.
-  - Confirm exception handling is correct.
+- Add missing health-check from the **camwatcher** to detect and restart a stalled **imagenode**. 
 - Continue development of video_review_df.py
+  - Support selection of different result sets
   - Add missing node/view filtering functionality
   - Allow display of neural net results to be optional
   - Add functionality for real-time display of any camera view, maybe
@@ -36,6 +33,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.0.20-alpha - 2023-03-27
+
+### Changed
+
+- Restructured python module organization for the data sink codebase.
+- Fleshed out **camwatcher** setups and migrated into a YAML document. 
+- Child process image subscribers are now pre-loaded when the **camwatcher** initializes.
+  These are now kept resident between events for faster response to new activity.
+- A list of known `Outpost` nodes has been added to the **camwatcher** settings. Subscriptions
+  to these are established automatically at startup. A new camera node can still introduce 
+  itself dynamically. This change allows the **camwatcher** and **imagenode** applications to 
+  restart independently of each other. Previously, all camera nodes had to be restarted 
+  whenever the **camwatcher** was bounced. 
+- Now providing **sentinel** task results via 0MQ log publishing. This content includes analysis 
+  results and status messages, along with internal errors and warnings. The **sentinel** does not
+  write to a logfile on local disk. All logging is published for any interested subscribers.
+- A subprocess agent was added to the **camwatcher** for subscribing to **sentinel** logging messages
+  and captuing task analysis data. 
+- Post-event processing logic was added to the **camwatcher**. This is used to automatically submit a 
+  parameterized task to the **sentinel** for a complete analysis of all event data. Results are stored
+  as a supplement to the original captured tracking data provided by the `Outpost` nodes.
 
 ## 0.0.19-alpha - 2023-03-22
 
