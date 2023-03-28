@@ -183,6 +183,9 @@ See below for a high-level design sketch.
 .. image:: docs/images/CamWatcher.png
    :alt: Sketch of basic camwatcher design
 
+Each **camwatcher** node can support a limited number of ``Outpost`` publishers. Additional data
+sinks may need to be added as more and more camera nodes are deployed.
+
   **Status**: stable working prototype.  
 
 - Image publishing over imageZMQ supports multiple subscribers concurrently. Event analysis and 
