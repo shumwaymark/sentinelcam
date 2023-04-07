@@ -161,8 +161,8 @@ class BackgroundTasks:
         self._thread.join()
 
 def create_tiny_jpeg() -> bytes:
-    tiny_image = np.zeros((3, 3, 3), dtype="uint8")  # tiny blank image
-    buffer = simplejpeg.encode_jpeg(tiny_image, quality=95, colorspace='BGR')
+    pixel = np.zeros((1, 1, 3), dtype=np.uint8)  # 1-pixel image
+    buffer = simplejpeg.encode_jpeg(pixel)
     return buffer
 
 def main():
@@ -192,7 +192,11 @@ def main():
                 elif request['cmd'] == 'evt':  # retrieve event data 
                     cData.set_date(request['date'])
                     cData.set_event(request['evt'])
-                    evtData = cData.get_event_data()
+                    if 'trk' in request:
+                        _trk = request['trk']
+                    else:
+                        _trk = 'trk'
+                    evtData = cData.get_event_data(_trk)
                     pump.send_DataFrame(reply, evtData)
                     continue
                 elif request['cmd'] == 'img':  # retrieve list of image timestamps
@@ -239,8 +243,8 @@ def main():
 
 def start_logging():
     log = logging.getLogger()
-    handler = logging.handlers.RotatingFileHandler('datapump.log',
-        maxBytes=1048576, backupCount=10)
+    handler = logging.handlers.RotatingFileHandler(cfg['logfile'],
+        maxBytes=524288, backupCount=5)
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     log.addHandler(handler)

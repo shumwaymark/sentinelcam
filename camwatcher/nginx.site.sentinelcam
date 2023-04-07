@@ -1,0 +1,41 @@
+#
+# Example NGINX site definition for SentinelCam (INTERNAL). 
+# 
+# For hosting SentinelCam services implemented in Flask via uWSGI 
+# as detailed below. This example is a simple same-server connection 
+# over Unix sockets. 
+#
+# Nothing fancy here. Left a default document root in place.
+# No TLS support, no PHP. Plain vanilla. 
+#
+# For private internal use only. Nowhere close to a hardened solution.
+#
+# This routes requests sent to http://hostname/sentinelcam on over
+# to uWSGI, where "video_review_df.py" is the Flask application mounted 
+# there as the root (/).
+#
+# Refer to the uwsgi.yaml file for that side of the setup.
+#
+# e.g. http://hostname/sentinelcam/cam_event/2022-05-31/...
+#
+# mark.shumway@swanriver.dev, 31-May-2022
+#
+server {
+	listen 80 default_server;
+	listen [::]:80 default_server;
+
+	root /var/www/html;
+	index index.html;
+
+	server_name _;
+
+	location / {
+		try_files $uri $uri/ =404;
+	}
+	location = /sentinelcam { rewrite ^ /sentinelcam/; }
+	location /sentinelcam { try_files $uri @sentinelcam; }
+	location @sentinelcam {
+		include uwsgi_params;
+		uwsgi_pass unix:/home/pi/sentinelcam/.tmp/video_review.sock;
+	}
+}

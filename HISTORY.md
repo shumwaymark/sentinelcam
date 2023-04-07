@@ -14,18 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     to support custom lenses as another layer beneath object detection.
 - Continue development and testing of the **sentinel** module. Support result signaling 
   to Twilio, and to Node-RED via MQTT.
-- Implement internal housekeeping on the **sentinel** to periodically dump old job history.
-  Needed to avoid an obvious memory leak. Perhaps daily at midnight? 
+- Implement internal housekeeping on the **sentinel** to periodically dump oldest job history.
+  Needed to avoid an obvious memory leak. Perform as a routine task during quiet periods.
+- Support a job runtime limit as a configurable setting per task engine. Provide tolerance
+  based on the queue length for tasks waiting in that job class.  
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by imageZMQ.
 - Need maintenance shell script to clear out empty **camwatcher** data folders after last
   event has been purged for a date.
-- Continue monitoring the **camwatcher** module. Still have a few items on the ToDo list.
-- Add missing health-check from the **camwatcher** to detect and restart a stalled **imagenode**. 
-- Continue development of video_review_df.py
-  - Support selection of different result sets
-  - Add missing node/view filtering functionality
+- Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
+  **imagenode**. 
+- Continue development of `video_review_df.py`
   - Allow display of neural net results to be optional
+  - Add missing node/view filtering functionality
   - Add functionality for real-time display of any camera view, maybe
 
 ### Known bugs
@@ -34,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.21-alpha - 2023-04-06
+
+### Changed
+
+- Spit and polish for camwatcher v3 support. Bug clean-up sweep.
+- Minor updates to `video_review_df.py` for supporting the selection of alternate result sets. 
+
 ## 0.0.20-alpha - 2023-03-27
 
 ### Changed
@@ -41,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restructured python module organization for the data sink codebase.
 - Fleshed out **camwatcher** setups and migrated into a YAML document. 
 - Child process image subscribers are now pre-loaded when the **camwatcher** initializes.
-  These are now kept resident between events for faster response to new activity.
+  These are kept resident between events for faster response to new activity.
 - A list of known `Outpost` nodes has been added to the **camwatcher** settings. Subscriptions
   to these are established automatically at startup. A new camera node can still introduce 
   itself dynamically. This change allows the **camwatcher** and **imagenode** applications to 
@@ -51,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results and status messages, along with internal errors and warnings. The **sentinel** does not
   write to a logfile on local disk. All logging is published for any interested subscribers.
 - A subprocess agent was added to the **camwatcher** for subscribing to **sentinel** logging messages
-  and captuing task analysis data. 
+  and capturing task analysis data. 
 - Post-event processing logic was added to the **camwatcher**. This is used to automatically submit a 
   parameterized task to the **sentinel** for a complete analysis of all event data. Results are stored
   as a supplement to the original captured tracking data provided by the `Outpost` nodes.

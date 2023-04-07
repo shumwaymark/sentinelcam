@@ -18,7 +18,7 @@ class Task:
         return -1
     def getRing(self) -> list:
         return []
-    def publish(self, msg, imageLogRef=None) -> None:
+    def publish(self, msg, imageLogRef=None, cwUpd=False) -> None:
         pass
     # Function prototypes, define these for task logic 
     def pipeline(self, frame) -> bool:
@@ -100,7 +100,8 @@ class DailyCleanup(Task):
         # This is a one-shot pipeline to scan all events within the eventDate 
         event_date = self.jreq.eventDate
         cwIndx = self.dataFeed.get_date_index(event_date)
-        for cwEvt in cwIndx[:].itertuples():
+        cwTrks = cwIndx.loc[cwIndx['type'] == 'trk']
+        for cwEvt in cwTrks[:].itertuples():
             start_time = time.time()
             event = cwEvt.event
             trkData = self.dataFeed.get_tracking_data(event_date, event)

@@ -582,6 +582,7 @@ class JobManager:
                     taskEngine.ringBuffer = taskEngine.ringbuffers[_camsize]
                 else:
                     logging.error(f"_feedStart() failed. RingBuffer {_camsize} not supported by {taskEngine.getName()}.")
+                    _camsize = jreq.camsize
                     _valid = False
             taskEngine.newEvent(jreq.eventDate, jreq.eventID, _camsize)
             taskEngine.taskQ.put(taskEngine.getJobRequest())  # confirm event change readiness with task engine 

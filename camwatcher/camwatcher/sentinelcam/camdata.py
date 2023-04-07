@@ -87,18 +87,20 @@ class CamData:
         self._event_types = None
         self._event_data = None
         if self._indexfile:
-            # read camwatcher index into pandas DataFrame
-            self._index = pandas.read_csv(
-                            self._indexfile, 
-                            names=CamData.IDXCOLS, 
-                            parse_dates=["timestamp"]
-                          ).sort_values(
-                             by="timestamp", ascending=False)
-            # retrive the event_id for the most recent event in the index
-            if len(self._index.index) > 0:
-                self._lastEvent = self._index.iloc[0].event
+            try:
+                # read camwatcher index into pandas DataFrame
+                self._index = pandas.read_csv(
+                                self._indexfile, 
+                                names=CamData.IDXCOLS, 
+                                parse_dates=["timestamp"]
+                            ).sort_values(
+                                by="timestamp", ascending=False)
+                # retrive the event_id for the most recent event in the index
+                if len(self._index.index) > 0:
+                    self._lastEvent = self._index.iloc[0].event
+            except pandas.errors.EmptyDataError:
+                self._index = pandas.DataFrame(columns=CamData.IDXCOLS)    
         else:
-            # if no index file, provide an empty DataFrame 
             self._index = pandas.DataFrame(columns=CamData.IDXCOLS)
 
     def get_date(self) -> str:
@@ -173,10 +175,16 @@ class CamData:
 
         self._event_id = event
         self._event_subset = self._index[(self._index['event'] == event)]
-        self._event_node = self._event_subset.iloc[0].node
-        self._event_view = self._event_subset.iloc[0].viewname
-        self._event_start = self._event_subset["timestamp"].min()
-        self._event_types = self._event_subset["type"].to_list()
+        if len(self._event_subset.index) > 0:
+            self._event_node = self._event_subset.iloc[0].node
+            self._event_view = self._event_subset.iloc[0].viewname
+            self._event_start = self._event_subset["timestamp"].min()
+            self._event_types = self._event_subset["type"].to_list()
+        else:
+            self._event_node = None
+            self._event_view = None
+            self._event_start = None
+            self._event_types = []
 
     def get_event_node(self) -> str:
         """ Return node name from event
@@ -269,10 +277,12 @@ class CamData:
 
         csvFile = self.get_event_pathname(self._event_id, type)
         if csvFile is not None:
-            self._event_data = pandas.read_csv(csvFile, parse_dates=['timestamp'])
-            self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
+            try:
+                self._event_data = pandas.read_csv(csvFile, parse_dates=['timestamp'])
+                self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
+            except pandas.errors.EmptyDataError:
+                self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
         else:
-            # return an empty result set when no CSV file
             self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
         return self._event_data
 

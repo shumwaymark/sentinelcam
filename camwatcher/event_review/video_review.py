@@ -124,7 +124,7 @@ def cam_event(date=None, event=None):
 @app.route("/")
 def index():
     _setup_form_data()
-    return render_template("index.html",
+    return render_template("original.html",
                     date = g.date,
                     event = g.event,
                     node = g.node,

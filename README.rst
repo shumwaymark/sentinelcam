@@ -183,8 +183,9 @@ See below for a high-level design sketch.
 .. image:: docs/images/CamWatcher.png
    :alt: Sketch of basic camwatcher design
 
-Each **camwatcher** node can support a limited number of ``Outpost`` publishers. Additional data
-sinks may need to be added as more and more camera nodes are deployed.
+Depending on how may camera events are occuring at any one time, each **camwatcher** node can support 
+a limited number of ``Outpost`` publishers. As the total number of deployed camera nodes increase, 
+additional data sinks will need to be included in the system architecture design to distribute the load.
 
   **Status**: stable working prototype.  
 
@@ -193,13 +194,13 @@ sinks may need to be added as more and more camera nodes are deployed.
   displays. 
 
 - Log publishing over ZeroMQ has also proven to be very effective. The **camwatcher** design
-  uses this in a couple of ways. One is for responding to activity being reported from the
+  exploits this in a couple of ways. One is for responding to activity being reported from the
   ``Outpost`` nodes in a real time manner. Additonally, task results from analysis running on 
   the **sentinel** are collected using this same technique. See the ``sentinel`` setting in the 
   `camwatcher.yaml <camwatcher.yaml>`_ file for how this is configured.
 
 The *CSV File Writers* run as dedicated I/O threads. This component is responsible for receiving 
-queued data events and writing them into CSV-format text files based on the following data model.
+queued data records and writing them into CSV-format text files based on the following data model.
 
 Data model
 ----------
@@ -227,8 +228,8 @@ not the local time zone.
   fps, int, pipeline velocity at start of event
   type, str, event type 
 
-Event detail files always include a header row, with varying data structures depending on the type 
-of event. The naming convention for all detail files is: ``EventID_TypeCode.csv``
+Event detail files always include a header row, with potentially varying data structures depending 
+on the type of result data. The naming convention for all detail files is: ``EventID_TypeCode.csv``
 
 .. csv-table:: Tracking Event Detail
   :header: "Name", "Type", "Description"
@@ -276,7 +277,7 @@ index crossing date boundaries.
 
 Captured images are written to the filesystem as individual full-sized frames 
 compressed into JPEG files. These files are written into the folder specified 
-by the ``images`` configuration setting int the `camwatcher.yaml <camwatcher.yaml>`_ 
+by the ``images`` configuration setting in the `camwatcher.yaml <camwatcher.yaml>`_ 
 file, and organized by date into subfolders with a YYYY-MM-DD naming convention.
 
 This convention allows for retrieval and storage that is both fast and efficient 
@@ -374,12 +375,12 @@ the data model above for further detail.
 
 .. code-block:: python
 
-  DataFeed.get_tracking_data (date, event) -> pandas.DataFrame
+  DataFeed.get_tracking_data (date, event, type='trk') -> pandas.DataFrame
 
-The ``get_tracking_data()`` function requires two arguments, a date and an event identifier. 
-Used to retrieve the full Tracking Event Detail dataset (see *Data model* above) as a
-``pandas.DataFrame`` object. Both arguments are required. The date is specified in 'YYYY-MM-DD'
-format, the EventID reference must exist for the indicated date. There is no error-checking.
+The first two arguments to the ``get_tracking_data()`` function are required, a date and an 
+event identifier. Used to retrieve the full Tracking Event Detail dataset (see *Data model* above) 
+as a ``pandas.DataFrame`` object. Both arguments are required. The date is specified in 'YYYY-MM-DD'
+format, the EventID reference must exist for the indicated date.
 
 .. code-block:: python
 
@@ -396,7 +397,7 @@ All date and time references are in Coordinated Universal Time (UTC), not the lo
   DataFeed.get_image_jpeg (date, event, timestamp) -> bytes
 
 Returns a buffer with the image frame as compressed JPEG data. Always for an existing date, 
-event, and timestamp as described above. There is no error checking on this either. 
+event, and timestamp as described above. 
 
 Presenting **camwatcher** data in this fashion provides the **sentinel** with direct access to 
 specific subsets of captured image data. For example, perhaps the images of interest are  

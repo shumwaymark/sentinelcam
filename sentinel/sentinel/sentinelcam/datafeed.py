@@ -93,8 +93,8 @@ class DataFeed(imagezmq.ImageSender):
         (msg, df) = self.recv_DataFrame()
         return df
 
-    def get_tracking_data(self, date, event):
-        req = msgpack.dumps({'cmd': 'evt', 'date': date, 'evt': event})
+    def get_tracking_data(self, date, event, type='trk'):
+        req = msgpack.dumps({'cmd': 'evt', 'date': date, 'evt': event, 'trk': type})
         self.zmq_socket.send(req)
         (msg, df) = self.recv_DataFrame()
         return df

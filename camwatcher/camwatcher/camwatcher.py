@@ -341,7 +341,7 @@ class SentinelAgent:
                                     _csvData = {
                                         "view": _view,
                                         "id": _event,
-                                        "timestamp": cwData.get_event_start().isoformat(),
+                                        "timestamp": datetime.utcnow().isoformat(),
                                         "type": "start",
                                         "new": _newEvent,
                                         "camsize": (0, 0),  # TODO: retrive these two from camwatcher event index
@@ -365,7 +365,7 @@ class SentinelAgent:
                                 "timestamp": _frametime.isoformat(),
                                 "type": _refkey,
                                 "obj": 0,
-                                "clas": _clas,
+                                "clas": _clas.split(':')[0],
                                 "rect": _rect
                             }
                             _dataBlock = (_taskref, _csvData)

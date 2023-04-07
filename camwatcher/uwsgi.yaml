@@ -1,0 +1,8 @@
+uwsgi:
+        socket: /home/pi/sentinelcam/.tmp/video_review.sock
+        chmod-socket: 664
+        mount: /sentinelcam=video_review_df:app
+        master: true
+        manage-script-name: true
+        processes: 2
+        threads: 2

@@ -1,10 +1,10 @@
 # camwatcher service unit file
-# Mark K Shumway, mark.shumway@swanriver,dev
-# Defines imagehub.py as a systemd service
+# Mark K. Shumway, mark.shumway@swanriver,dev
+# Defines camwatcher.py as a systemd service
 # This file should be copied to /etc/systemd/system as root
 #   e.g. sudo cp camwatcher.service /etc/systemd/system
-# Use usual systemctl start, stop, status restart, enable commands
-#   e.g. sudo systemctl start camwatcher.service
+# Use usual systemctl start, stop, status, restart, enable commands
+#   e.g. sudo systemctl restart camwatcher
 
 [Unit]
 Description=CamWatcher Service

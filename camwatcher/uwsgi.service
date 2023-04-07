@@ -1,0 +1,21 @@
+# service definition for uWSGI
+# Mark K. Shumway, mark.shumway@swanriver,dev
+# Defines uwsgi as a systemd service
+# This file should be copied to /etc/systemd/system as root:
+#   sudo cp uwsgi.service /etc/systemd/system
+#   sudo systemctl enable uwsgi
+
+[Unit]
+Description=uWSGI Service
+After=multi-user.target
+
+[Service]
+Type=idle
+WorkingDirectory=/home/pi/sentinelcam
+User=pi
+Restart=always
+RestartSec=5
+ExecStart=/home/pi/.virtualenvs/py3cv4/bin/uwsgi -c /home/pi/sentinelcam/uwsgi.yaml
+
+[Install]
+WantedBy=multi-user.target
