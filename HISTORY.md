@@ -24,10 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event has been purged for a date.
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
   **imagenode**. 
-- Continue development of `video_review_df.py`
-  - Allow display of neural net results to be optional
-  - Add missing node/view filtering functionality
-  - Add functionality for real-time display of any camera view, maybe
 
 ### Known bugs
 
@@ -35,12 +31,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.22-alpha - 2023-04-17
+
+### Added
+
+- Face detection pipeline introduced. This demonstrates a **sentinel** task designed to 
+  run against just a subset of event images. Skip-ahead logic is used to advance the ring buffer
+  start dynamically, so that only frames with a previously detected "person" object are analyzed.
+
+### Changed
+
+- Corrected timestamp on logged `SpyGlass` results to match timestamp of frame being analyzed. 
+  This was previously being stamped with the time results were received, resulting in an 
+  noticeable lag. Bounding boxes were sometimes being drawn behind moving objects, following 
+  them like some kind of ghostly electronic shadow. 
+- Support an event type selection as a part of **sentinel** task configuration. Each task 
+  receives a set of tracking data, which defaults to `'trk'`. This change allows tasks to either 
+  process every frame in the event, or selectively analyze only a subset of frames based on results
+  in a previously collected dataset.
+- Added basic task performance instrumentation to the **sentinel** end-of-job message.
+
+### Fixed
+
+- Corrected alignment logic between results and images when presented for video review. Factoring
+  in estimations around elapsed time within the event has not been helpful.
+- Timestamp mapping for **sentinel** tasks was incorrectly based on the first `trk` record, rather 
+  than the first frame. 
+- Fixed a bug in how the `JobManager` for the **sentinel** manages the task list. Failed task initialization
+  could sometimes lead into a spiral of death and destruction. 
+- The **sentinel** was occasionally attempting to feed a ring buffer no longer in use, when a task had
+  selected an early exit. This exposed a bug where ring buffer operations were being executed against tasks 
+  just ending, resulting in failures.  
+
 ## 0.0.21-alpha - 2023-04-06
 
 ### Changed
 
-- Spit and polish for camwatcher v3 support. Bug clean-up sweep.
-- Minor updates to `video_review_df.py` for supporting the selection of alternate result sets. 
+- Spit and polish for *camwatcher v3* support. Bug clean-up sweep.
+- Minor updates to `video_review_df.py` for selecting alternate result sets. 
 
 ## 0.0.20-alpha - 2023-03-27
 
@@ -131,7 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added video_review_df.py module, leaving original version in place for reference. This uses the 
+- Added `video_review_df.py` module, leaving original version in place for reference. This uses the 
   `DataFeed` for operation within a WSGI container, and represents the next logical step in the 
   evolution of this function.
 
