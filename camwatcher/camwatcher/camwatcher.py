@@ -306,8 +306,8 @@ class SentinelAgent:
                                     csvQueue.put(_dataBlock)
                                 del runningJobs[_jobid]
 
-                            logging.info("EOJ ({}, {}), elapsed time: {}. Target sink ({}), source ({}).".format(
-                                logdata['task'], logdata['status'], logdata['elapsed'], logdata['sink'], logdata['from']))
+                            logging.info("EOJ ({}, {}), elapsed time: {} {}, Target sink ({}), source ({}).".format(
+                                logdata['task'], logdata['status'], logdata['elapsed'], logdata['taskstats'], logdata['sink'], logdata['from']))
 
                     elif 'jobid' in logdata:
                         _jobid = logdata['jobid']
@@ -341,7 +341,7 @@ class SentinelAgent:
                                     _csvData = {
                                         "view": _view,
                                         "id": _event,
-                                        "timestamp": datetime.utcnow().isoformat(),
+                                        "timestamp": cwData.get_event_start().isoformat(),
                                         "type": "start",
                                         "new": _newEvent,
                                         "camsize": (0, 0),  # TODO: retrive these two from camwatcher event index
