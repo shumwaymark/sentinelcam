@@ -93,26 +93,23 @@ def generate_video(date, event, type='trk'):
             event_start = _cwEvt.iloc[0].timestamp
             tracker = _cwEvt[:].itertuples()
             trk = next(tracker)
-            iter_elapsed = trk.elapsed
+            trkr_time = trk.timestamp
             playback_begin = datetime.utcnow()
             for frame_time in image_list:
                 jpeg = _cwFeed.get_image_jpg(date, event, frame_time)
                 frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
                 frame_elaps = frame_time - event_start
-                if iter_elapsed < frame_elaps:
+                if trkr_time < frame_time:
                     try:
-                        while trk.elapsed < frame_elaps:
+                        while trk.timestamp <= frame_time:
                             objects[trk.objid] = (trk.rect_x1, trk.rect_y1, trk.rect_x2, trk.rect_y2, 
                                 trk.classname, trk.elapsed)
+                            text.putText(frame, trk.objid, trk.classname, trk.rect_x1, trk.rect_y1, trk.rect_x2, trk.rect_y2)
                             trk = next(tracker)
-                        iter_elapsed = trk.elapsed
+                            trkr_time = trk.timestamp
                     except StopIteration:
-                        iter_elapsed = timedelta(days=1) # short-circuit any further calls back to the iterator
+                        trkr_time += timedelta(days=1) # short-circuit any further calls back to the iterator
                         objects = {}
-
-                for (objid, (rect_x1, rect_y1, rect_x2, rect_y2, classname, lastknown)) in objects.items():
-                    # draw last known object tracking data on the output frame
-                    text.putText(frame, objid, classname, rect_x1, rect_y1, rect_x2, rect_y2)
 
                 # draw timestamp on image frame
                 tag = "{} UTC".format(frame_time.isoformat())
