@@ -318,14 +318,10 @@ portrayed below.
   │
   └──  # additional directories for each date
 
-It is important to note that the collection of image data occurs independently from the tracking 
-data. Some variation in the rate of capture can be expected. Differences from a perspective in real 
-time are not expected to be significant. There can also be minor differences between the clock times 
-from one network node to another.
-
-To correlate tracking data back to a captured image, it is helpful to bind these together by estimating 
-an elapsed time from the starting point for each data source, perhaps even with consideration for latency 
-as an additional factor.
+The collection of image data occurs independently from the tracking data. Some variation in the rate 
+of capture can be expected, though these differences are not expected to be significant. There can also 
+be minor differences between the clock times from one network node to another. Reporting around image 
+analysis is designed to connect any results to the timestamp of the image when it was captured. 
 
 DataPump and DataFeed
 ---------------------
@@ -588,7 +584,8 @@ and libraries.
 - Raspberry Pi 4B
 - Raspbian Buster
 - Python 3.7
-- OpenCV 4
+- OpenCV 4.1.1
+- OpenVINO
 - picamera
 - Luxonis OAK-1
 - Intel NCS2
@@ -599,6 +596,7 @@ and libraries.
 - pandas
 - dlib
 - imutils
+- scikit-learn
 - simplejpeg
   
 Acknowledgements
