@@ -7,7 +7,8 @@ License: MIT, see the sentinelcam LICENSE for more details.
 import time
 import simplejpeg
 from sentinelcam.utils import readConfig
-from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace
+from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace, FaceAligner
+from sentinelcam.tasklibrary import findCosineDistance, findEuclideanDistance
 
 class Task:
     dataFeed = None
@@ -43,126 +44,107 @@ class MobileNetSSD_allFrames(Task):
                 self.publish(result, self.refkey, self.cwUpd)
         return True  # process every frame 
 
-class PersonsFaces(Task):
+class GetFaces(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
-        self.jreq = jobreq
-        self.evtData = trkdata
-        self.start_time = time.time()
-        self.detectFaces = cfg['faces'] 
-        self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
-        if self.detectFaces:
-            self.fd = OpenCV_dnnFace(cfg["dnn_face"], accelerator)
-        self.frame_cnt = 0
-        self.person_cnt = 0
+        self.fd = OpenCV_dnnFace(cfg['dnn_face'], accelerator)
+        self.cwUpd = cfg['camwatcher_update']
+        self.refkey = cfg['trk_type']
+        self.allFrames = cfg['all_frames']
+        self.event_id = jobreq.eventID
+        self.event_date = jobreq.eventDate
+        self.imgs = feed.get_image_list(self.event_date, self.event_id)
+        self.persons = trkdata.loc[trkdata['classname'] == 'person']
+        if len(self.persons.index) > 0:
+            # When processing a subset of frames, define a couple of iterators
+            # to align image and tracking references within the event.
+            self.cursor = iter(self.persons[:].itertuples()) 
+            self.frames = iter(self.imgs)
+            self.trkRec = next(self.cursor)
+            self.frametime = next(self.frames)
+        else:
+            self.cursor = None
         self.face_cnt = 0
+        self._search_cnt = 0
+
+    def _publish_face_rects(self, faces) -> None:
+        if len(faces) > 0:
+            for face in faces:
+                result = ("Face", int(face[0]), int(face[1]), int(face[2]), int(face[3]))
+                self.publish(result, self.refkey, self.cwUpd)
+                self.face_cnt += 1
 
     def pipeline(self, frame) -> bool:
-        continuePipe = True
-        (rects, labels) = self.od.detect(frame)
-        self.frame_cnt += 1
-        p = 0
-        for det in labels:
-            if det.startswith("person"):
-                p += 1
-        self.person_cnt += p
-        if p > 0 and self.detectFaces:
+        if self.allFrames:
             faces = self.fd.detect(frame)
-            self.face_cnt += len(faces)
-        return continuePipe
-                    
+            if len(faces) > 0: self._publish_face_rects(faces)
+            self._search_cnt += 1
+        else:
+            if not self.cursor:
+                return False  # No 'persons' detected. Do not begin the search, end it.
+            else:
+                image = frame
+                if self.frametime < self.trkRec.timestamp:
+                    # Skip-ahead logic below. TODO: This becomes inefficient when advancing less
+                    # than the lengh of the ring buffer, since the desired frame is already in there.
+                    bucket = self.ringStart(self.trkRec.timestamp)
+                    if bucket > -1:
+                        image = self.getRing()[bucket]
+                        try:
+                            while self.frametime < self.trkRec.timestamp:
+                                self.frametime = next(self.frames) 
+                        except StopIteration:
+                            return False   # Reached last image, end the task
+                    else:
+                        return False
+                search_not_completed = True
+                while self.trkRec.timestamp <= self.frametime:
+                    # There could be multiple persons detected in the image, so will have a 
+                    # tracking record for each. Once face detection has executed for this frame,
+                    # continue iterating through the tracker until next timestamp found.
+                    if search_not_completed:
+                        faces = self.fd.detect(image)  # currently finds every face in the image
+                        if len(faces) > 0: self._publish_face_rects(faces)
+                        search_not_completed = False
+                        self._search_cnt += 1
+                    try:
+                        self.trkRec = next(self.cursor)
+                    except StopIteration:
+                        return False                 # Reached last detected person, end the task.
+                self.frametime = next(self.frames)   # Internal tracking for timestamp of current frame.
+        return True
+    
     def finalize(self) -> None:
-        # this writes CSV data to the logger
-        stats = ",".join([
-            'PERSONS',
-            str(self.jreq.eventDate),
-            str(self.jreq.eventID),
-            str(len(self.evtData.index)),
-            str(self.person_cnt),
-            str(self.face_cnt),
-            str(self.frame_cnt),
-            "{:.1f}".format(self.frame_cnt / (time.time() - self.start_time))  
-        ])
-        self.publish(stats)
+        results = ('Faces', self.event_date, self.event_id, len(self.imgs), len(self.persons.index), self._search_cnt, self.face_cnt)
+        self.publish(results)
 
 class DailyCleanup(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
-        self.jreq = jobreq
         self.dataFeed = feed
-        self.facePatience = cfg["face_patience"]
-        if cfg["run_deletes"]:
-            self.deleteOptions = cfg["delete_options"]
-        else:
-            self.deleteOptions = None
-        self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
-        self.fd = OpenCV_dnnFace(cfg["dnn_face"], accelerator)
+        self.event_date = jobreq.eventDate
+        self.performing_deletes = cfg["run_deletes"]
+        self.face_ratio_cutoff = cfg["fail_safe"]['face_ratio']
 
     def pipeline(self, frame) -> bool:
-        # This is a one-shot pipeline to scan all events within the eventDate 
-        event_date = self.jreq.eventDate
-        cwIndx = self.dataFeed.get_date_index(event_date)
-        cwTrks = cwIndx.loc[cwIndx['type'] == 'trk']
-        for cwEvt in cwTrks[:].itertuples():
-            start_time = time.time()
-            event = cwEvt.event
-            trkData = self.dataFeed.get_tracking_data(event_date, event)
-            eventKey = (event_date, event)
-            event_start = cwEvt.timestamp
-            bucket = self.ringStart(event_start, eventKey)
-            ringbuff = self.getRing()
-            frame_cnt, person_cnt, face_cnt, limit = 0, 0, 0, 0
-            while bucket != -1:
-                (rects, labels) = self.od.detect(ringbuff[bucket])
-                frame_cnt += 1
-                p = 0
-                for det in labels:
-                    if det.startswith("person"):
-                        p += 1
-                if p > person_cnt:
-                    person_cnt = p
-                if p > 0:
-                    limit += 1
-                    faces = self.fd.detect(ringbuff[bucket])
-                    f = len(faces)
-                    if f > face_cnt:
-                        face_cnt = f
-                        break  # break out of the frame loop when first face found
-                    elif limit > self.facePatience:
-                        break  # still no face and have run out of patience looking
-                bucket = self.ringNext()
-            if self.deleteOptions is not None:
-                delEvent = False
-                if 'face_cnt' in self.deleteOptions: 
-                    if face_cnt == self.deleteOptions['face_cnt']:
-                        delEvent = True
-                if "total_frame_threshold" in self.deleteOptions:
-                    if bucket == -1 and frame_cnt < self.deleteOptions["total_frame_threshold"]:
-                        delEvent = True
-                if delEvent:
-                    self.dataFeed.delete_event(event_date, event)
-                    stats = ",".join([
-                        'Delete',
-                        str(event),
-                        str(len(trkData.index)),
-                        str(person_cnt),
-                        str(face_cnt),
-                        str(limit),
-                        str(frame_cnt),
-                        "{:.1f}".format(frame_cnt / (time.time() - start_time))  
-                    ])
-                    self.publish(stats)
+        # This is a one-shot pipeline to process all events within the eventDate 
+        cwIndx = self.dataFeed.get_date_index(self.event_date)
+        types = cwIndx['type'].value_counts()
+        trk_cnt = types['trk'] if 'trk' in types else 0
+        obj_cnt = types['obj'] if 'obj' in types else 0
+        faces_cnt = types['fd1'] if 'fd1' in types else 0
+        if trk_cnt:
+            face_ratio = faces_cnt / trk_cnt
+            if face_ratio > self.face_ratio_cutoff: 
+                face_evts = cwIndx.loc[cwIndx['type'] == 'fd1']['event'].to_list()
+                trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
+                delete_evts = [e for e in trk_evts if not e in face_evts]
+                if self.performing_deletes:
+                    for event in delete_evts: self.dataFeed.delete_event(self.event_date, event)
+                    stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, events deleted: {len(delete_evts)}"
+                else:
+                    stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, ratio: {round(face_ratio,2)}"
             else:
-                stats = ",".join([
-                    str(event_date),
-                    str(event),
-                    str(len(trkData.index)),
-                    str(person_cnt),
-                    str(face_cnt),
-                    str(limit),
-                    str(frame_cnt),
-                    "{:.1f}".format(frame_cnt / (time.time() - start_time))  
-                ])
-                self.publish(stats)
-
+                stats = f"DailyCleanup, delete ratio not met: events {trk_cnt}, with faces {faces_cnt}"
+            self.publish(stats)
         return False
 
 class CollectImageSizes(Task):
@@ -182,9 +164,10 @@ class CollectImageSizes(Task):
             try:
                 # Get the camwatcher event index for a given date
                 cwIndx = self.feed.get_date_index(evtDate)
-                if len(cwIndx.index) > 0:
+                trkrs = cwIndx.loc[cwIndx['type'] == 'trk']
+                if len(trkrs.index) > 0:
                     # Process every event for this date
-                    for _evt in cwIndx[:].itertuples():
+                    for _evt in trkrs[:].itertuples():
                         event = _evt.event
                         node = _evt.node
                         view = _evt.viewname
@@ -213,18 +196,17 @@ class CollectImageSizes(Task):
 
 class MeasureRingLatency(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
-        self.jreq = jobreq
+        self.event_date = jobreq.eventDate
         self.dataFeed = feed
         self.od = MobileNetSSD(cfg["mobilenetssd"], accelerator)
 
     def pipeline(self, frame) -> bool:
-        event_date = self.jreq.eventDate
-        cwIndx = self.dataFeed.get_date_index(event_date)
+        cwIndx = self.dataFeed.get_date_index(self.event_date)
         for cwEvt in cwIndx[:].itertuples():
             # For every event in the date...
             start_time = time.time()
             event = cwEvt.event
-            eventKey = (event_date, event)
+            eventKey = (self.event_date, event)
             event_start = cwEvt.timestamp
             bucket = self.ringStart(event_start, eventKey)
             ringbuff = self.getRing()
@@ -252,7 +234,7 @@ class MeasureRingLatency(Task):
 
 def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
     menu = {
-        'PersonsFaces'           : PersonsFaces,
+        'GetFaces'               : GetFaces,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
         'DailyCleanup'           : DailyCleanup,
         'CollectImageSizes'      : CollectImageSizes,

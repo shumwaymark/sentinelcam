@@ -1,0 +1,22 @@
+%YAML 1.0
+---
+# GetFaces.yaml - Detect faces
+
+trk_type: fd1
+all_frames: False         # restrict face detection to images with 'person' detections
+camwatcher_update: True
+
+dnn_face: 
+    prototxt_path: /home/pi/sentinel/models/opencv_dnn_face/deploy.prototxt
+    model_path: /home/pi/sentinel/models/opencv_dnn_face/res10_300x300_ssd_iter_140000.caffemodel
+    target: myriad  # [cpu, myriad]
+    confidence: 0.5
+
+# --- Not currently used here; to extract embeddings for identification/comparison/modeling  
+face_embeddings:
+    model_path: /home/pi/sentinel/models/openface_torch/openface_nn4.small2.v1.t7
+eye_detection:
+    haarcascade_path: /home/pi/sentinel/models/haarcascades/haarcascade_eye.xml
+    desiredLeftEye: [0.35, 0.35]
+    desiredFaceWidth: 96
+    desiredFaceHeight: 96

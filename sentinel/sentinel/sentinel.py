@@ -66,6 +66,8 @@ class JobRequest:
         self.datapump = pump  # datapump connection string
         self.camsize = (0,0)  # TODO: required per event; learn up front, dynamically
         self.engine = None
+        self.image_cnt = 0
+        self.image_rate = 0.0
         logging.info(str(self.start_Message('SUBMIT')))
         with jobLock:
             taskList[self.jobID] = self
@@ -78,12 +80,15 @@ class JobRequest:
         with jobLock:
             jobList[self.jobID] = self
 
-    def deregisterJOB(self, status) -> None:
+    def deregisterJOB(self, status, stats) -> None:
         self.jobEndTime = datetime.utcnow()
         self.jobStatus = status
+        self.image_cnt = stats[0]
+        self.image_rate = stats[1]
         logging.info(str(self.stop_Message()))
         with jobLock:
             if self.jobID in jobList:
+                logging.debug(f"del jobList[{self.jobID}], status now {self.jobStatus}")
                 del jobList[self.jobID]
 
     def _timeVals(self) -> tuple:
@@ -116,7 +121,8 @@ class JobRequest:
             'from': self.sourceNode,
             'sink': self.dataSink,
             'status': JobRequest.Status[self.jobStatus],
-            'elapsed': elapsed_time
+            'elapsed': elapsed_time,
+            'taskstats': [self.image_cnt, self.image_rate]
         })
 
     def summary_JSON(self) -> str:
@@ -133,7 +139,9 @@ class JobRequest:
             'ElapsedTime': elapsed_time,
             'TaskEngine': self.engine,
             'EventID': self.eventID,
-            'JobID': self.jobID
+            'JobID': self.jobID,
+            'ImageCnt': self.image_cnt,
+            'ImageRate': self.image_rate
         })
     
     def full_history_report() -> None:
@@ -272,8 +280,8 @@ class JobTasking:
                 ringbuffers[wh] = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in _ringbuff[wh]]
             handshake = ringWire.recv()  # wait for subscriber to connect
 
-            # Hang tight on the scoping here, best to keep these variables close at hand 
-            # for the four local function definitions below
+            # Hang tight on the scoping here, best to keep these variables close at hand for the four
+            # local function definitions below. Also enhances eyes-on clarity for scrutiny during code review.
             self.jobreq = None
             self.frame_start = None
             self.frame_offset = 0
@@ -328,7 +336,6 @@ class JobTasking:
                     self.jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
                     try:
-                        self.start_time = time.time()
                         if self.jobreq.datapump != taskpump:
                             taskpump = self.jobreq.datapump
                             feed.zmq_socket.connect(taskpump)
@@ -342,11 +349,13 @@ class JobTasking:
                         # ----------------------------------------------------------------------
                         #   Task Initialization
                         # ----------------------------------------------------------------------
+                        taskcfg = taskCFG[self.jobreq.jobTask]
                         if not self.jobreq.eventID:
                             trackingData = None
                         else:
-                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID)
-                        taskcfg = taskCFG[self.jobreq.jobTask]
+                            deftrk = taskcfg['deftrk'] if 'deftrk' in taskcfg else 'trk'
+                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, deftrk)
+                            imageList = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)
                         task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator)
                         # Hang hooks for task references to ring buffer and publisher
                         task.ringStart = ringStart
@@ -366,10 +375,9 @@ class JobTasking:
 
                         else:
                             # ------------------------------------------------------------------------
-                            #   Start the Ring Buffer
+                            #   Start the Ring Buffer, default to the first frame
                             # ------------------------------------------------------------------------
-                            frame_start = trackingData.iloc[0].timestamp  # default to the first frame
-                            bucket = ringStart(frame_start)
+                            bucket = ringStart(imageList[0])  
 
                             # ------------------------------------------------------------------------
                             #   Frame loop for an image pipeline task
@@ -462,6 +470,9 @@ class TaskEngine:
 
     def getName(self) -> str:
         return self.name
+    
+    def getClasses(self) -> list:
+        return self.job_classes
 
     def getJobID(self) -> str:
         if self.jobreq:
@@ -495,6 +506,8 @@ class TaskEngine:
             logging.debug(f"{jobreq.engine}: starting job {jobreq.jobID}")
             self.jobreq = jobreq
             self.taskQ.put(jobreq)
+            self.task_start = time.time()
+            self.image_cnt = 0
         return confirm_start
 
     def have_request(self) -> bool:
@@ -504,7 +517,14 @@ class TaskEngine:
         return self.wire.recv()
 
     def send_response(self, resp) -> None:
+        self.image_cnt += 1
         self.wire.send(resp)
+
+    def get_image_cnt(self) -> int:
+        return self.image_cnt - 1
+
+    def get_image_rate(self) -> float:
+        return round((self.get_image_cnt() / (time.time() - self.task_start)), 2)
 
     def is_alive(self) -> bool:
         return self._engine.process.is_alive()
@@ -527,10 +547,13 @@ class JobManager:
     ReadNOP = 0
 
     def __init__(self, engineCFG, ringCFG, taskCFG, default_pump, _asyncSUB) -> None:
+        self.ondeck = {}
         self.engines = {}
         self.datafeeds = {}
         for engine in engineCFG:
             self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, default_pump, _asyncSUB)
+            for jobclass in self.engines[engine].getClasses():
+                self.ondeck[jobclass] = None
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -544,6 +567,7 @@ class JobManager:
         return self.datafeeds[pump]
 
     def _releaseJob(self, jobid, engine) -> None:
+        logging.debug(f"Release job {jobid}")
         jreq = taskList[jobid]
         jreq.registerJOB(engine)
         self.engines[engine].dataFeed = self._setPump(jreq.datapump)
@@ -551,7 +575,8 @@ class JobManager:
             framesize = self._getFrameDimensons(jreq)
             jreq.camsize = (framesize[1], framesize[0])
         if not self.engines[engine].start_job(jreq):
-            jreq.deregisterJOB(TaskEngine.TaskFAIL)
+            jreq.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
+        self.ondeck[jreq.jobClass] = None
 
     def _getFrameDimensons(self, jreq) -> tuple:
         # TODO: Eliminate this stupid hack. Image dimsensions should be carried in the camera event data.
@@ -622,19 +647,20 @@ class JobManager:
         while not self._stop:
             if not taskFeed.empty():
                 (tag, msg) = taskFeed.get()
+                logging.debug(f"Job Manager has queue entry {(tag,msg)}")
                 if tag == TaskEngine.TaskSUBMIT:
                     jobreq = taskList[msg]
-                    task = self.taskmenu[jobreq.jobTask]
-                    for engine in self.engines.items():
-                        if engine[1].getJobID() is None and task['class'] in engine[1].job_classes: 
-                            self._releaseJob(jobreq.jobID, engine[0])
-                            break
+                    jobclass = self.taskmenu[jobreq.jobTask]['class']
+                    if jobclass in self.ondeck: 
+                        if self.ondeck[jobclass] is None: 
+                            self.ondeck[jobclass] = jobreq
                 elif tag in [TaskEngine.TaskDONE,
                              TaskEngine.TaskFAIL,
                              TaskEngine.TaskCANCELED]:
                     engine = self.engines[taskList[msg].engine]
                     engine.jobreq = None
-                    taskList[msg].deregisterJOB(tag)
+                    task_stats = (engine.get_image_cnt(), engine.get_image_rate())
+                    taskList[msg].deregisterJOB(tag, task_stats)
                 elif tag == TaskEngine.TaskBOMB:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{msg}' bombed out.")
@@ -650,27 +676,40 @@ class JobManager:
                 if engine.is_alive():
                     if engine.getJobID() is not None:
                         runningTasks += 1
-                    if engine.have_request():
-                        (cmd, key) = engine.get_request()
-                        if cmd == JobManager.ReadSTART:
-                            self._feedStart(engine, key)
-                            engine.send_response(engine.ringBuffer.get())
-                        elif cmd == JobManager.ReadNEXT:
-                            engine.ringBuffer.frame_complete()
-                            engine.send_response(engine.ringBuffer.get())
-                    if engine.cursor:
-                        self._feedNext(engine)
+                        if engine.have_request():
+                            (cmd, key) = engine.get_request()
+                            if cmd == JobManager.ReadSTART:
+                                self._feedStart(engine, key)
+                                engine.send_response(engine.ringBuffer.get())
+                            elif cmd == JobManager.ReadNEXT:
+                                engine.ringBuffer.frame_complete()
+                                engine.send_response(engine.ringBuffer.get())
+                        if engine.cursor:
+                            self._feedNext(engine)
                 else:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{engineName}' found dead.")
                     del self.engines[engineName]
 
             if runningTasks < len(self.engines):
-                # Have available capacity, any queued jobs awaiting release?  
-                with jobLock:
-                    pending = [r.jobID for r in taskList.values() if r.jobStatus == JobRequest.Status_QUEUED]
-                if len(pending) > 0:
-                    taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
+                # Have available capacity, what's on-deck by jobclass?
+                for engine in self.engines.items():
+                    if engine[1].getJobID() is None:
+                        for jobclass in engine[1].getClasses():
+                            if self.ondeck[jobclass] is not None:
+                                jreq = self.ondeck[jobclass]
+                                self._releaseJob(jreq.jobID, engine[0])
+                                break
+                # Assign next queued job to any open on-deck classes 
+                for jobclass in self.ondeck:
+                    if self.ondeck[jobclass] is None:
+                        with jobLock:
+                            pending = [r.jobID for r in taskList.values() 
+                                if r.jobStatus == JobRequest.Status_QUEUED and r.jobClass == jobclass]
+                        if len(pending) > 0:
+                            logging.debug(f"Queue up for ondeck, class {jobclass}: {pending[0]}")
+                            taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
+
             if runningTasks == 0:
                 time.sleep(1)
 
