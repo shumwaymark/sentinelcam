@@ -31,6 +31,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.23-alpha - 2023-05-03
+
+### Changed
+
+- Event index modified to include captured camera image dimensions (width, height). This is helpful 
+  for buffer allocations during downstream processing.
+- Support an alternate image cursor for populating the **sentinel** ring buffer. This allows image
+  retrieval to be restricted to only images included in a specific result set. The default for this is 
+  to provide all images captured for an event.
+
+### Fixed
+
+- Exit the **sentinel** task gracefully whenever image retrieval fails. 
+- The **sentinel** on-deck status was not being properly cleared for jobs running in secondary classes. 
+
 ## 0.0.22-alpha - 2023-04-17
 
 ### Added

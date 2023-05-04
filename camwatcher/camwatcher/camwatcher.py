@@ -126,7 +126,7 @@ class CSVwriter:
         self._thread.daemon = True
         self._thread.start()
     
-    def _set_index(self, node, view, evt, timestamp, fps, type, is_new_event) -> str:
+    def _set_index(self, node, view, evt, timestamp, camsize, type, is_new_event) -> str:
         _today = timestamp[:10] 
         logging.debug("CSVwriter index setup " + evt)
         date_directory = os.path.join(self._folder, _today)
@@ -142,7 +142,7 @@ class CSVwriter:
             # write an entry into the date folder index
             try: 
                 with open(os.path.join(date_directory, 'camwatcher.csv'), mode='at') as index:
-                    index.write(','.join([node, view, timestamp, evt, str(int(fps)), type]) + "\n")
+                    index.write(','.join([node, view, timestamp, evt, str(camsize[0]), str(camsize[1]), type]) + "\n")
             except Exception as e:
                 logging.error(f"CSVwriter failure updating index file for '{_today}': {str(e)}")
         return date_directory
@@ -171,7 +171,7 @@ class CSVwriter:
                             ]) + "\n" )
                     elif _recType == 'start': 
                         f = open(os.path.join(self._set_index(
-                            _node, _view, _data['id'], _data['timestamp'], _data['fps'], _tag, _data['new']), 
+                            _node, _view, _data['id'], _data['timestamp'], _data['camsize'], _tag, _data['new']), 
                             _data['id'] + '_' + _tag + '.csv'), mode='wt')
                         f.write("timestamp,objid,classname,rect_x1,rect_y1,rect_x2,rect_y2\n") # write column headers
                         self._openfiles[_ref] = f # add to list
@@ -187,7 +187,7 @@ class CSVwriter:
                     logging.exception('CSVwriter thread unhandled exception')
                 self._dataQ.task_done()
         logging.debug('CSVwriter closing')
-        for f in self._openfiles:
+        for f in self._openfiles.values():
             f.close()
 
     def close(self):
@@ -317,6 +317,7 @@ class SentinelAgent:
                             task_data = runningJobs[_jobid]
                             _event = task_data.eventID
                             _refkey = logdata['refkey']
+                            _ringctrl = logdata['ringctrl']
                             _framestart = logdata['start']
                             _frameoffset = logdata['offset']
                             _clas = logdata['clas']
@@ -329,9 +330,12 @@ class SentinelAgent:
                                 _node = cwData.get_event_node()
                                 _view = cwData.get_event_view()
                                 task_data.set_view(_node, _view)
-                                task_data.framelist = [datetime.strptime(_jpgfile[-30:-4],"%Y-%m-%d_%H.%M.%S.%f") 
-                                    for _jpgfile in cwData.get_event_images()]
-
+                                if _ringctrl == 'full':
+                                    task_data.framelist = [datetime.strptime(_jpgfile[-30:-4],"%Y-%m-%d_%H.%M.%S.%f") 
+                                        for _jpgfile in cwData.get_event_images()]
+                                else:
+                                    trkdata = cwData.get_event_data(_ringctrl)
+                                    task_data.framelist = trkdata['timestamp'].dt.to_pydatetime().tolist()
                                 logging.debug(f"Check event {_event} for '{_refkey}' tag, frames={len(task_data.framelist)}")
                                 if len(task_data.framelist) > 0:
                                     if _refkey not in cwData.get_event_types():
@@ -344,8 +348,7 @@ class SentinelAgent:
                                         "timestamp": cwData.get_event_start().isoformat(),
                                         "type": "start",
                                         "new": _newEvent,
-                                        "camsize": (0, 0),  # TODO: retrive these two from camwatcher event index
-                                        "fps": 0
+                                        "camsize": (0, 0)  # TODO: retrive this from camwatcher event index
                                     }
                                     _taskref = task_data.get_taskref()
                                     _startBlock = (_taskref, _csvData)

@@ -60,7 +60,7 @@ class CamData:
 
     IDXFILE = "camwatcher.csv"
     IDXTYPES = ["trk"]
-    IDXCOLS = ["node", "viewname", "timestamp", "event", "fps", "type"]
+    IDXCOLS = ["node", "viewname", "timestamp", "event", "width", "height", "type"]
     TRKCOLS = ["timestamp", "elapsed", "objid", "classname", "rect_x1", "rect_x2", "rect_y1", "rect_y2"]
 
     def set_date(self, date) -> None:
@@ -174,7 +174,7 @@ class CamData:
         """
 
         self._event_id = event
-        self._event_subset = self._index[(self._index['event'] == event)]
+        self._event_subset = self._index.loc[self._index['event'] == event]
         if len(self._event_subset.index) > 0:
             self._event_node = self._event_subset.iloc[0].node
             self._event_view = self._event_subset.iloc[0].viewname
@@ -278,7 +278,7 @@ class CamData:
         csvFile = self.get_event_pathname(self._event_id, type)
         if csvFile is not None:
             try:
-                self._event_data = pandas.read_csv(csvFile, parse_dates=['timestamp'])
+                self._event_data = pandas.read_csv(csvFile, parse_dates=['timestamp']).sort_values(by="timestamp")
                 self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
             except pandas.errors.EmptyDataError:
                 self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
@@ -342,7 +342,8 @@ if __name__ == '__main__' :
     cindx = cdata.get_index()                      # Get reference to index DataFrame
     
     # most recent 5 events
-    for row in cindx[:5].itertuples():
+    trkevts = cindx.loc[cindx['type'] == 'trk']
+    for row in trkevts[:5].itertuples():
         print(row.node + " " + row.viewname + " " + str(row.timestamp) + " " + row.event)
 
     event_id = cdata.get_last_event()      # grab the most recent event id
