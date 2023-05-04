@@ -287,13 +287,15 @@ class JobTasking:
             self.frame_offset = 0
             self.imagesize = (0,0)
             self.ringbuff = []
+            self.ringctrl = 'full'
 
-            def ringStart(frametime, _newEvent=None) -> int:
+            def ringStart(frametime, newEvent=None, ringctrl='full') -> int:
+                self.ringctrl = ringctrl
                 self.frame_start = frametime.isoformat()
                 self.frame_offset = 0
-                _start_command = (JobManager.ReadSTART, (self.frame_start, _newEvent))
+                _start_command = (JobManager.ReadSTART, (self.frame_start, newEvent, ringctrl))
                 ringWire.send(msgpack.packb(_start_command))
-                if _newEvent:
+                if newEvent:
                     # wait here for confirmation of ring buffer assignment
                     self.jobreq = taskQ.get()  
                     if self.jobreq.camsize != self.imagesize and self.jobreq.camsize != (0,0):
@@ -313,16 +315,17 @@ class JobTasking:
 
             def publish(msg, frameref=None, cwUpd=False) -> None:
                 if frameref is not None:
-                    frame = (self.jobreq.jobID, frameref, self.frame_start, self.frame_offset)
+                    frame = (self.jobreq.jobID, frameref, self.ringctrl, self.frame_start, self.frame_offset)
                     msg = frame + msg
                     if cwUpd:
                         cwUpdate = {
                             "jobid": msg[0],
                             "refkey": msg[1],
-                            "start": msg[2],
-                            "offset": msg[3],
-                            "clas": msg[4],
-                            'rect': [int(msg[5]), int(msg[6]), int(msg[7]), int(msg[8])]
+                            "ringctrl": msg[2],
+                            "start": msg[3],
+                            "offset": msg[4],
+                            "clas": msg[5],
+                            'rect': [int(msg[6]), int(msg[7]), int(msg[8]), int(msg[9])]
                         }
                         msg = json.dumps(cwUpdate)
                 envelope = (TaskEngine.TaskSTATUS, msg)
@@ -353,9 +356,15 @@ class JobTasking:
                         if not self.jobreq.eventID:
                             trackingData = None
                         else:
-                            deftrk = taskcfg['deftrk'] if 'deftrk' in taskcfg else 'trk'
-                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, deftrk)
-                            imageList = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)
+                            trktype = taskcfg['trk_type'] if 'trk_type' in taskcfg else 'trk'
+                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, trktype)
+                            if 'ringctrl' in taskcfg:
+                                if taskcfg == 'trk':
+                                    startframe = trackingData.iloc[0]['timestamp']  # .to_pydatetime()
+                                else:
+                                    startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
+                            else:
+                                startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
                         task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator)
                         # Hang hooks for task references to ring buffer and publisher
                         task.ringStart = ringStart
@@ -375,9 +384,9 @@ class JobTasking:
 
                         else:
                             # ------------------------------------------------------------------------
-                            #   Start the Ring Buffer, default to the first frame
+                            #   Start the ring buffer
                             # ------------------------------------------------------------------------
-                            bucket = ringStart(imageList[0])  
+                            bucket = ringStart(startframe)
 
                             # ------------------------------------------------------------------------
                             #   Frame loop for an image pipeline task
@@ -521,7 +530,7 @@ class TaskEngine:
         self.wire.send(resp)
 
     def get_image_cnt(self) -> int:
-        return self.image_cnt - 1
+        return self.image_cnt 
 
     def get_image_rate(self) -> float:
         return round((self.get_image_cnt() / (time.time() - self.task_start)), 2)
@@ -572,27 +581,25 @@ class JobManager:
         jreq.registerJOB(engine)
         self.engines[engine].dataFeed = self._setPump(jreq.datapump)
         if jreq.eventID:
-            framesize = self._getFrameDimensons(jreq)
-            jreq.camsize = (framesize[1], framesize[0])
+            jreq.camsize = self._getFrameDimensons(jreq)
         if not self.engines[engine].start_job(jreq):
             jreq.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
         self.ondeck[jreq.jobClass] = None
 
     def _getFrameDimensons(self, jreq) -> tuple:
-        # TODO: Eliminate this stupid hack. Image dimsensions should be carried in the camera event data.
-        _shape = (0,0)
         datafeed = self.datafeeds[jreq.datapump]
-        frametimes = datafeed.get_image_list(jreq.eventDate, jreq.eventID)
-        if len(frametimes) > 0:
-            jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametimes[0])
-            frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
-            _shape = frame.shape
-        logging.debug(f"Learned image dimensions: {_shape}")
-        return _shape
+        cwIndx = datafeed.get_date_index(jreq.eventDate)
+        trkevt = cwIndx.loc[(cwIndx['event'] == jreq.eventID) & (cwIndx['type'] == 'trk')]
+        if len(trkevt.index) > 0:
+            _camsize = (trkevt.iloc[0].width, trkevt.iloc[0].height)
+        else:
+            _camsize = (0,0)
+        logging.debug(f"Learned image dimensions: {_camsize}")
+        return _camsize
 
     def _feedStart(self, taskEngine, key) -> None:
         jreq = taskEngine.getJobRequest()
-        (startframe, _newEvent) = key
+        (startframe, _newEvent, _ringctrl) = key
         if startframe:
             _valid = True
         if _newEvent:  
@@ -600,8 +607,7 @@ class JobManager:
             jreq.eventDate = _newEvent[0]
             jreq.eventID = _newEvent[1]
             logging.debug(f"_feedStart() {taskEngine.getName()}, {startframe}, {jreq.eventDate}, {jreq.eventID}")
-            framesize = self._getFrameDimensons(jreq)
-            _camsize = (framesize[1], framesize[0])
+            _camsize = self._getFrameDimensons(jreq)
             if _camsize != jreq.camsize:
                 if _camsize in taskEngine.ringbuffers:
                     taskEngine.ringBuffer = taskEngine.ringbuffers[_camsize]
@@ -616,7 +622,11 @@ class JobManager:
             taskEngine.cursor = None
         else:
             framestart = datetime.fromisoformat(startframe)
-            frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
+            if _ringctrl == 'full':
+                frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
+            else:
+                evtData = taskEngine.dataFeed.get_tracking_data(jreq.eventDate, jreq.eventID, _ringctrl)
+                frametimes = evtData['timestamp'].dt.to_pydatetime().tolist()
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = iter(frametimes)
             logging.debug(f"_feedStart() frames: {len(frametimes)}, date {jreq.eventDate} evt {jreq.eventID}")
@@ -639,8 +649,12 @@ class JobManager:
     def _get_frame(self, taskEngine, frametime) -> None:
         datafeed = taskEngine.dataFeed
         jreq = taskEngine.getJobRequest()
-        jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametime)
-        taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+        try:
+            jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametime)
+            taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+        except Exception as e:
+            logging.error(f"_get_frame(), abandon cursor, ({jreq.eventDate},{jreq.eventID},{frametime}): {str(e)}")
+            taskEngine.cursor = None
 
     def _jobThread(self) -> None:
         logging.debug(f"Job Manager thread started.")
@@ -650,10 +664,10 @@ class JobManager:
                 logging.debug(f"Job Manager has queue entry {(tag,msg)}")
                 if tag == TaskEngine.TaskSUBMIT:
                     jobreq = taskList[msg]
-                    jobclass = self.taskmenu[jobreq.jobTask]['class']
-                    if jobclass in self.ondeck: 
-                        if self.ondeck[jobclass] is None: 
-                            self.ondeck[jobclass] = jobreq
+                    jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
+                    if jobreq.jobClass in self.ondeck: 
+                        if self.ondeck[jobreq.jobClass] is None: 
+                            self.ondeck[jobreq.jobClass] = jobreq
                 elif tag in [TaskEngine.TaskDONE,
                              TaskEngine.TaskFAIL,
                              TaskEngine.TaskCANCELED]:
@@ -698,6 +712,7 @@ class JobManager:
                         for jobclass in engine[1].getClasses():
                             if self.ondeck[jobclass] is not None:
                                 jreq = self.ondeck[jobclass]
+                                logging.debug(f"Found on deck for class {jobclass}: {jreq.jobID}")
                                 self._releaseJob(jreq.jobID, engine[0])
                                 break
                 # Assign next queued job to any open on-deck classes 
