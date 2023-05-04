@@ -215,7 +215,7 @@ the detailed data for each event.
 
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
 header row included in the data. All dates and timestamps reflect Coordinated Universal Time (UTC), 
-not the local time zone.
+rather than local time zone.
 
 .. csv-table:: Event Index 
   :header: "Name", "Type", "Description"
@@ -225,17 +225,19 @@ not the local time zone.
   viewname, str, camera view name 
   timestamp, datetime, timestamp at the start of the event
   event, str, unique identifer for the event 
-  fps, int, pipeline velocity at start of event
-  type, str, event type 
+  width, int, width of captured images
+  height, int, height of captured images
+  type, str, tracking type 
 
 Event detail files always include a header row, with potentially varying data structures depending 
-on the type of result data. The naming convention for all detail files is: ``EventID_TypeCode.csv``
+on the type of result data. All event tracking result sets currently confirm to the following
+description. The naming convention for all detail files is: ``EventID_TypeCode.csv``
 
 .. csv-table:: Tracking Event Detail
   :header: "Name", "Type", "Description"
   :widths: 20, 20, 60
 
-  timestamp, datetime, timestamp when tracking record written
+  timestamp, datetime, timestamp for the image
   objid, str, object identifier
   classname, str, classification name
   rect_x1, int, bounding rectangle X1-coordinate
