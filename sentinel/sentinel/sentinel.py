@@ -288,12 +288,12 @@ class JobTasking:
             self.imagesize = (0,0)
             self.ringbuff = []
             self.ringctrl = 'full'
+            self.trktype = 'trk'
 
-            def ringStart(frametime, newEvent=None, ringctrl='full') -> int:
-                self.ringctrl = ringctrl
+            def ringStart(frametime, newEvent=None) -> int:
                 self.frame_start = frametime.isoformat()
                 self.frame_offset = 0
-                _start_command = (JobManager.ReadSTART, (self.frame_start, newEvent, ringctrl))
+                _start_command = (JobManager.ReadSTART, (self.frame_start, newEvent, self.ringctrl, self.trktype))
                 ringWire.send(msgpack.packb(_start_command))
                 if newEvent:
                     # wait here for confirmation of ring buffer assignment
@@ -325,7 +325,8 @@ class JobTasking:
                             "start": msg[3],
                             "offset": msg[4],
                             "clas": msg[5],
-                            'rect': [int(msg[6]), int(msg[7]), int(msg[8]), int(msg[9])]
+                            'rect': [int(msg[6]), int(msg[7]), int(msg[8]), int(msg[9])],
+                            'trktype': self.trktype
                         }
                         msg = json.dumps(cwUpdate)
                 envelope = (TaskEngine.TaskSTATUS, msg)
@@ -356,14 +357,16 @@ class JobTasking:
                         if not self.jobreq.eventID:
                             trackingData = None
                         else:
-                            trktype = taskcfg['trk_type'] if 'trk_type' in taskcfg else 'trk'
-                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, trktype)
+                            self.trktype = taskcfg['trk_type'] if 'trk_type' in taskcfg else 'trk'
+                            trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, self.trktype)
                             if 'ringctrl' in taskcfg:
-                                if taskcfg == 'trk':
+                                self.ringctrl = taskcfg['ringctrl']
+                                if self.ringctrl == 'trk':
                                     startframe = trackingData.iloc[0]['timestamp']  # .to_pydatetime()
                                 else:
                                     startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
                             else:
+                                self.ringctrl = 'full'
                                 startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
                         task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator)
                         # Hang hooks for task references to ring buffer and publisher
@@ -377,7 +380,7 @@ class JobTasking:
                         # ----------------------------------------------------------------------
                         if not self.jobreq.eventID:
                             # ------------------------------------------------------------------------
-                            #   No starting event? No pipline() loop supported. Have no tracking data, 
+                            #   No starting event? No pipeline() loop supported. Have no tracking data, 
                             #   and no starting frame. Will call the pipeline() once for this task.
                             # ------------------------------------------------------------------------
                             task.pipeline(None)
@@ -414,8 +417,8 @@ class JobTasking:
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
                     except Exception as e:
-                        traceback.print_exc()  # see syslog for traceback
-                        msg = (TaskEngine.TaskSTATUS, f"taskHost() exception, {str(e)}")
+                        traceback.print_exc()  # see syslog for traceback  
+                        msg = (TaskEngine.TaskSTATUS, f"taskHost({self.jobreq.eventDate}, {self.jobreq.eventID}), {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
@@ -599,7 +602,7 @@ class JobManager:
 
     def _feedStart(self, taskEngine, key) -> None:
         jreq = taskEngine.getJobRequest()
-        (startframe, _newEvent, _ringctrl) = key
+        (startframe, _newEvent, _ringctrl, _trktype) = key
         if startframe:
             _valid = True
         if _newEvent:  
@@ -625,11 +628,11 @@ class JobManager:
             if _ringctrl == 'full':
                 frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
             else:
-                evtData = taskEngine.dataFeed.get_tracking_data(jreq.eventDate, jreq.eventID, _ringctrl)
+                evtData = taskEngine.dataFeed.get_tracking_data(jreq.eventDate, jreq.eventID, _trktype)
                 frametimes = evtData['timestamp'].dt.to_pydatetime().tolist()
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = iter(frametimes)
-            logging.debug(f"_feedStart() frames: {len(frametimes)}, date {jreq.eventDate} evt {jreq.eventID}")
+            logging.debug(f"_feedStart({key}) frames: {len(frametimes)}, date {jreq.eventDate} evt {jreq.eventID}")
             try:
                 frametime = next(taskEngine.cursor)
                 while frametime < framestart:
@@ -661,7 +664,7 @@ class JobManager:
         while not self._stop:
             if not taskFeed.empty():
                 (tag, msg) = taskFeed.get()
-                logging.debug(f"Job Manager has queue entry {(tag,msg)}")
+                logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
                 if tag == TaskEngine.TaskSUBMIT:
                     jobreq = taskList[msg]
                     jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']

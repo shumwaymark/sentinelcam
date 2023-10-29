@@ -214,6 +214,12 @@ class SentinelTaskData:
         self._framestart = datetime.utcnow()
         self._startidx = 0
 
+    # TODO: Tasks running on the Sentinel can produce multiple result types,
+    # and should be allowed to provide results from multiple events. Need support 
+    # for multiple open CSV files in simultaneous use per job. New CSV files are 
+    # opened as additional tracking types are introduced for the current event.
+    # If the eventID changes, close all open CSV files for the current event. 
+
     def set_view(self, node, view) -> None:
         self.node = node
         self.view = view
@@ -318,6 +324,7 @@ class SentinelAgent:
                             _event = task_data.eventID
                             _refkey = logdata['refkey']
                             _ringctrl = logdata['ringctrl']
+                            _trktype = logdata['trktype']
                             _framestart = logdata['start']
                             _frameoffset = logdata['offset']
                             _clas = logdata['clas']
@@ -334,20 +341,20 @@ class SentinelAgent:
                                     task_data.framelist = [datetime.strptime(_jpgfile[-30:-4],"%Y-%m-%d_%H.%M.%S.%f") 
                                         for _jpgfile in cwData.get_event_images()]
                                 else:
-                                    trkdata = cwData.get_event_data(_ringctrl)
+                                    trkdata = cwData.get_event_data(_trktype)
                                     task_data.framelist = trkdata['timestamp'].dt.to_pydatetime().tolist()
                                 logging.debug(f"Check event {_event} for '{_refkey}' tag, frames={len(task_data.framelist)}")
                                 if len(task_data.framelist) > 0:
                                     if _refkey not in cwData.get_event_types():
-                                        _newEvent = True
+                                        _newResult = True
                                     else:
-                                        _newEvent = False  # must be an update to an existing tracking set                                
+                                        _newResult = False  # must be an update to an existing tracking set                                
                                     _csvData = {
                                         "view": _view,
                                         "id": _event,
                                         "timestamp": cwData.get_event_start().isoformat(),
                                         "type": "start",
-                                        "new": _newEvent,
+                                        "new": _newResult,
                                         "camsize": (0, 0)  # TODO: retrive this from camwatcher event index
                                     }
                                     _taskref = task_data.get_taskref()
@@ -359,7 +366,9 @@ class SentinelAgent:
                                     del runningJobs[_jobid]
                                     continue
                             # map frame offset to the correct timetamp 
-                            if _framestart != task_data.get_frame_start():
+                            _desiredStart = datetime.fromisoformat(_framestart)
+                            if _desiredStart != task_data.get_frame_start():
+                                logging.debug(f"Sentinel agent adjust framestart={_framestart} for sentinel task {_taskref}")
                                 task_data.set_frame_start(_framestart)
                             _frametime = task_data.get_frame_byoffset(_frameoffset)
                             # write result data to CSV fie 
