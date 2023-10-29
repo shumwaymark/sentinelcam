@@ -212,6 +212,8 @@ def main():
                         request['evt'] + '_' + request['frametime'] + '.jpg')
                     if os.path.exists(jpegfile):
                         jpeg = open(jpegfile, "rb").read()
+                        if len(jpeg) == 0:
+                            jpeg = tinyJPG
                     else:
                         jpeg = tinyJPG
                     pump.send_jpg(reply, jpeg)
