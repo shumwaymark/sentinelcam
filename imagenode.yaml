@@ -4,7 +4,7 @@ node:
   name: outpost
   heartbeat: 10
   patience: 5
-  REP_watcher: True
+  REP_watcher: False                 # Not recommended for sentinelcam
   queuemax: 50
   send_type: jpg
   send_threading: True
