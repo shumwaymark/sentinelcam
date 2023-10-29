@@ -12,12 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
-- Continue development and testing of the **sentinel** module. Support result signaling 
-  to Twilio, and to Node-RED via MQTT.
-- Implement internal housekeeping on the **sentinel** to periodically dump oldest job history.
-  Needed to avoid an obvious memory leak. Perform as a routine task during quiet periods.
-- Support a job runtime limit as a configurable setting per task engine. Provide tolerance
-  based on the queue length for tasks waiting in that job class.  
+- Support multiple result sets from both `Outpost` event management, and from running 
+  **sentinel** tasks. Needed to support the capture of multiple neural nets producing 
+  results in parallel from a single event. 
+- Continue development and testing of the **sentinel** module. 
+  - Support result signaling to Twilio, and to Node-RED via MQTT.
+  - Provide an abstraction to support a set of reusable design patterns for the most common
+    ring buffer control techniques.
+  - Implement internal housekeeping to periodically purge oldest job history. This is 
+    needed to avoid an obvious memory leak. Perform as a routine task during quiet periods.
+    Incorporate a job history report of statistics and performance metrics as an output. This
+    could ultimately fuel a **sentinel** health check, perhaps built to support agency based on 
+    self-diagnosis. 
+  - Support a job runtime limit as a configurable setting per task engine. Provide tolerance
+    based on the queue length for tasks waiting in that job class.  
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by imageZMQ.
 - Need maintenance shell script to clear out empty **camwatcher** data folders after last
@@ -30,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+- Sentinel tasks with ring control = 'trk' will fail when provided an empty tracking set
+
+## 0.0.24-alpha - 2023-10-29
+
+### Added
+
+- Include alpha version of facial reconnaissance pipeline
+
+### Fixed
+
+- Send empty image from **datapump** when size of JPEG file is zero
+- Corrected tracking references for **camwatcher** updates when task ringctrl is ``trk``
 
 ## 0.0.23-alpha - 2023-05-03
 

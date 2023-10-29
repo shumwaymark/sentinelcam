@@ -131,36 +131,46 @@ class FaceAligner:
         if self.desiredFaceHeight is None:
             self.desiredFaceHeight = self.desiredFaceWidth
 
-    def align(self, face):
+    def landmarks(self, face) -> tuple:
         gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)            
         eyes = self.eye_detector.detectMultiScale(image=gray,
             scaleFactor=1.05, minNeighbors=3, minSize=(20,20), maxSize=(35,35))
         # establish eye centroids
-        centerX = face.shape[0] // 2
+        centerX = face.shape[1] // 2
+        centerY = face.shape[0] // 2
         eyeCentroids = []
-        for (i, (x, y, w, h)) in enumerate(eyes):
+        for (x, y, w, h) in eyes:
             cX = int((x + x + w) / 2.0)
             cY = int((y + y + h) / 2.0)
-            if cX > centerX or cX < centerX // 2: 
-                continue  # discard any false-positives
+            if cY > centerY * 1.05 or cY < centerY // 2: 
+                continue   # discard oblique perspectives and any false-positive detections
             eyeCentroids.append((cX, cY))
 
-        if len(eyeCentroids) != 2: return face
+        angle = 0
+        leftEyeCenter = (0,0)
+        rightEyeCenter = (0,0)
+        if len(eyeCentroids) == 2:
+            if eyeCentroids[0][0] > eyeCentroids[1][0]:
+                leftEyeCenter = eyeCentroids[0]
+                rightEyeCenter = eyeCentroids[1]
+            else:
+                leftEyeCenter = eyeCentroids[1]
+                rightEyeCenter = eyeCentroids[0]
 
-        if eyes[0][0] > eyes[1][0]:
-            leftEyeCenter = eyeCentroids[0]
-            rightEyeCenter = eyeCentroids[1]
-        else:
-            leftEyeCenter = eyeCentroids[1]
-            rightEyeCenter = eyeCentroids[0]
+        cX = (leftEyeCenter[0] + rightEyeCenter[0]) // 2
+        cY = (leftEyeCenter[1] + rightEyeCenter[1]) // 2
 
         # compute the angle between the eye centroids
         dY = rightEyeCenter[1] - leftEyeCenter[1]
         dX = rightEyeCenter[0] - leftEyeCenter[0]
         angle = np.degrees(np.arctan2(dY, dX)) - 180
 
-        if 360 + angle > 30: return face
+        # estimated focus metric as the variance of the Laplacian
+        focus = cv2.Laplacian(gray, cv2.CV_64F).var()
 
+        return (rightEyeCenter, leftEyeCenter, (cX, cY), (dX, dY), angle, focus)
+
+    def align(self, face, rightEyeCenter, leftEyeCenter, distance, angle):
         # compute the desired right eye x-coordinate based on the
         # desired x-coordinate of the left eye
         desiredRightEyeX = 1.0 - self.desiredLeftEye[0]
@@ -169,6 +179,7 @@ class FaceAligner:
         # the ratio of the distance between eyes in the *current*
         # image to the ratio of distance between eyes in the
         # *desired* image
+        (dX, dY) = distance
         dist = np.sqrt((dX ** 2) + (dY ** 2))
         desiredDist = (desiredRightEyeX - self.desiredLeftEye[0])
         desiredDist *= self.desiredFaceWidth
@@ -220,7 +231,7 @@ class OpenFace:
         # extract the face ROI and grab the ROI dimensions
         face = frame[y:y+h, x:x+w]
         (fH, fW) = face.shape[:2]
-        # ensure the face width and height are sufficiently large
+        # insure that face width and height are sufficiently large
         if fW < 20 or fH < 20:
             pass
         else:

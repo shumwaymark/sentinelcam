@@ -4,16 +4,21 @@ Copyright (c) 2023 by Mark K Shumway, mark.shumway@swanriver.dev
 License: MIT, see the sentinelcam LICENSE for more details.
 """
 
+import cv2
+import numpy as np
+import pickle
 import time
+import imutils
 import simplejpeg
 from sentinelcam.utils import readConfig
 from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace, FaceAligner
 from sentinelcam.tasklibrary import findCosineDistance, findEuclideanDistance
 
 class Task:
-    dataFeed = None
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        pass
     # Function placeholders, defined by the taskHost
-    def ringStart(self, frametime, newEvent=None) -> int:
+    def ringStart(self, frametime, newEvent=None, ringctrl='full') -> int:
         return -1
     def ringNext(self) -> int:
         return -1
@@ -117,6 +122,67 @@ class GetFaces(Task):
         results = ('Faces', self.event_date, self.event_id, len(self.imgs), len(self.persons.index), self._search_cnt, self.face_cnt)
         self.publish(results)
 
+class FaceRecon(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        self.cwUpd = cfg['camwatcher_update']
+        self.refkey = cfg['trk_type']
+        self.trkrecs = iter(trkdata[:].itertuples())
+
+        self.fa = FaceAligner(cfg["face_aligner"])
+        self.fe = OpenFace(cfg["face_embeddings"])
+        faceModel = pickle.loads(open(cfg['facemodel'], "rb").read())
+        self.model = faceModel['svm']
+        self.labels = faceModel['labels']
+        self.cnts = [0 for i in range(len(self.labels.classes_))]
+        self.facecnt = len(trkdata.index)
+        self.event_id = jobreq.eventID
+        self.event_date = jobreq.eventDate
+
+    def pipeline(self, frame) -> bool:
+        try:
+            trkrec = next(self.trkrecs)
+        except StopIteration:
+            return False
+        x, y, x1, y1 = trkrec.rect_x1, trkrec.rect_y1, trkrec.rect_x2, trkrec.rect_y2
+        face = frame[y:y1, x:x1]
+        if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
+        (rightEye, leftEye, ctrPoint, distance, angle, focus) = self.fa.landmarks(face)
+        relative_angle = 360 + angle if angle < -180 else abs(angle)  
+        usableFace = (
+            #  found 2 eyes?
+            ctrPoint[0] > 0 and
+            #  distance between left and right eye at least 20% of the image width?
+            round(abs(distance[0]) / face.shape[1], 2) >= 0.2 # and
+            #  both eyes outside of a centered 20% prohibited area?
+            #leftEye[0] > ((face.shape[1]/2)+(face.shape[1]//10)) and
+            #rightEye[0] < ((face.shape[1]/2)-(face.shape[1]//10)) and
+            #  for filtering out extreme alignment angles?
+            #relative_angle < 17 # and
+            #  focus metric above a currently hard-coded, and low, threshold?
+            #focus > 42.9 
+        )
+        if usableFace:
+            validate = self.fa.align(face, rightEye, leftEye, distance, angle)
+        else:
+            validate = face
+        v = validate.shape
+        embeddings = self.fe.detect(validate, (0,0,v[1],v[0]))
+        # perform classification to recognize the face
+        preds = self.model.predict_proba(embeddings.reshape(1,-1))
+        j = np.argmax(preds)
+        #proba = preds[0,j]
+        name = self.labels.classes_[j]
+        if usableFace or name != 'Unknown':
+            self.cnts[j] += 1
+            result = (name, x, y, x1, y1)
+            self.publish(result, self.refkey, self.cwUpd)
+        return True
+    
+    def finalize(self) -> None:
+        cnts = ", ".join([f"{self.labels.classes_[n]} {self.cnts[n]}" for n in range(len(self.cnts)) if self.cnts[n]>0])
+        results = ('Recon', self.event_date, self.event_id, self.facecnt, cnts)
+        self.publish(results)
+
 class DailyCleanup(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.dataFeed = feed
@@ -141,7 +207,17 @@ class DailyCleanup(Task):
                     for event in delete_evts: self.dataFeed.delete_event(self.event_date, event)
                     stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, events deleted: {len(delete_evts)}"
                 else:
-                    stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, ratio: {round(face_ratio,2)}"
+                    for event in delete_evts:
+                        setlen = {'trk': 0, 'obj': 0}
+                        trkrs = cwIndx.loc[cwIndx['event'] == event]['type'].to_list()
+                        started = cwIndx.loc[cwIndx['event'] == event]['timestamp'].min()
+                        imgs = self.dataFeed.get_image_list(self.event_date, event)
+                        for trk in trkrs:
+                            trkset = self.dataFeed.get_tracking_data(self.event_date, event, trk)
+                            setlen[trk] = len(trkset.index)
+                        stats = f"{event} {started}  imgs {len(imgs):3}  trk {setlen['trk']:3}  obj {setlen['obj']:3}"
+                        self.publish(stats)
+                    stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, todelete: {len(delete_evts)}, ratio: {round(face_ratio,2)}"
             else:
                 stats = f"DailyCleanup, delete ratio not met: events {trk_cnt}, with faces {faces_cnt}"
             self.publish(stats)
@@ -202,7 +278,8 @@ class MeasureRingLatency(Task):
 
     def pipeline(self, frame) -> bool:
         cwIndx = self.dataFeed.get_date_index(self.event_date)
-        for cwEvt in cwIndx[:].itertuples():
+        trkEvts = cwIndx.loc[cwIndx['type'] == 'trk']
+        for cwEvt in trkEvts[:].itertuples():
             # For every event in the date...
             start_time = time.time()
             event = cwEvt.event
@@ -235,6 +312,7 @@ class MeasureRingLatency(Task):
 def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
     menu = {
         'GetFaces'               : GetFaces,
+        'FaceRecon'              : FaceRecon,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
         'DailyCleanup'           : DailyCleanup,
         'CollectImageSizes'      : CollectImageSizes,

@@ -7,8 +7,8 @@ default_pump: tcp://data1:5556
 socket_dir: /home/pi/sentinel/sockets
 
 # For ring buffer allocations, any potential image size must
-# be known in advance. Each task_engine needs a set of ring
-# buffers. Parameters are ((width, height), buffer_length)
+# be known in advance. Each of the task_engines need a set of 
+# ring buffers. Parameters are ((width, height), buffer_length)
 ring_buffer_models:
   default:
     vga: ((640, 480), 5)
@@ -39,7 +39,13 @@ task_list:
   GetFaces:
     config: /home/pi/sentinel/tasks/GetFaces.yaml
     class: 1
-    deftrk: obj  # desired tracking type, default for this is 'trk'
+    trk_type: obj    # desired tracking feed, default = trk
+    ringctrl: full   # [full, trk]  default = full
+  FaceRecon:
+    config: /home/pi/sentinel/tasks/FaceRecon.yaml
+    class: 2
+    trk_type: fd1    # desired tracking feed, default = trk
+    ringctrl: trk    # [full, trk]  default = full
   DailyCleanup:
     config: /home/pi/sentinel/tasks/DailyCleanup.yaml
     class: 2

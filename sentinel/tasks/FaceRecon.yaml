@@ -1,0 +1,17 @@
+%YAML 1.0
+---
+# FaceRecon.yaml - Identify candidate images for facial recognition modeling
+
+trk_type: fr1
+camwatcher_update: True
+
+face_aligner:
+  haarcascade_path: /home/pi/sentinel/models/haarcascades/haarcascade_eye.xml
+  desiredLeftEye: [0.35, 0.35]
+  desiredFaceWidth: 96
+  desiredFaceHeight: 96
+
+face_embeddings:
+  model_path: /home/pi/sentinel/models/openface_torch/openface_nn4.small2.v1.t7
+
+facemodel: /home/pi/sentinel/models/face_recon/faces_alpha.pickle

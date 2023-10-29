@@ -211,11 +211,11 @@ data is stored in the filesystem, within a separate folder for each category.
 
 Event tracking data and results from event analysis are written to the filesystem as a set of 
 CSV-format text files. For each date, there is an event index file and a separate file with
-the detailed data for each event.
+the detailed result sets from each analysis task executed for the event.
 
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
 header row included in the data. All dates and timestamps reflect Coordinated Universal Time (UTC), 
-rather than local time zone.
+rather than the local time zone.
 
 .. csv-table:: Event Index 
   :header: "Name", "Type", "Description"
@@ -377,8 +377,8 @@ the data model above for further detail.
 
 The first two arguments to the ``get_tracking_data()`` function are required, a date and an 
 event identifier. Used to retrieve the full Tracking Event Detail dataset (see *Data model* above) 
-as a ``pandas.DataFrame`` object. Both arguments are required. The date is specified in 'YYYY-MM-DD'
-format, the EventID reference must exist for the indicated date.
+as a ``pandas.DataFrame`` object. The date is specified in 'YYYY-MM-DD' format, the EventID 
+reference must exist for the indicated date.
 
 .. code-block:: python
 
@@ -497,6 +497,11 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   `imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
   See the `depthai.yaml <depthai.yaml>`_ file for the setups.
 
+Facial recognition and learning pipeline
+----------------------------------------
+
+
+
 Data management
 ---------------
 
@@ -523,9 +528,9 @@ the likelihood that key details might be missed. This is helpful for analysis an
 while also allowing for the production of high-quality full-motion archival videos. 
 
 There can be multiple objects of interest moving through the field of view simultaneously. 
-Collected logging data can include geometry, classification, and possibly labeling. This could 
-represent the aggregated results inferred from one or more deep neural networks whether collected 
-in real time by an Outpost node or produced by the Sentinel. Or both.
+Collected logging data can include geometry, classification, and labeling. These datasets could 
+represent the aggregated results inferred from multiple deep neural networks, both collected 
+in real time by an Outpost node and analysis results produced by the Sentinel. 
 
 It adds up in a hurry. *And the rest of the story...*
 
@@ -547,7 +552,7 @@ occupants and their vehicles will pass in front of that camera multiple times pe
 
   What to keep, and why. That's the real question to be answered. Isn't it always?
 
-  - All these collected images: incredibly valuable for model-building. This is often the first order of business. 
+  - All these collected images: incredibly valuable for model-building. This is generally the first order of business. 
   - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
   - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
   - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
@@ -594,9 +599,9 @@ and libraries.
 - imageZMQ
 - ZeroMQ
 - MessagePack
+- Dlib
 - NumPy
 - pandas
-- dlib
 - imutils
 - scikit-learn
 - simplejpeg
