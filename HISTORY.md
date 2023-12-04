@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     self-diagnosis. 
   - Support a job runtime limit as a configurable setting per task engine. Provide tolerance
     based on the queue length for tasks waiting in that job class.  
+- Need **datapump** command to lock event as prevention against deletion when used for modeling. 
 - Add missing support for **datapump** error codes in response messages using the first 
   element of the (text,data) tuple carried by imageZMQ.
 - Need maintenance shell script to clear out empty **camwatcher** data folders after last
@@ -39,18 +40,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
-- Sentinel tasks with ring control = 'trk' will fail when provided an empty tracking set
+## 0.0.25-alpha - 2023-12-04
+
+### Added
+
+- The **sentinel** now supports easily configurable pipeline definitions, through task chaining and
+  aliasing. This is managed by new `Task` attributes in the YAML file.
+- Defined an `EventList` class to encapsulate the most common event selection and processing methods:
+  by date or date range, by specific date and event, and from a from text file with a list of events 
+  to process. An optional tracking type parameter can be used to refine the selection. 
+
+### Changed
+
+- Facial reconnaissance pipeline now incorprates Euclidean distance metrics against the individual 
+  baselines kept for known individuals. **OpenFace** embeddings are used for both this purpose and also
+  for training the SVM classifier. This ensemble approach both bolsters classification results and 
+  helps address the open set recognition problem inherent in the overall design. 
+- Include support for carrying object ID references within tracking data updates from tasks running 
+  on the **sentinel**.
+- The `DataFeed` now raises a `TrackingSetEmpty` exception when attempting to retrieve tracking data
+  that does not exist. 
+
+### Fixed
+
+- Now properly reporting messages with ERROR and WARNING logging levels from tasks running on 
+  the **sentinel**. Previously, these were being logged with a level of INFO.
 
 ## 0.0.24-alpha - 2023-10-29
 
 ### Added
 
-- Include alpha version of facial reconnaissance pipeline
+- Include alpha version of facial reconnaissance pipeline.
 
 ### Fixed
 
-- Send empty image from **datapump** when size of JPEG file is zero
-- Corrected tracking references for **camwatcher** updates when task ringctrl is ``trk``
+- Send empty image from **datapump** when size of JPEG file is zero.
+- Corrected tracking references for **camwatcher** updates when task ringctrl is ``trk``.
 
 ## 0.0.23-alpha - 2023-05-03
 
