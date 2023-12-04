@@ -11,8 +11,8 @@ import time
 import imutils
 import simplejpeg
 from sentinelcam.utils import readConfig
-from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace, FaceAligner
-from sentinelcam.tasklibrary import findCosineDistance, findEuclideanDistance
+from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace
+from sentinelcam.tasklibrary import findEuclideanDistance, FaceAligner, FaceBaselines
 
 class Task:
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -44,8 +44,8 @@ class MobileNetSSD_allFrames(Task):
         (rects, labels) = self.od.detect(frame)
         if len(rects) > 0:
             detections = zip(labels, rects)
-            for objs in detections:
-                result = (objs[0], int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
+            for i, objs in enumerate(detections):
+                result = (objs[0], i, int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
                 self.publish(result, self.refkey, self.cwUpd)
         return True  # process every frame 
 
@@ -58,7 +58,7 @@ class GetFaces(Task):
         self.event_id = jobreq.eventID
         self.event_date = jobreq.eventDate
         self.imgs = feed.get_image_list(self.event_date, self.event_id)
-        self.persons = trkdata.loc[trkdata['classname'] == 'person']
+        self.persons = trkdata.loc[trkdata['classname'].str.startswith('person')]
         if len(self.persons.index) > 0:
             # When processing a subset of frames, define a couple of iterators
             # to align image and tracking references within the event.
@@ -73,8 +73,8 @@ class GetFaces(Task):
 
     def _publish_face_rects(self, faces) -> None:
         if len(faces) > 0:
-            for face in faces:
-                result = ("Face", int(face[0]), int(face[1]), int(face[2]), int(face[3]))
+            for i, face in enumerate(faces):
+                result = ("Face", i, int(face[0]), int(face[1]), int(face[2]), int(face[3]))
                 self.publish(result, self.refkey, self.cwUpd)
                 self.face_cnt += 1
 
@@ -107,7 +107,7 @@ class GetFaces(Task):
                     # tracking record for each. Once face detection has executed for this frame,
                     # continue iterating through the tracker until next timestamp found.
                     if search_not_completed:
-                        faces = self.fd.detect(image)  # currently finds every face in the image
+                        faces = self.fd.detect(image)  # finds every face in the image
                         if len(faces) > 0: self._publish_face_rects(faces)
                         search_not_completed = False
                         self._search_cnt += 1
@@ -127,41 +127,46 @@ class FaceRecon(Task):
         self.cwUpd = cfg['camwatcher_update']
         self.refkey = cfg['trk_type']
         self.trkrecs = iter(trkdata[:].itertuples())
-
         self.fa = FaceAligner(cfg["face_aligner"])
         self.fe = OpenFace(cfg["face_embeddings"])
         faceModel = pickle.loads(open(cfg['facemodel'], "rb").read())
         self.model = faceModel['svm']
         self.labels = faceModel['labels']
+        self.fb = FaceBaselines(cfg['baselines'], self.labels.classes_)
         self.cnts = [0 for i in range(len(self.labels.classes_))]
+        self.cnts.append(0)  # one more on the end for the Unknown class
+        self.unk = len(self.cnts) - 1
         self.facecnt = len(trkdata.index)
         self.event_id = jobreq.eventID
         self.event_date = jobreq.eventDate
 
     def pipeline(self, frame) -> bool:
         try:
-            trkrec = next(self.trkrecs)
+            trkrec = next(self.trkrecs)  # TODO: pipeline needs internal iteration over every face in the frame
         except StopIteration:
             return False
         x, y, x1, y1 = trkrec.rect_x1, trkrec.rect_y1, trkrec.rect_x2, trkrec.rect_y2
+        if x<0:x=0
+        if y<0:y=0
         face = frame[y:y1, x:x1]
+        if len(face) == 0: return True 
         if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
         (rightEye, leftEye, ctrPoint, distance, angle, focus) = self.fa.landmarks(face)
         relative_angle = 360 + angle if angle < -180 else abs(angle)  
-        usableFace = (
+        candidate = (
             #  found 2 eyes?
             ctrPoint[0] > 0 and
             #  distance between left and right eye at least 20% of the image width?
-            round(abs(distance[0]) / face.shape[1], 2) >= 0.2 # and
+            round(abs(distance[0]) / face.shape[1], 2) >= 0.2 and
             #  both eyes outside of a centered 20% prohibited area?
-            #leftEye[0] > ((face.shape[1]/2)+(face.shape[1]//10)) and
-            #rightEye[0] < ((face.shape[1]/2)-(face.shape[1]//10)) and
+            leftEye[0] > ((face.shape[1]/2)+(face.shape[1]//10)) and
+            rightEye[0] < ((face.shape[1]/2)-(face.shape[1]//10)) and
             #  for filtering out extreme alignment angles?
-            #relative_angle < 17 # and
+            relative_angle < 17 and
             #  focus metric above a currently hard-coded, and low, threshold?
-            #focus > 42.9 
+            focus > 40 
         )
-        if usableFace:
+        if candidate:
             validate = self.fa.align(face, rightEye, leftEye, distance, angle)
         else:
             validate = face
@@ -170,16 +175,31 @@ class FaceRecon(Task):
         # perform classification to recognize the face
         preds = self.model.predict_proba(embeddings.reshape(1,-1))
         j = np.argmax(preds)
-        #proba = preds[0,j]
+        proba = preds[0,j]
         name = self.labels.classes_[j]
-        if usableFace or name != 'Unknown':
-            self.cnts[j] += 1
-            result = (name, x, y, x1, y1)
+        (k, dist) = self.fb.search(embeddings)
+        if dist > 0.99 or k != j:
+            (name, j) = ('Unknown', self.unk)
+            proba = 0
+            margin = 0
+        else:
+            margin = dist - self.fb.thresholds()[k]
+        if proba > 0.97 and margin < 0.05: 
+            pass
+        elif name != 'Unknown':
+            candidate = False
+        flag = '*' if candidate else ''
+        if candidate or name != 'Unknown':
+            classlabel = "{}: {:.2f}% {}".format(name, proba * 100, flag)
+            result = (classlabel, trkrec.objid, x, y, x1, y1)
             self.publish(result, self.refkey, self.cwUpd)
+            self.cnts[j] += 1
         return True
     
     def finalize(self) -> None:
-        cnts = ", ".join([f"{self.labels.classes_[n]} {self.cnts[n]}" for n in range(len(self.cnts)) if self.cnts[n]>0])
+        namelist = [self.labels.classes_[n] for n in range(len(self.labels.classes_))]
+        namelist.append('Unknown')
+        cnts = ", ".join([f"{namelist[n]} {self.cnts[n]}" for n in range(len(self.cnts)) if self.cnts[n]>0])
         results = ('Recon', self.event_date, self.event_id, self.facecnt, cnts)
         self.publish(results)
 
