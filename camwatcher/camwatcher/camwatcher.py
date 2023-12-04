@@ -328,6 +328,7 @@ class SentinelAgent:
                             _framestart = logdata['start']
                             _frameoffset = logdata['offset']
                             _clas = logdata['clas']
+                            _objid = logdata['objid']
                             _rect = logdata['rect']  # [int(msg[5]), int(msg[6]), int(msg[7]), int(msg[8])]
                             if task_data.trkType is None:
                                 task_data.trkType = _refkey
@@ -376,8 +377,8 @@ class SentinelAgent:
                             _csvData = {
                                 "timestamp": _frametime.isoformat(),
                                 "type": _refkey,
-                                "obj": 0,
-                                "clas": _clas.split(':')[0],
+                                "obj": _objid,
+                                "clas": _clas,
                                 "rect": _rect
                             }
                             _dataBlock = (_taskref, _csvData)
