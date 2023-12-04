@@ -183,7 +183,7 @@ See below for a high-level design sketch.
 .. image:: docs/images/CamWatcher.png
    :alt: Sketch of basic camwatcher design
 
-Depending on how may camera events are occuring at any one time, each **camwatcher** node can support 
+Depending on how many camera events are occuring at any one time, each **camwatcher** node can support 
 a limited number of ``Outpost`` publishers. As the total number of deployed camera nodes increase, 
 additional data sinks will need to be included in the system architecture design to distribute the load.
 
@@ -405,10 +405,11 @@ over the first 90-100 frames, for fast efficient access to the point of interest
 Sentinel design
 ---------------
 
-A working prototype of the **sentinel** module is up and running in production. The **sentinel** 
-accepts job service requests as JSON over ZeroMQ. Parallelization is provided by a multi-processing 
-design, allowing multiple tasks to run at once. Employs a dedicated I/O thread to supply image 
-requests for use in analysis tasks through a set of ring buffers in shared memory. 
+A working prototype of the **sentinel** module is up and running in production. Early design goals 
+for this module have been met. The **sentinel** accepts job service requests as JSON over ZeroMQ.
+Parallelization is provided by a multi-processing design, allowing multiple tasks to run at once. 
+Employs a dedicated I/O thread to supply image requests for use in analysis tasks through a set of 
+ring buffers in shared memory. 
 
 .. image:: docs/images/Sentinel.png
    :alt: Sketch of Sentinel internal architecture
@@ -417,7 +418,7 @@ The **sentinel** module is conceived as the primary inference and signaling cent
 heartbeat of the larger system. One or more dispatchers are responsible for firing events 
 that are deemed worthy of deeper analysis by the **sentinel**. 
 
-  **Status**: working proof of concept, functionality still evolving.  
+  **Status**: stable working prototype.  
 
 Workloads are configured through a set of YAML files. Tasks can be configured by job class to 
 have an affinity for a certain task engine. Perhaps one of the task engines has a dedicated 
@@ -429,6 +430,8 @@ inference co-processor and is kept ready for real-time supplemental event analys
 - Workloads can be reconfigured during idle time periods, such as at night. With fewer camera
   events occurring, co-processors can be re-tasked for larger batch analytical sweeps of the data. 
 
+- Configurable pipeline definitions are supported through task chaining and task aliasing.
+
 See `sentinel.yaml <sentinel.yaml>`_ for an example of how this is configured. 
 
 Research and development roadmap
@@ -439,13 +442,13 @@ describe an all-inclusive list, they are simply interrelated areas of current fo
 conceptual framework driving the overall project is larger in scope. Updates are published
 here on an incremental basis as new functionality is fleshed out, proven, and stabilized. 
 
+Facial recognition and learning pipeline
+----------------------------------------
+
+*Stay tuned for complete design and full description*
+
 Sentinel
 --------
-
-Additional development is in the works with regard to task configuration. This will include
-another level of abstraction for the task list in the main YAML file. Ideally, ``TaskFactory`` 
-definitions should be useable as standard models in a workload definition. These pipeline models
-could be set up for multiple use simultaneously, each with a different configuration file. 
 
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
@@ -496,11 +499,6 @@ expected/routine events and unexpected/new activity deserving of a closer look.
   The prototype pipeline definition can be found in 
   `imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
   See the `depthai.yaml <depthai.yaml>`_ file for the setups.
-
-Facial recognition and learning pipeline
-----------------------------------------
-
-
 
 Data management
 ---------------
@@ -563,13 +561,6 @@ the bare minimum of care and feeding. Ideally, set it up and forget about it. It
 
 *Saying it once more. Dream big*.
 
-Video event playback and retention
-----------------------------------
-
-The ability to easily select and review historical events and then present them within a video
-player is an obvious requirement. This will ultimately evolve into a set of services to search 
-for, list, and replay events that have been cataloged. 
-
 Librarian
 ---------
 
@@ -596,14 +587,17 @@ and libraries.
 - picamera
 - Luxonis OAK-1
 - Intel NCS2
+- NVIDIA Jetson Nano DevKit
+- Google Coral USB Accelerator
 - imageZMQ
 - ZeroMQ
-- MessagePack
-- Dlib
+- scikit-learn
 - NumPy
 - pandas
+- papermill
+- MessagePack
+- Dlib
 - imutils
-- scikit-learn
 - simplejpeg
   
 Acknowledgements
