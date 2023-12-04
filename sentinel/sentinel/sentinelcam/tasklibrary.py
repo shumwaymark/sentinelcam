@@ -1,5 +1,6 @@
 import os
 import cv2
+import h5py
 import logging
 import numpy as np
 #import tensorflow as tf
@@ -243,4 +244,22 @@ class OpenFace:
             vec = self.embedder.forward()
             result = vec.flatten()
         return result
+    
+class FaceBaselines:
+    def __init__(self, baselines, names) -> None:
+        self._baselines = h5py.File(baselines)
+        self._namelist = names
+        self._faces = [self._baselines[face] for face in names]  # should be a short list, right?!
+        self._thresholds = [self._baselines[face].attrs.get('threshold') for face in names]
+
+    def thresholds(self) -> list:
+        return(self._thresholds)
+    
+    def distance(self, face, check) -> float:
+        return findEuclideanDistance(face, self._faces[check])
+
+    def search(self, face) -> tuple:
+        distances = np.array([findEuclideanDistance(face, self._faces[i]) for i in range(len(self._faces))])
+        min_dist = np.argmin(distances)
+        return (min_dist, distances[min_dist])
     
