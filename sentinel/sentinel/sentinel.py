@@ -91,6 +91,11 @@ class JobRequest:
                 logging.debug(f"del jobList[{self.jobID}], status now {self.jobStatus}")
                 del jobList[self.jobID]
 
+    def chainJOB(self, task) -> None:
+         chained = JobRequest(self.dataSink, self.sourceNode, self.eventDate, self.eventID, self.datapump, task)
+         logging.debug(f"Chained job {chained.jobID} added to taskList[]")
+         #taskFeed.put((JobManager.JobSUBMIT, chained.jobID))
+
     def _timeVals(self) -> tuple:
         # Returns tuple with 3 formatted strings, or None when factor missing
         start_time, end_time, elapsed_time = None, None, None
@@ -325,7 +330,8 @@ class JobTasking:
                             "start": msg[3],
                             "offset": msg[4],
                             "clas": msg[5],
-                            'rect': [int(msg[6]), int(msg[7]), int(msg[8]), int(msg[9])],
+                            "objid": msg[6],
+                            'rect': [int(msg[7]), int(msg[8]), int(msg[9]), int(msg[10])],
                             'trktype': self.trktype
                         }
                         msg = json.dumps(cwUpdate)
@@ -339,6 +345,7 @@ class JobTasking:
                 else:
                     self.jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
+                    nextTask = None
                     try:
                         if self.jobreq.datapump != taskpump:
                             taskpump = self.jobreq.datapump
@@ -347,9 +354,6 @@ class JobTasking:
                             self.imagesize = self.jobreq.camsize
                             self.ringbuff = ringbuffers[self.imagesize]
 
-                        startMsg = (TaskEngine.TaskSTARTED, self.jobreq.jobID)
-                        publisher.send(msgpack.packb(startMsg))
-
                         # ----------------------------------------------------------------------
                         #   Task Initialization
                         # ----------------------------------------------------------------------
@@ -357,23 +361,28 @@ class JobTasking:
                         if not self.jobreq.eventID:
                             trackingData = None
                         else:
+                            # preload desired tracking set and retrieve starting image
                             self.trktype = taskcfg['trk_type'] if 'trk_type' in taskcfg else 'trk'
+                            self.ringctrl = taskcfg['ringctrl'] if 'ringctrl' in taskcfg else 'full'
                             trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, self.trktype)
-                            if 'ringctrl' in taskcfg:
-                                self.ringctrl = taskcfg['ringctrl']
-                                if self.ringctrl == 'trk':
-                                    startframe = trackingData.iloc[0]['timestamp']  # .to_pydatetime()
-                                else:
-                                    startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
+                            if self.ringctrl == 'trk':
+                                startframe = trackingData.iloc[0]['timestamp']  # .to_pydatetime()
                             else:
-                                self.ringctrl = 'full'
                                 startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
+
+                        if 'alias' in taskcfg:
+                            self.jobreq.jobTask = taskcfg['alias']
+                        if 'chain' in taskcfg:
+                            nextTask = taskcfg['chain']
+
                         task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator)
                         # Hang hooks for task references to ring buffer and publisher
                         task.ringStart = ringStart
                         task.ringNext = ringNext
                         task.getRing = getRing
                         task.publish = publish
+                        startMsg = (TaskEngine.TaskSTARTED, self.jobreq.jobID)
+                        publisher.send(msgpack.packb(startMsg))
 
                         # ----------------------------------------------------------------------
                         #   Execute task
@@ -405,20 +414,28 @@ class JobTasking:
                         # ----------------------------------------------------------------------
                         task.finalize()
 
+                        if nextTask and eoj_status == TaskEngine.TaskDONE:
+                            msg = (TaskEngine.TaskCHAIN, (self.jobreq.jobID, nextTask))
+                            publisher.send(msgpack.packb(msg))
+
                     except (KeyboardInterrupt, SystemExit):
                         raise
+                    except DataFeed.TrackingSetEmpty as e:
+                        msg = (TaskEngine.TaskERROR, f"No tracking data for ({e.date}, {e.evt}, {e.trk})")
+                        publisher.send(msgpack.packb(msg))
+                        eoj_status = TaskEngine.TaskFAIL
                     except KeyError as keyval:
-                        msg = (TaskEngine.TaskSTATUS, f"taskHost() internal key error '{keyval}'")
+                        msg = (TaskEngine.TaskERROR, f"taskHost() internal key error '{keyval}'")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                     except cv2.error as e:
-                        msg = (TaskEngine.TaskSTATUS, f"OpenCV error, {str(e)}")
+                        msg = (TaskEngine.TaskERROR, f"OpenCV error, {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
                     except Exception as e:
                         traceback.print_exc()  # see syslog for traceback  
-                        msg = (TaskEngine.TaskSTATUS, f"taskHost({self.jobreq.eventDate}, {self.jobreq.eventID}), {str(e)}")
+                        msg = (TaskEngine.TaskERROR, f"taskHost({self.jobreq.eventDate}, {self.jobreq.eventID}), {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
@@ -455,6 +472,9 @@ class TaskEngine:
     TaskDONE = 3
     TaskFAIL = 4
     TaskCANCELED = 5
+    TaskWARNING = 6
+    TaskERROR = 7
+    TaskCHAIN = 8
     TaskBOMB = -1
 
     def __init__(self, engineName, config, ringCFG, taskCFG, pump, asyncSUB) -> None:
@@ -628,8 +648,10 @@ class JobManager:
             if _ringctrl == 'full':
                 frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
             else:
+                # TODO: When multiple tracking records are present for the same frame, the frame should only be read
+                # once. It becomes task responsibility to internally align tracking data with each image provided.
                 evtData = taskEngine.dataFeed.get_tracking_data(jreq.eventDate, jreq.eventID, _trktype)
-                frametimes = evtData['timestamp'].dt.to_pydatetime().tolist()
+                frametimes = evtData['timestamp'].dt.to_pydatetime().tolist()  # per above note, need unique timestamps only
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = iter(frametimes)
             logging.debug(f"_feedStart({key}) frames: {len(frametimes)}, date {jreq.eventDate} evt {jreq.eventID}")
@@ -701,7 +723,7 @@ class JobManager:
                             elif cmd == JobManager.ReadNEXT:
                                 engine.ringBuffer.frame_complete()
                                 engine.send_response(engine.ringBuffer.get())
-                        if engine.cursor:
+                        elif engine.cursor:
                             self._feedNext(engine)
                 else:
                     # TODO: Need an engine restart here 
@@ -797,10 +819,18 @@ async def task_feedback(asyncSUB):
                 logging.debug(f"{taskMsg}: status update {JobRequest.Status[msgTag]}.")
                 if msgTag != TaskEngine.TaskSTARTED:
                     taskFeed.put((msgTag, taskMsg))
+            elif msgTag == TaskEngine.TaskCHAIN:
+                (jobid, task) = taskMsg
+                taskList[jobid].chainJOB(task)
+                logging.debug(f"Job {jobid} chained to Task {task}")
+            elif msgTag == TaskEngine.TaskWARNING:
+                logging.warning(str(taskMsg))
+            elif msgTag == TaskEngine.TaskERROR:
+                logging.error(str(taskMsg))
             elif msgTag == TaskEngine.TaskBOMB:
                 msg = taskMsg.split(':')
                 taskFeed.put(msgTag, msg[0])
-                logging.error(f"TaskEngine {taskMsg} failure.")
+                logging.critical(f"TaskEngine {taskMsg} failure.")
             else:
                 logging.error(f"Unsupported task message: {msgTag}")
 
