@@ -85,7 +85,13 @@ class DataFeed(imagezmq.ImageSender):
         payload = zlib.decompress(msg)
         return (md["msg"], pickle.loads(payload))
 
-#def main():
+#----------------------------------------------------------------------------------------
+
+    class TrackingSetEmpty(Exception):
+        def __init__(self, date, evt, trk) -> None:
+            self.date = date
+            self.evt = evt
+            self.trk = trk
 
     def get_date_index(self, date):
         req = msgpack.dumps({'cmd': 'idx', 'date': date})
@@ -97,6 +103,10 @@ class DataFeed(imagezmq.ImageSender):
         req = msgpack.dumps({'cmd': 'evt', 'date': date, 'evt': event, 'trk': type})
         self.zmq_socket.send(req)
         (msg, df) = self.recv_DataFrame()
+        if len(df.index) == 0: 
+            # Not certain this is best. Seems proper for events that no longer exist.
+            # However, for otherwise empty tracking sets perhaps this is more state than error?
+            raise DataFeed.TrackingSetEmpty(date, event, type)
         return df
 
     def get_date_list(self):
