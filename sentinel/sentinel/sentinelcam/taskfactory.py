@@ -32,6 +32,7 @@ class Task:
         # Return False to shutdown the pipeline and task
         return False 
     def finalize(self) -> None:
+        # Optional, for implementing end of task finalization logic 
         pass
 
 class MobileNetSSD_allFrames(Task):
@@ -139,61 +140,55 @@ class FaceRecon(Task):
         self.facecnt = len(trkdata.index)
         self.event_id = jobreq.eventID
         self.event_date = jobreq.eventDate
+        if self.facecnt > 0:
+            self.trkRec = next(self.trkrecs)
+            self.frametime = self.trkRec.timestamp 
+        else:
+            self.frametime = None
 
     def pipeline(self, frame) -> bool:
-        try:
-            trkrec = next(self.trkrecs)  # TODO: pipeline needs internal iteration over every face in the frame
-        except StopIteration:
-            return False
-        x, y, x1, y1 = trkrec.rect_x1, trkrec.rect_y1, trkrec.rect_x2, trkrec.rect_y2
-        if x<0:x=0
-        if y<0:y=0
-        face = frame[y:y1, x:x1]
-        if len(face) == 0: return True 
-        if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
-        (rightEye, leftEye, ctrPoint, distance, angle, focus) = self.fa.landmarks(face)
-        relative_angle = 360 + angle if angle < -180 else abs(angle)  
-        candidate = (
-            #  found 2 eyes?
-            ctrPoint[0] > 0 and
-            #  distance between left and right eye at least 20% of the image width?
-            round(abs(distance[0]) / face.shape[1], 2) >= 0.2 and
-            #  both eyes outside of a centered 20% prohibited area?
-            leftEye[0] > ((face.shape[1]/2)+(face.shape[1]//10)) and
-            rightEye[0] < ((face.shape[1]/2)-(face.shape[1]//10)) and
-            #  for filtering out extreme alignment angles?
-            relative_angle < 17 and
-            #  focus metric above a currently hard-coded, and low, threshold?
-            focus > 40 
-        )
-        if candidate:
-            validate = self.fa.align(face, rightEye, leftEye, distance, angle)
-        else:
-            validate = face
-        v = validate.shape
-        embeddings = self.fe.detect(validate, (0,0,v[1],v[0]))
-        # perform classification to recognize the face
-        preds = self.model.predict_proba(embeddings.reshape(1,-1))
-        j = np.argmax(preds)
-        proba = preds[0,j]
-        name = self.labels.classes_[j]
-        (k, dist) = self.fb.search(embeddings)
-        if dist > 0.99 or k != j:
-            (name, j) = ('Unknown', self.unk)
-            proba = 0
-            margin = 0
-        else:
-            margin = dist - self.fb.thresholds()[k]
-        if proba > 0.97 and margin < 0.05: 
-            pass
-        elif name != 'Unknown':
-            candidate = False
-        flag = '*' if candidate else ''
-        if candidate or name != 'Unknown':
-            classlabel = "{}: {:.2f}% {}".format(name, proba * 100, flag)
-            result = (classlabel, trkrec.objid, x, y, x1, y1)
-            self.publish(result, self.refkey, self.cwUpd)
-            self.cnts[j] += 1
+        while self.trkRec.timestamp <= self.frametime:
+            x1, y1, x2, y2 = self.trkRec.rect_x1, self.trkRec.rect_y1, self.trkRec.rect_x2, self.trkRec.rect_y2
+            if x1<0:x1=0
+            if y1<0:y1=0
+            face = frame[y1:y2, x1:x2]
+            if len(face) == 0: return True 
+            if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
+            facemarks = self.fa.landmarks(face)
+            candidate = self.fa.assess(facemarks)
+            if candidate:
+                validate = self.fa.align(face, facemarks)
+            else:
+                validate = face  
+            v = validate.shape
+            embeddings = self.fe.detect(validate, (0,0,v[1],v[0]))
+            # perform classification to recognize the face
+            preds = self.model.predict_proba(embeddings.reshape(1,-1))
+            j = np.argmax(preds)
+            proba = preds[0,j]
+            name = self.labels.classes_[j]
+            if proba > 0.97:
+                (distance, margin) = self.fb.compare(embeddings, j)
+                if distance > 0.99:
+                    # almost certainly someone else
+                    name, j = 'Unknown', self.unk
+                    proba = 0
+                elif margin < 0.05:  # TODO: Parameterize this. Always consider these as possible candidates 
+                    # for inclusion in recognition model, since distance within fudge factor over threshold.
+                    candidate = True
+            else:
+                name, j = 'Unknown', self.unk
+            flag = '*' if candidate else ''
+            if candidate or name != 'Unknown':
+                classlabel = "{}: {:.2f}% {}".format(name, proba * 100, flag)
+                result = (classlabel, self.trkRec.objid, x1, y1, x2, y2)
+                self.publish(result, self.refkey, self.cwUpd)
+                self.cnts[j] += 1
+            try:
+                self.trkRec = next(self.trkrecs)
+            except StopIteration:
+                return False 
+        self.frametime = self.trkRec.timestamp 
         return True
     
     def finalize(self) -> None:

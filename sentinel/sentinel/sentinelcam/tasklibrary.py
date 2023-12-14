@@ -158,9 +158,6 @@ class FaceAligner:
                 leftEyeCenter = eyeCentroids[1]
                 rightEyeCenter = eyeCentroids[0]
 
-        cX = (leftEyeCenter[0] + rightEyeCenter[0]) // 2
-        cY = (leftEyeCenter[1] + rightEyeCenter[1]) // 2
-
         # compute the angle between the eye centroids
         dY = rightEyeCenter[1] - leftEyeCenter[1]
         dX = rightEyeCenter[0] - leftEyeCenter[0]
@@ -169,9 +166,29 @@ class FaceAligner:
         # estimated focus metric as the variance of the Laplacian
         focus = cv2.Laplacian(gray, cv2.CV_64F).var()
 
-        return (rightEyeCenter, leftEyeCenter, (cX, cY), (dX, dY), angle, focus)
+        facemarks = (rightEyeCenter, leftEyeCenter, (dX, dY), angle, focus)
+        return facemarks
+    
+    def assess(self, facemarks) -> bool:
+        (rightEye, leftEye, distance, angle, focus) = facemarks
+        relative_angle = 360 + angle if angle < -180 else abs(angle)  
+        candidate = (
+            #  found 2 eyes?
+            distance[0] != 0 and
+            #  distance between left and right eye at least 20% of the image width?
+            round(abs(distance[0]) / self.desiredFaceWidth, 2) >= 0.2 and
+            #  both eyes outside of a centered 20% prohibited area?
+            leftEye[0] > ((self.desiredFaceWidth/2)+(self.desiredFaceWidth//10)) and
+            rightEye[0] < ((self.desiredFaceWidth/2)-(self.desiredFaceWidth//10)) and
+            #  for filtering out extreme alignment angles
+            relative_angle < 17 and
+            #  focus metric above a currently hard-coded, and low, threshold?
+            focus > 40 
+        )
+        return candidate
 
-    def align(self, face, rightEyeCenter, leftEyeCenter, distance, angle):
+    def align(self, face, facemarks) -> None:
+        (rightEyeCenter, leftEyeCenter, distance, angle, focus) = facemarks
         # compute the desired right eye x-coordinate based on the
         # desired x-coordinate of the left eye
         desiredRightEyeX = 1.0 - self.desiredLeftEye[0]
@@ -247,16 +264,18 @@ class OpenFace:
     
 class FaceBaselines:
     def __init__(self, baselines, names) -> None:
-        self._baselines = h5py.File(baselines)
+        self._baselines = h5py.File(baselines,'r')
         self._namelist = names
-        self._faces = [self._baselines[face] for face in names]  # should be a short list, right?!
+        self._faces = [self._baselines[face] for face in names]  # map by face index
         self._thresholds = [self._baselines[face].attrs.get('threshold') for face in names]
 
     def thresholds(self) -> list:
         return(self._thresholds)
     
-    def distance(self, face, check) -> float:
-        return findEuclideanDistance(face, self._faces[check])
+    def compare(self, face, who) -> tuple:
+        distance = findEuclideanDistance(face, self._faces[who])
+        margin = distance - self._thresholds[who]
+        return (distance, margin)
 
     def search(self, face) -> tuple:
         distances = np.array([findEuclideanDistance(face, self._faces[i]) for i in range(len(self._faces))])
