@@ -10,6 +10,7 @@ import logging
 import logging.handlers
 import cv2
 import numpy as np
+import pandas as pd
 from ast import literal_eval
 from datetime import datetime
 import multiprocessing
@@ -64,7 +65,7 @@ class JobRequest:
         self.eventDate = date
         self.eventID = event
         self.datapump = pump  # datapump connection string
-        self.camsize = (0,0)  # TODO: required per event; learn up front, dynamically
+        self.camsize = (0,0)  # required per event; learn up front, dynamically
         self.engine = None
         self.image_cnt = 0
         self.image_rate = 0.0
@@ -88,13 +89,12 @@ class JobRequest:
         logging.info(str(self.stop_Message()))
         with jobLock:
             if self.jobID in jobList:
-                logging.debug(f"del jobList[{self.jobID}], status now {self.jobStatus}")
+                logging.debug(f"strike jobList[{self.jobID}], status now {JobRequest.Status[status]}")
                 del jobList[self.jobID]
 
     def chainJOB(self, task) -> None:
          chained = JobRequest(self.dataSink, self.sourceNode, self.eventDate, self.eventID, self.datapump, task)
          logging.debug(f"Chained job {chained.jobID} added to taskList[]")
-         #taskFeed.put((JobManager.JobSUBMIT, chained.jobID))
 
     def _timeVals(self) -> tuple:
         # Returns tuple with 3 formatted strings, or None when factor missing
@@ -366,7 +366,7 @@ class JobTasking:
                             self.ringctrl = taskcfg['ringctrl'] if 'ringctrl' in taskcfg else 'full'
                             trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, self.trktype)
                             if self.ringctrl == 'trk':
-                                startframe = trackingData.iloc[0]['timestamp']  # .to_pydatetime()
+                                startframe = trackingData.iloc[0]['timestamp'] 
                             else:
                                 startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
 
@@ -607,7 +607,7 @@ class JobManager:
             jreq.camsize = self._getFrameDimensons(jreq)
         if not self.engines[engine].start_job(jreq):
             jreq.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
-        self.ondeck[jreq.jobClass] = None
+            self.ondeck[jreq.jobClass] = None
 
     def _getFrameDimensons(self, jreq) -> tuple:
         datafeed = self.datafeeds[jreq.datapump]
@@ -648,10 +648,10 @@ class JobManager:
             if _ringctrl == 'full':
                 frametimes = taskEngine.dataFeed.get_image_list(jreq.eventDate, jreq.eventID)
             else:
-                # TODO: When multiple tracking records are present for the same frame, the frame should only be read
-                # once. It becomes task responsibility to internally align tracking data with each image provided.
                 evtData = taskEngine.dataFeed.get_tracking_data(jreq.eventDate, jreq.eventID, _trktype)
-                frametimes = evtData['timestamp'].dt.to_pydatetime().tolist()  # per above note, need unique timestamps only
+                # When multiple tracking records are present for the same frame, image data should only be read
+                # once. It is task responsibility to internally align tracking data with each image provided.
+                frametimes = [pd.to_datetime(ts) for ts in evtData['timestamp'].unique()]
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = iter(frametimes)
             logging.debug(f"_feedStart({key}) frames: {len(frametimes)}, date {jreq.eventDate} evt {jreq.eventID}")
@@ -693,13 +693,19 @@ class JobManager:
                     if jobreq.jobClass in self.ondeck: 
                         if self.ondeck[jobreq.jobClass] is None: 
                             self.ondeck[jobreq.jobClass] = jobreq
+                elif tag == TaskEngine.TaskSTARTED:
+                    jobreq = taskList[msg]
+                    self.ondeck[jobreq.jobClass] = None
                 elif tag in [TaskEngine.TaskDONE,
                              TaskEngine.TaskFAIL,
                              TaskEngine.TaskCANCELED]:
-                    engine = self.engines[taskList[msg].engine]
+                    jobreq = taskList[msg]
+                    engine = self.engines[jobreq.engine]
                     engine.jobreq = None
                     task_stats = (engine.get_image_cnt(), engine.get_image_rate())
-                    taskList[msg].deregisterJOB(tag, task_stats)
+                    jobreq.deregisterJOB(tag, task_stats)
+                    if self.ondeck[jobreq.jobClass] == jobreq:
+                        self.ondeck[jobreq.jobClass] = None
                 elif tag == TaskEngine.TaskBOMB:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{msg}' bombed out.")
@@ -817,8 +823,7 @@ async def task_feedback(asyncSUB):
                           TaskEngine.TaskFAIL,
                           TaskEngine.TaskCANCELED]:
                 logging.debug(f"{taskMsg}: status update {JobRequest.Status[msgTag]}.")
-                if msgTag != TaskEngine.TaskSTARTED:
-                    taskFeed.put((msgTag, taskMsg))
+                taskFeed.put((msgTag, taskMsg))
             elif msgTag == TaskEngine.TaskCHAIN:
                 (jobid, task) = taskMsg
                 taskList[jobid].chainJOB(task)
