@@ -17,6 +17,7 @@ import traceback
 import queue
 import imagezmq
 import zmq
+import pandas as pd
 from time import sleep
 from datetime import datetime
 from zmq.asyncio import Context as AsyncContext
@@ -343,7 +344,7 @@ class SentinelAgent:
                                         for _jpgfile in cwData.get_event_images()]
                                 else:
                                     trkdata = cwData.get_event_data(_trktype)
-                                    task_data.framelist = trkdata['timestamp'].dt.to_pydatetime().tolist()
+                                    task_data.framelist = [pd.to_datetime(ts) for ts in trkdata['timestamp'].unique()]
                                 logging.debug(f"Check event {_event} for '{_refkey}' tag, frames={len(task_data.framelist)}")
                                 if len(task_data.framelist) > 0:
                                     if _refkey not in cwData.get_event_types():
