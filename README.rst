@@ -454,8 +454,8 @@ Strategy
 
 There would seem to be broadly two strategies to follow when designing a facial recognition system. 
 
-1. Formal data collection accompanied by something like a "look here to be recognized" solution.
-2. Casual data collection and recognition based on a catch-as-catch-can philosophy. 
+  1. Formal data collection accompanied by something like a "look here to be recognized" solution.
+  2. Casual data collection and recognition based on a catch-as-catch-can philosophy. 
 
 SentinelCam adopts the latter approach.
 
