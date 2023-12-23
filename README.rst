@@ -495,13 +495,13 @@ Design philosophy presents a more complex set of obstacles.
 - Except for when the subject is gazing directly at the camera, collected images often present profile 
   views and oblique perspectives.
 - Persons may be actively moving through the field of view, and not stationary. This can sometimes 
-  result in images containing motion aftifacts resulting in blurry, appearingly out of focus, faces.
+  result in images containing motion artifacts resulting in blurry, apparently out of focus, faces.
 - At high frame rates, a single Outpost event can potentially capture hundreds of images containing 
   facial data.
 - Only a few of these images might result in a recognition result with high confidence. 
-- A much smaller subset of those images might have the quality needed for use as feedback to improve
+- A much smaller subset of those images might have the desired quality for use as feedback to improve
   the recognition model. 
-- Sometimes, faiures in recognition tasks result from the introduction of new individuals not seen 
+- Sometimes, failures in recognition tasks result from the introduction of new individuals not seen 
   before.
 - The system needs to be able to discern the difference, and attempt to remember each new person
   so that they can be recognized in the future.
@@ -514,9 +514,9 @@ Solution approach
 
 There are a triad of goals that need to be addressed. 
 
-1. Determining when an individual has been identified with confidence.
-2. Recognizing when a new person has been encountered.
-3. Selecting a set of candidate images for improving the recognition model.
+  1. Determining when an individual has been identified with confidence.
+  2. Recognizing when a new person has been encountered.
+  3. Selecting a set of candidate images for improving the recognition model.
 
 SentinelCam uses facial embeddings produced by the `OpenFace <https://cmusatyalab.github.io/openface/>`_ deep 
 neural network as the foundation for a solution. This model transforms a facial image into a set of numeric
@@ -526,9 +526,9 @@ likely they are taken from two from different faces.
 
 These embeddings are used to train an SVM classifier based on the face captures taken from known individuals. 
 
-Whenever the probabability of the determined result from the model falls below a given threshold, this distance 
-metric is used as an additional confirmation. The fallback approach is implemented by a search for the closest 
-comparable known face.
+Whenever the probabability of the determined result from the model falls below a confidence threshold, this 
+distance metric is used as an additional confirmation. The fallback approach is implemented by a search for 
+the closest comparable known face.
 
 In turn, this distance metric then also helps to quickly identify and remember newly introduced faces.
 
