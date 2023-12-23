@@ -522,7 +522,7 @@ SentinelCam uses facial embeddings produced by the `OpenFace <https://cmusatyala
 neural network as the foundation for a solution. This model transforms a facial image into a set of numeric
 embeddings which describe an 128-dimension unit hypersphere representing the face. These values support a 
 comparison based on the Euclidean distance between two faces such that the greater the distance, the more 
-likely they are taken from two from different individuals. 
+likely they are taken from two different individuals. 
 
 These embeddings are used to train an SVM classifier based on the face captures collected from known individuals. 
 
@@ -637,7 +637,7 @@ occupants and their vehicles will pass in front of that camera multiple times pe
   What to keep, and why. That's the real question to be answered. Isn't it always?
 
   - All these collected images: incredibly valuable for model-building.
-    * For feeding the SentinelCam machine learning life cycle, this is the first order of business. 
+      For feeding the SentinelCam machine learning life cycle, this is the first order of business. 
   - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
   - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
   - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
