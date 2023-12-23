@@ -5,14 +5,18 @@ License: MIT, see the sentinelcam LICENSE for more details.
 """
 
 import cv2
+import h5py
 import numpy as np
+import pandas as pd 
 import pickle
 import time
 import imutils
 import simplejpeg
+from collections import namedtuple
 from sentinelcam.utils import readConfig
-from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace
-from sentinelcam.tasklibrary import findEuclideanDistance, FaceAligner, FaceBaselines
+from sentinelcam.facedata import FaceBaselines, FaceList
+from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace, FaceAligner
+from sentinelcam.tasklibrary import dhash
 
 class Task:
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -171,13 +175,27 @@ class FaceRecon(Task):
                 (distance, margin) = self.fb.compare(embeddings, j)
                 if distance > 0.99:
                     # almost certainly someone else
-                    name, j = 'Unknown', self.unk
-                    proba = 0
-                elif margin < 0.05:  # TODO: Parameterize this. Always consider these as possible candidates 
-                    # for inclusion in recognition model, since distance within fudge factor over threshold.
-                    candidate = True
+                    (k, distance) = self.fb.search(embeddings)
+                    margin = distance - self.fb.thresholds()[k]
+                    if k != j:
+                        proba = 0
+                        if distance > 0.99:
+                            name, j = 'Unknown', self.unk
+                        else:
+                            name, j = self.labels.classes_[k], k
             else:
-                name, j = 'Unknown', self.unk
+                (k, distance) = self.fb.search(embeddings)
+                margin = distance - self.fb.thresholds()[k]
+                if k != j:
+                    proba = 0
+                    if distance > 0.99:
+                        name, j = 'Unknown', self.unk
+                    else:
+                        name, j = self.labels.classes_[k], k
+            if margin < 0.05:  
+                # TODO: Parameterize (or improve) this. Always consider these as possible candidates 
+                # for inclusion in recognition model, since distance within fudge factor over threshold.
+                candidate = True
             flag = '*' if candidate else ''
             if candidate or name != 'Unknown':
                 classlabel = "{}: {:.2f}% {}".format(name, proba * 100, flag)
@@ -197,6 +215,120 @@ class FaceRecon(Task):
         cnts = ", ".join([f"{namelist[n]} {self.cnts[n]}" for n in range(len(self.cnts)) if self.cnts[n]>0])
         results = ('Recon', self.event_date, self.event_id, self.facecnt, cnts)
         self.publish(results)
+
+class FaceSweep(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        self.feed = feed
+        self.taskDate = jobreq.eventDate
+        self.ref_type = cfg['ref_type']
+        #self.threshold = cfg['threshold']
+        self.facelist = FaceList(cfg['facefile'])
+        self.fa = FaceAligner(cfg["face_aligner"])
+
+    def pipeline(self, frame) -> False:  # runs once
+        # Sweep for new candidates 
+        fldlist = ['date','event','timestamp','objid','source','status','name','proba','dist','margin',
+                    'x1','y1','x2','y2','rx','ry','lx','ly','dx','dy','angle','focus']
+        facerec = namedtuple('facerec', fldlist)
+        refkeys = [self.facelist.format_refkey(r) for r in self.facelist.get_fullset()[:].itertuples()]
+        new_faces = 0
+        prev_hash = 0
+        cwIndx = self.feed.get_date_index(self.taskDate)
+        # TODO: protect existing selections from being inadvertently over-written with new/duplicated data.
+        # Probably OK to permit this if not included in the subset with non-zero status flags. But should first
+        # remove any exsiting content already held for that event. 
+        for sweepchk in cwIndx.loc[cwIndx['type'] == self.ref_type].itertuples():
+            trkdata = self.feed.get_tracking_data(self.taskDate, sweepchk.event, self.ref_type)
+            trkdata['name'] = trkdata.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
+            trkdata['proba'] = trkdata.apply(lambda x: float(str(x['classname']).split()[1][:-1])/100, axis=1)
+            trkdata['usable'] = trkdata.apply(lambda x: str(x['classname'])[-1:], axis=1)
+            for consider in trkdata.loc[trkdata['usable'] == '*'].itertuples():
+                image = cv2.imdecode(np.frombuffer(
+                    self.feed.get_image_jpg(self.taskDate, sweepchk.event, consider.timestamp), 
+                    dtype='uint8'), -1)                    
+                x1, y1, x2, y2 = consider.rect_x1, consider.rect_y1, consider.rect_x2, consider.rect_y2
+                if x1<0:x1=0
+                if y1<0:y1=0
+                face = image[y1:y2, x1:x2]                    
+                if len(face) > 0:
+                    hash = dhash(face)
+                    if hash != prev_hash:
+                        if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
+                        ((rx,ry), (lx,ly), (dx,dy), angle, focus) = self.fa.landmarks(face)
+                        r = {'date': self.taskDate,
+                             'event': sweepchk.event,
+                             'timestamp': consider.timestamp,
+                             'objid': consider.objid,
+                             'source': 0,
+                             'status': 0,
+                             'name': consider.name,
+                             'proba': round(consider.proba, 4),
+                             'dist': 0,                             # TODO: collect this also, somehow
+                             'margin': 0,                           # TODO: collect this also, somehow
+                             'x1': x1,
+                             'y1': y1,
+                             'x2': x2,
+                             'y2': y2,
+                             'rx': rx,
+                             'ry': ry,
+                             'lx': lx,
+                             'ly': ly,
+                             'dx': dx,
+                             'dy': dy,
+                             'angle': round(angle, 1),
+                             'focus': round(focus, 2)
+                        }
+                        keytest = self.facelist.format_refkey(facerec(**r))
+                        if keytest not in refkeys:
+                            self.facelist.add_rows(pd.DataFrame(r.values(), index=fldlist).T)
+                            new_faces += 1
+                    prev_hash = hash 
+        # Should always push any updates back to data sink. SFTP? 
+        if new_faces:
+            self.facelist.commit()
+            self.publish(f'FaceSweep: {new_faces} face candidates added from {self.taskDate}.')
+        return False
+
+class FaceDataUpdate(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
+        self.feed = feed
+        self.taskDate = jobreq.eventDate
+        self.facedata = cfg['facedata']
+        self.facelist = FaceList(cfg['facefile'])
+        self.fa = FaceAligner(cfg["face_aligner"])
+        self.fe = OpenFace(cfg["face_embeddings"])
+
+    def pipeline(self, frame) -> False:  # runs once
+        # Sweep for new selections to be included in recognition model
+        update_cnt = 0
+        updates = self.facelist.get_selections()
+        if len(updates.index) > 0:
+            with h5py.File(self.facedata, 'a') as hdf5:
+                for r in updates[:].itertuples():
+                    image = cv2.imdecode(np.frombuffer(
+                        self.feed.get_image_jpg(r.date, r.event, r.timestamp), 
+                        dtype='uint8'), -1)
+                    ((x1, y1, x2, y2), facemarks) = self.facelist.format_facemarks(r)
+                    if y1 < 0: y1 = 0 
+                    if x1 < 0: x1 = 0 
+                    face = image[y1:y2, x1:x2]
+                    if len(face) > 0:
+                        if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
+                        if r.dx != 0:
+                            aligned = self.fa.align(face, facemarks)
+                        else:
+                            aligned = face
+                        embeddings = self.fe.detect(aligned, (0,0,aligned.shape[1],aligned.shape[0]))
+                        refkey = self.facelist.format_refkey(r)
+                        if refkey in hdf5.keys(): del hdf5[refkey]
+                        hdf5[refkey] = embeddings
+                        self.facelist.set_status(r.Index, 2, self.taskDate)
+                        update_cnt += 1
+            # Should always push any updates back to data sink. SFTP? 
+            if update_cnt:
+                self.facelist.commit()
+                self.publish(f'FaceDataUpdate: {update_cnt} face selections processed for {self.taskDate}.')
+        return False
 
 class DailyCleanup(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -328,6 +460,8 @@ def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
     menu = {
         'GetFaces'               : GetFaces,
         'FaceRecon'              : FaceRecon,
+        'FaceSweep'              : FaceSweep,
+        'FaceDataUpdate'         : FaceDataUpdate,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
         'DailyCleanup'           : DailyCleanup,
         'CollectImageSizes'      : CollectImageSizes,

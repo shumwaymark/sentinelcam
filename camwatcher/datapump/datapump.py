@@ -16,7 +16,9 @@ import imagezmq
 import msgpack
 import pandas
 import simplejpeg
-from camdata import CamData
+from sentinelcam.camdata import CamData
+from sentinelcam.facedata import FaceList
+from sentinelcam.utils import readConfig
 
 class DataPump(imagezmq.ImageHub):
     """ Service access requests to camwatcher data store and Sentinel DataFeed 
@@ -117,8 +119,9 @@ class DataPump(imagezmq.ImageHub):
         return self.zmq_socket.send(z, flags, copy=copy, track=track)
 
 class BackgroundTasks:
-    def __init__(self, tasks, csvdir, imgdir):
+    def __init__(self, tasks, facelist, csvdir, imgdir):
         self._tasks = tasks
+        self._facelist = facelist
         self._csvdir = csvdir
         self._imgdir = imgdir
         self._stop = False
@@ -166,12 +169,14 @@ def create_tiny_jpeg() -> bytes:
     return buffer
 
 def main():
-    start_logging()
+    CFG = readConfig(os.path.join(os.path.expanduser("~"), "datapump.yaml"))
+    start_logging(CFG['logfile'])
     tinyJPG = create_tiny_jpeg()
     taskQueue = queue.Queue()
-    bgTasks = BackgroundTasks(taskQueue, cfg['datafolder'], cfg['imagefolder'])
-    cData = CamData(cfg['datafolder'], cfg['imagefolder'])
-    pump = DataPump(f"tcp://*:{cfg['control_port']}")
+    facelist = FaceList(CFG['facefile'])
+    bgTasks = BackgroundTasks(taskQueue, facelist, CFG['datafolder'], CFG['imagefolder'])
+    cData = CamData(CFG['datafolder'], CFG['imagefolder'])
+    pump = DataPump(f"tcp://*:{CFG['control_port']}")
     logging.info("datapump response loop starting")
     # TODO: Graceful shutdown / termination handling needed 
     # Need a policy for sending meaningful response codes back to the DataFeed
@@ -208,7 +213,7 @@ def main():
                     pump.pickle_and_send(reply, timestamps)
                     continue
                 elif request['cmd'] == 'pic':  # retrieve image frame 
-                    jpegfile = os.path.join(cfg['imagefolder'], request['date'],
+                    jpegfile = os.path.join(CFG['imagefolder'], request['date'],
                         request['evt'] + '_' + request['frametime'] + '.jpg')
                     if os.path.exists(jpegfile):
                         jpeg = open(jpegfile, "rb").read()
@@ -219,11 +224,13 @@ def main():
                     pump.send_jpg(reply, jpeg)
                     continue
                 elif request['cmd'] == 'del':  # delete event data
-                    task = ('del', (request['date'], request['evt']))
-                    taskQueue.put(task)
-                    reply = b'OK'
-                elif request['cmd'] == 'upd':  # event update processing placeholder
-                    pass
+                    (date, event) = (request['date'], request['evt']) 
+                    if facelist.event_locked(date, event):
+                        reply = b'Locked'
+                    else:
+                        task = ('del', (date, event))
+                        taskQueue.put(task)
+                        reply = b'OK'
                 elif request['cmd'] == 'HC':  # health check
                     reply = b'OK'
                 else:
@@ -243,9 +250,9 @@ def main():
 
     bgTasks.close() 
 
-def start_logging():
+def start_logging(logfile):
     log = logging.getLogger()
-    handler = logging.handlers.RotatingFileHandler(cfg['logfile'],
+    handler = logging.handlers.RotatingFileHandler(logfile,
         maxBytes=524288, backupCount=5)
     formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
@@ -254,9 +261,4 @@ def start_logging():
     return log
 
 if __name__ == "__main__":
-
-    cfg = {'control_port': 5556, 
-           'imagefolder' : '/mnt/usb1/sentinelcam/images',
-           'datafolder'  : '/mnt/usb1/sentinelcam/camwatcher',
-           'logfile'     : '/mnt/usb1/sentinelcam/logs/datapump.log'} 
     main()

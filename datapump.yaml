@@ -1,0 +1,15 @@
+%YAML 1.0
+---
+# Settings file datapump.yaml 
+control_port: 5556
+
+# Logfile pathname
+logfile: /mnt/usb1/sentinelcam/logs/datapump.log
+
+## Data storage locations  ##
+
+imagefolder: /mnt/usb1/sentinelcam/images
+datafolder:  /mnt/usb1/sentinelcam/camwatcher
+
+# Current FaceList CSV file, defines the population of locked events
+facefile: /mnt/usb1/sentinelcam/faces/facebeta4.csv

@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support multiple result sets from both `Outpost` event management, and from running 
   **sentinel** tasks. Needed to support the capture of multiple neural nets producing 
   results in parallel from a single event. 
-- Continue development and testing of the **sentinel** module. 
+- Aditional refinements for the **sentinel** module. 
   - Support result signaling to Twilio, and to Node-RED via MQTT.
   - Provide an abstraction to support a set of reusable design patterns for the most common
     ring buffer control techniques.
@@ -24,11 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Incorporate a job history report of statistics and performance metrics as an output. This
     could ultimately fuel a **sentinel** health check, perhaps built to support agency based on 
     self-diagnosis. 
-  - Support a job runtime limit as a configurable setting per task engine. Provide tolerance
+  - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
     based on the queue length for tasks waiting in that job class.  
-- Need **datapump** command to lock event as prevention against deletion when used for modeling. 
-- Add missing support for **datapump** error codes in response messages using the first 
-  element of the (text,data) tuple carried by imageZMQ.
 - Need maintenance shell script to clear out empty **camwatcher** data folders after last
   event has been purged for a date.
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
@@ -40,6 +37,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.26-alpha - 2023-12-22
+
+### Added
+
+- Defined `FaceList` class to encapsulate access and updates against the `facelist.csv` file of
+  faces which are in use or awaiting analysis. Storage is in a CSV-format text file used to support
+  management of the facial recognition and learning pipeline. This also serves as an event lock 
+  preventing data deletion whenever present within the dataset.
+- Added `FaceSweep` and `FaceDataUpdate` task definitions to flesh out the facial recognition and
+  learning pipeline. The former identifies new candidate images to be considered for inclusion in the 
+  next model update. The latter writes selected candidates into the `facedata.hdf5` file of embeddings
+  used for modeling.
+
+### Fixed
+
+- Cleanup and shakedown of facial recon pipeline.
+- Corrected **sentinel** ring buffer loading when task is configured with `ringctrl: trk`. Now loads
+  only the subset of unique images for the tracking type. 
+- Delay clearing of **sentinel** on-deck presence until task has either reported a successful start
+  or failed during initialization.
+
 ## 0.0.25-alpha - 2023-12-04
 
 ### Added
@@ -48,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aliasing. This is managed by new `Task` attributes in the YAML file.
 - Defined an `EventList` class to encapsulate the most common event selection and processing methods:
   by date or date range, by specific date and event, and from a from text file with a list of events 
-  to process. An optional tracking type parameter can be used to refine the selection. 
+  to process. An optional tracking type parameter is supported to refine the selection. 
 
 ### Changed
 
@@ -56,13 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baselines kept for known individuals. **OpenFace** embeddings are used for both this purpose and also
   for training the SVM classifier. This ensemble approach both bolsters classification results and 
   helps address the open set recognition problem inherent in the overall design. 
-- Include support for carrying object ID references within tracking data updates from tasks running 
-  on the **sentinel**.
 - The `DataFeed` now raises a `TrackingSetEmpty` exception when attempting to retrieve tracking data
   that does not exist. 
 
 ### Fixed
 
+- Include support for carrying object ID references within tracking data updates from tasks running 
+  on the **sentinel**.
 - Now properly reporting messages with ERROR and WARNING logging levels from tasks running on 
   the **sentinel**. Previously, these were being logged with a level of INFO.
 

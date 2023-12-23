@@ -1,6 +1,6 @@
-=========================================
-sentinelcam: Smart Home Vision Technology
-=========================================
+==========================================================
+sentinelcam: Computer Vision and Machine Learning Pipeline
+==========================================================
 
 Introduction
 ============
@@ -445,14 +445,99 @@ here on an incremental basis as new functionality is fleshed out, proven, and st
 Facial recognition and learning pipeline
 ----------------------------------------
 
-*Stay tuned for complete design and full description*
+For all machine learning aspects of SentinelCam related to computer vision, the system is
+designed so that models are trained on data which has been collected by the deployed Outpost 
+cameras. 
+
+Strategy
+........
+
+There would seem to be broadly two strategies to follow when designing a facial recognition system. 
+
+  1. Formal data collection accompanied by something like a "look here to be recognized" solution.
+  2. Casual data collection and recognition based on a catch-as-catch-can philosophy. 
+
+SentinelCam adopts the latter approach.
+
+New individuals are learned through an on-going cycle of data collection and model refinement. 
+This is a semi-supervised life cycle relying on human feedback for both confirming the identity 
+of new individuals learned, and oversight into the health of the recognition model evolution 
+process.
+
+   The lofty goal is: limited care-and-feeding requiring only a bare minimum of human input and feedback.
+
+For the initial stand-up of a new deployment, the system needs to be introduced to the persons
+who should be known at start-up. This is best served by a conscious act of data collection. Such 
+an effort would entail each individual spending some time standing alone in front of an Outpost node, 
+facing the camera lens. Ideally, with good lighting for illumination of the images. This needs to 
+allow for several seconds of elapsed time; including minor head movements and changes in direction
+of gaze, perhaps while conversing with someone off-camera, to capture a variety of expressions. 
+The more of this, the better. 
+
+Challenges
+..........
+
+There are a number of inherent challenges to the SentinelCam design that must be overcome. Partly this is
+related to the current state-of-the-art around affordable low-voltage embedded hardware available direct
+to consumer. *Though that is a minor point*.
+
+Design philosophy presents a more complex set of obstacles. 
+
+  - High image publishing frame rates are needed to provide full motion video for on-demand viewing 
+    and collection for analysis and playback.
+  - Requirements for providing, even limited, timely response to events in progress further support that 
+    same constraint.
+  - Thus for efficient collection, transport, analysis, and storage of data: images must often be scaled 
+    down to XGA or even VGA sizes.
+  - Detected faces within these resulting images can be quite small.
+  - Lighting conditions are rarely supportive of quality image collection, sometimes resulting in shadows 
+    and poor contrast.
+  - Except for when the subject is gazing directly at the camera, collected images often present profile 
+    views and oblique perspectives.
+  - Persons may be actively moving through the field of view, and not stationary. This can sometimes 
+    result in images containing motion aftifacts resulting in blurry, appearingly out of focus, faces.
+  - At high frame rates, a single Outpost event can potentially capture hundreds of images containing 
+    facial data.
+  - Only a few of these images might result in a recognition result with high confidence. 
+  - A much smaller subset of those images might have the quality needed for use as feedback to improve
+    the recognition model. 
+  - Sometimes, faiures in recognition tasks result from the introduction of new individuals not seen 
+    before.
+  - The system needs to be able to discern the difference, and attempt to remember each new person
+    so that they can be recognized in the future.
+
+Some of this can be alleviated with planning and forethought. Lighting and camera placement are obvious 
+factors that, when given careful consideration, can greatly improve overall results.
+
+There are a triad of goals that need to be addressed. 
+
+  1. Determining when an individual has been identified with confidence.
+  2. Recognizing when a new person has been encountered.
+  3. Selecting a set of candidate images for improving the recognition model.
+
+Solution approach
+.................
+
+SentinelCam uses facial embeddings produced by the `OpenFace <https://cmusatyalab.github.io/openface/>`_ deep 
+neural network as the foundation for a solution. This model transforms a facial image into a set of numeric
+embeddings which describe an 128-dimension unit hypersphere representing the face. These values support a 
+comparison based on the Euclidean distance between two faces such that the greater the distance, the more 
+likely they are taken from two from different faces. 
+
+These embeddings are used to train an SVM classifier based on the face captures taken from known individuals. 
+
+Whenever the probabability of the determined result from the model falls below a given threshold, this distance 
+metric is used as an additional confirmation. The fallback approach is implemented by a search for the closest 
+comparable known face.
+
+This distance metric also helps identify and remeber newly introduced faces.
 
 Sentinel
 --------
 
 Outputs from **sentinel** task results can be applied in multiple ways. 
 
-  Multiple methods for addressing those event publication needs which  go out to the larger 
+  Multiple methods for addressing those event publication needs which go out to the larger 
   world will also be important.
   
   - `MQTT` for use in applications such as Node-RED
@@ -550,7 +635,8 @@ occupants and their vehicles will pass in front of that camera multiple times pe
 
   What to keep, and why. That's the real question to be answered. Isn't it always?
 
-  - All these collected images: incredibly valuable for model-building. This is generally the first order of business. 
+  - All these collected images: incredibly valuable for model-building.
+    * For feeding the SentinelCam machine learning life cycle, this is the first order of business. 
   - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
   - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
   - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
@@ -597,8 +683,6 @@ and libraries.
 - papermill
 - MessagePack
 - Dlib
-- imutils
-- simplejpeg
   
 Acknowledgements
 ================

@@ -1,0 +1,15 @@
+%YAML 1.0
+---
+# FaceDataUpdate.yaml - Update "facedata" HDF5 file with embeddings for new faces
+
+face_aligner:
+  haarcascade_path: /home/pi/sentinel/models/haarcascades/haarcascade_eye.xml
+  desiredLeftEye: [0.29, 0.27]  # [0.35, 0.35]
+  desiredFaceWidth: 96
+  desiredFaceHeight: 96
+
+face_embeddings:
+  model_path: /home/pi/sentinel/models/openface_torch/openface_nn4.small2.v1.t7
+
+facefile: /home/pi/sentinel/models/face_recon/facebeta2.csv
+facedata: /home/pi/sentinel/models/face_recon/facebeta2.hdf5

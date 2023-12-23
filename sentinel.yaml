@@ -49,6 +49,12 @@ task_list:
     class: 2
     trk_type: fd1    # desired tracking feed, default = trk
     ringctrl: trk    # [full, trk]  default = full
+  FaceSweep:
+    config: /home/pi/sentinel/tasks/FaceSweep.yaml
+    class: 2
+  FaceDataUpdate:
+    config: /home/pi/sentinel/tasks/FaceDataUpdate.yaml
+    class: 2
   GetFaces2:
     alias: GetFaces
     config: /home/pi/sentinel/tasks/GetFaces.yaml
