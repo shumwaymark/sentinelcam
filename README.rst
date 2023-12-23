@@ -530,7 +530,7 @@ Whenever the probabability of the determined result from the model falls below a
 metric is used as an additional confirmation. The fallback approach is implemented by a search for the closest 
 comparable known face.
 
-This distance metric also helps identify and remeber newly introduced faces.
+In turn, this distance metric then also helps to quickly identify and remember newly introduced faces.
 
 Sentinel
 --------
