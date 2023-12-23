@@ -522,13 +522,14 @@ SentinelCam uses facial embeddings produced by the `OpenFace <https://cmusatyala
 neural network as the foundation for a solution. This model transforms a facial image into a set of numeric
 embeddings which describe an 128-dimension unit hypersphere representing the face. These values support a 
 comparison based on the Euclidean distance between two faces such that the greater the distance, the more 
-likely they are taken from two from different faces. 
+likely they are taken from two from different individuals. 
 
-These embeddings are used to train an SVM classifier based on the face captures taken from known individuals. 
+These embeddings are used to train an SVM classifier based on the face captures collected from known individuals. 
 
-Whenever the probabability of the determined result from the model falls below a confidence threshold, this 
-distance metric is used as an additional confirmation. The fallback approach is implemented by a search for 
-the closest comparable known face.
+Whenever the probability of the determined result from the model falls below a confidence threshold, a measurement 
+using an Euclidean distance calculation is implemented as an additional confirmation. Distance is evaluated against 
+a baseline representation kept for each known individual. The fallback approach is implemented by a search for the 
+closest comparable known face.
 
 In turn, this distance metric then also helps to quickly identify and remember newly introduced faces.
 
