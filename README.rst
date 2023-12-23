@@ -509,14 +509,14 @@ Design philosophy presents a more complex set of obstacles.
 Some of this can be alleviated with planning and forethought. Lighting and camera placement are obvious 
 factors that, when given careful consideration, can greatly improve overall results.
 
+Solution approach
+.................
+
 There are a triad of goals that need to be addressed. 
 
 1. Determining when an individual has been identified with confidence.
 2. Recognizing when a new person has been encountered.
 3. Selecting a set of candidate images for improving the recognition model.
-
-Solution approach
-.................
 
 SentinelCam uses facial embeddings produced by the `OpenFace <https://cmusatyalab.github.io/openface/>`_ deep 
 neural network as the foundation for a solution. This model transforms a facial image into a set of numeric
