@@ -454,8 +454,8 @@ Strategy
 
 There would seem to be broadly two strategies to follow when designing a facial recognition system. 
 
-  1. Formal data collection accompanied by something like a "look here to be recognized" solution.
-  2. Casual data collection and recognition based on a catch-as-catch-can philosophy. 
+1. Formal data collection accompanied by something like a "look here to be recognized" solution.
+2. Casual data collection and recognition based on a catch-as-catch-can philosophy. 
 
 SentinelCam adopts the latter approach.
 
@@ -483,37 +483,37 @@ to consumer. *Though that is a minor point*.
 
 Design philosophy presents a more complex set of obstacles. 
 
-  - High image publishing frame rates are needed to provide full motion video for on-demand viewing 
-    and collection for analysis and playback.
-  - Requirements for providing, even limited, timely response to events in progress further support that 
-    same constraint.
-  - Thus for efficient collection, transport, analysis, and storage of data: images must often be scaled 
-    down to XGA or even VGA sizes.
-  - Detected faces within these resulting images can be quite small.
-  - Lighting conditions are rarely supportive of quality image collection, sometimes resulting in shadows 
-    and poor contrast.
-  - Except for when the subject is gazing directly at the camera, collected images often present profile 
-    views and oblique perspectives.
-  - Persons may be actively moving through the field of view, and not stationary. This can sometimes 
-    result in images containing motion aftifacts resulting in blurry, appearingly out of focus, faces.
-  - At high frame rates, a single Outpost event can potentially capture hundreds of images containing 
-    facial data.
-  - Only a few of these images might result in a recognition result with high confidence. 
-  - A much smaller subset of those images might have the quality needed for use as feedback to improve
-    the recognition model. 
-  - Sometimes, faiures in recognition tasks result from the introduction of new individuals not seen 
-    before.
-  - The system needs to be able to discern the difference, and attempt to remember each new person
-    so that they can be recognized in the future.
+- High image publishing frame rates are needed to provide full motion video for on-demand viewing 
+  and collection for analysis and playback.
+- Requirements for providing, even limited, timely response to events in progress further support that 
+  same constraint.
+- Thus for efficient collection, transport, analysis, and storage of data: images must often be scaled 
+  down to XGA or even VGA sizes.
+- Detected faces within these resulting images can be quite small.
+- Lighting conditions are rarely supportive of quality image collection, sometimes resulting in shadows 
+  and poor contrast.
+- Except for when the subject is gazing directly at the camera, collected images often present profile 
+  views and oblique perspectives.
+- Persons may be actively moving through the field of view, and not stationary. This can sometimes 
+  result in images containing motion aftifacts resulting in blurry, appearingly out of focus, faces.
+- At high frame rates, a single Outpost event can potentially capture hundreds of images containing 
+  facial data.
+- Only a few of these images might result in a recognition result with high confidence. 
+- A much smaller subset of those images might have the quality needed for use as feedback to improve
+  the recognition model. 
+- Sometimes, faiures in recognition tasks result from the introduction of new individuals not seen 
+  before.
+- The system needs to be able to discern the difference, and attempt to remember each new person
+  so that they can be recognized in the future.
 
 Some of this can be alleviated with planning and forethought. Lighting and camera placement are obvious 
 factors that, when given careful consideration, can greatly improve overall results.
 
 There are a triad of goals that need to be addressed. 
 
-  1. Determining when an individual has been identified with confidence.
-  2. Recognizing when a new person has been encountered.
-  3. Selecting a set of candidate images for improving the recognition model.
+1. Determining when an individual has been identified with confidence.
+2. Recognizing when a new person has been encountered.
+3. Selecting a set of candidate images for improving the recognition model.
 
 Solution approach
 .................
