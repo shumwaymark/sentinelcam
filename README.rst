@@ -1,6 +1,6 @@
-==========================================================
-sentinelcam: Computer Vision and Machine Learning Pipeline
-==========================================================
+=================================================
+sentinelcam: Vision and machine learning pipeline
+=================================================
 
 Introduction
 ============
