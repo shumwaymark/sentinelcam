@@ -1,5 +1,5 @@
 =================================================
-sentinelcam: Vision and machine learning pipeline
+SentinelCam: vision and machine learning pipeline
 =================================================
 
 Introduction
