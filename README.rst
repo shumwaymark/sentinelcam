@@ -492,8 +492,8 @@ complex set of obstacles.
   response to events in progress further support that same constraint.
 - Thus for efficient collection, transport, analysis, and storage of data: images must often be scaled 
   down to XGA or even VGA sizes.
-  - *This, is where infrastructure constraints have the greatest impact*.
-  - Detected faces within these resulting images can be quite small.
+     *This, is where infrastructure constraints have the greatest impact*.
+     Detected faces within these resulting images can be quite small.
 - Lighting conditions are rarely supportive of quality image collection, sometimes resulting in deep
   shadows and poor contrast.
 - Except for when the subject is gazing directly at the camera, collected images often present profile 
