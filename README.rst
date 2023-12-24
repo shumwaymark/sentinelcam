@@ -477,33 +477,35 @@ The more of this, the better.
 Challenges
 ..........
 
-There are a number of inherent challenges to the SentinelCam design that must be overcome. Partly this is
-related to the current state-of-the-art around affordable low-voltage embedded hardware available direct
-to consumer. *Though that is a minor point*.
+There are a number of inherent challenges to the SentinelCam design that must be overcome.
 
-Design philosophy presents a more complex set of obstacles. 
+Partly this is related to infrastructure constraints. This system is designed to run on small 
+low-voltage embedded devices, not in some high-end commercial data center, or within some virtual 
+server farm in the clouds. The more CPU/GPU brought to bear, the more electricity needed to make
+it all work.
 
-- High image publishing frame rates are needed to provide full motion video for on-demand viewing 
-  and collection for analysis and playback.
-- Requirements for providing, even limited, timely response to events in progress further support that 
-  same constraint.
+*Frankly, though, infrastructure is not the only challenge*. Design philosophy presents a more 
+complex set of obstacles. 
+
+- High image publishing frame rates are required to provide full motion video for on-demand viewing 
+  and collection for analysis and playback. The additional goal for providing, even limited, timely 
+  response to events in progress further support that same constraint.
 - Thus for efficient collection, transport, analysis, and storage of data: images must often be scaled 
   down to XGA or even VGA sizes.
-- Detected faces within these resulting images can be quite small.
-- Lighting conditions are rarely supportive of quality image collection, sometimes resulting in shadows 
-  and poor contrast.
+  - *This, is where infrastructure constraints have the greatest impact*.
+  - Detected faces within these resulting images can be quite small.
+- Lighting conditions are rarely supportive of quality image collection, sometimes resulting in deep
+  shadows and poor contrast.
 - Except for when the subject is gazing directly at the camera, collected images often present profile 
   views and oblique perspectives.
 - Persons may be actively moving through the field of view, and not stationary. This can sometimes 
   result in images containing motion artifacts resulting in blurry, apparently out of focus, faces.
 - At high frame rates, a single Outpost event can potentially capture hundreds of images containing 
-  facial data.
-- Only a few of these images might result in a recognition result with high confidence. 
+  facial data. Only a few of these images might result in a recognition result with high confidence. 
 - A much smaller subset of those images might have the desired quality for use as feedback to improve
   the recognition model. 
 - Sometimes, failures in recognition tasks result from the introduction of new individuals not seen 
-  before.
-- The system needs to be able to discern the difference, and attempt to remember each new person
+  before. The system needs to be able to discern the difference, and attempt to remember each new person
   so that they can be recognized in the future.
 
 Some of this can be alleviated with planning and forethought. Lighting and camera placement are obvious 
