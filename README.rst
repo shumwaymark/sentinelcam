@@ -480,11 +480,11 @@ Challenges
 There are a number of inherent challenges to the SentinelCam design that must be overcome.
 
 Partly this is related to infrastructure constraints. This system is designed to run on small 
-low-voltage embedded devices, not in some high-end commercial data center, or within some virtual 
-server farm in the clouds. The more CPU/GPU brought to bear, the more electricity needed to make
-it all work.
+low-voltage embedded devices, rather than operating in some high-end commercial data center, or 
+within a virtual server farm in the clouds. The more CPU/GPU brought to bear, the more electricity 
+and expense needed to make it all work.
 
-*Infrastructure is not the only challenge*. Design philosophy presents an equally complex set of obstacles. 
+*Infrastructure is not the only challenge*. Design philosophy presents a more complex set of obstacles. 
 
 - High image publishing frame rates are required to provide full motion video for on-demand viewing 
   and collection for analysis and playback. The additional goal for providing, even limited, timely 
@@ -684,6 +684,7 @@ and libraries.
 - pandas
 - papermill
 - MessagePack
+- OpenFace
 - Dlib
   
 Acknowledgements
