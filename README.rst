@@ -484,8 +484,7 @@ low-voltage embedded devices, not in some high-end commercial data center, or wi
 server farm in the clouds. The more CPU/GPU brought to bear, the more electricity needed to make
 it all work.
 
-*Frankly, though, infrastructure is not the only challenge*. Design philosophy presents a more 
-complex set of obstacles. 
+*Infrastructure is not the only challenge*. Design philosophy presents an equally complex set of obstacles. 
 
 - High image publishing frame rates are required to provide full motion video for on-demand viewing 
   and collection for analysis and playback. The additional goal for providing, even limited, timely 
