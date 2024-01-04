@@ -115,7 +115,7 @@ ZeroMQ and imageZMQ respectively.
   *Image publishing has a twofold benefit*
 
 - Image capture from another node can be quickly initiated by an event in progress.
-- A live stream can simultaneously feed one or more monitors for on-demand real time display.
+- A live stream can simultaneously feed one or more monitors for on-demand real-time display.
 
 Images are transported as individual full-sized frames, each compressed into JPEG format. For 
 smooth realistic video playback, the pipeline needs to run with a target throughput of somewhere 
@@ -167,7 +167,7 @@ As a general rule, in-depth analysis tasks such as these are assigned to batch j
   potentially dozens of individual camera nodes.
 
 - More importantly, logged event notifications including information related to an event in progress
-  are then available as data which can be streamed to multiple interested consumers in real time.
+  are then available as data which can be streamed to multiple interested consumers.
 
 The ``Outpost`` as currently implemented is still considered experimental, and best represents proof 
 of concept as an evolving work in progress. Further detail on the design, structure, and operation of
@@ -195,7 +195,7 @@ additional data sinks will need to be included in the system architecture design
 
 - Log publishing over ZeroMQ has also proven to be very effective. The **camwatcher** design
   exploits this in a couple of ways. One is for responding to activity being reported from the
-  ``Outpost`` nodes in a real time manner. Additonally, task results from analysis running on 
+  ``Outpost`` nodes as quickly as possible. Additonally, task results from analysis running on 
   the **sentinel** are collected using this same technique. See the ``sentinel`` setting in the 
   `camwatcher.yaml <camwatcher.yaml>`_ file for how this is configured.
 
@@ -422,7 +422,7 @@ that are deemed worthy of deeper analysis by the **sentinel**.
 
 Workloads are configured through a set of YAML files. Tasks can be configured by job class to 
 have an affinity for a certain task engine. Perhaps one of the task engines has a dedicated 
-inference co-processor and is kept ready for real-time supplemental event analysis.
+inference co-processor and is kept ready for immediate supplemental event analysis.
 
 - A separate engine can be used for work that only requires CPU, such as background 
   maintenance tasks.
@@ -480,15 +480,14 @@ Challenges
 There are a number of inherent challenges to the SentinelCam design that must be overcome.
 
 Partly this is related to infrastructure constraints. This system is designed to run on small 
-low-voltage embedded devices, rather than operating in some high-end commercial data center, or 
-within a virtual server farm in the clouds. The more CPU/GPU brought to bear, the more electricity 
-and expense needed to make it all work.
+low-voltage embedded devices, rather than operating within a top-shelf commercial data center, or 
+virtual server farm in the clouds. The more CPU/GPU brought to bear, the more electricity and expense 
+needed to make it all work.
 
 *Infrastructure is not the only challenge*. Design philosophy presents a more complex set of obstacles. 
 
-- High image publishing frame rates are required to provide full motion video for on-demand viewing 
-  and collection for analysis and playback. The additional goal for providing, even limited, timely 
-  response to events in progress further support that same constraint.
+- High image publishing frame rates are required to provide full motion video for on-demand viewing, 
+  data gathering for analysis and playback, and timely response to events in progress.
 - Thus for efficient collection, transport, analysis, and storage of data: images must often be scaled 
   down to XGA or even VGA sizes.
      *This, is where infrastructure constraints have the greatest impact*.
@@ -498,10 +497,10 @@ and expense needed to make it all work.
 - Except for when the subject is gazing directly at the camera, collected images often present profile 
   views and oblique perspectives.
 - Persons may be actively moving through the field of view, and not stationary. This can sometimes 
-  result in images containing motion artifacts resulting in blurry, apparently out of focus, faces.
+  result in images containing motion artifacts which produce blurry, apparently out of focus, faces.
 - At high frame rates, a single Outpost event can potentially capture hundreds of images containing 
-  facial data. Only a few of these images might result in a recognition result with high confidence. 
-- A much smaller subset of those images might have the desired quality for use as feedback to improve
+  facial data. Only a small subset of these images might return a recognition result with high confidence. 
+- Often, none of the collected images will have the desired quality needed for use as feedback to improve
   the recognition model. 
 - Sometimes, failures in recognition tasks result from the introduction of new individuals not seen 
   before. The system needs to be able to discern the difference, and attempt to remember each new person
@@ -559,33 +558,35 @@ hardware provisioning can allow for running facial and vehicle recognition model
 the camera node. When focused on an entry into the house, any face immediately recognized would
 not require engaging the **sentinel** for further analysis.
 
-Essentially, this could enable a camera to provide data in real time for discerning between
+Essentially, this could enable a camera to provide data in real-time for discerning between
 expected/routine events and unexpected/new activity deserving of a closer look.
 
-  Support for using an OAK camera from *Luxonis* as the primary data collection device has 
-  recently been incorporated into the ``Outpost``. These devices are an "AI-included" camera 
-  with an on-board VPU co-processor. 
-  
-  The **DepthAI** `software libraries <https://docs.luxonis.com/projects/sdk>`_
-  provide for model upload and customizable pipelines. The prototype definition provided here 
-  produces the following outputs from the camera.
+Luxonis OAK cameras
+...................
 
-  1. MobileNetSSD object detection on every frame
-  2. The 640x360 RGB image data ready for OpenCV and passed into the **imagenode** pipeline as the main camera source
-  3. The same image data encoded into JPEG, ready for publication to the **camwatcher**
-  
-  All 3 of these outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily 
-  consume this and publish complete object detection results and captured JPEG data for storage by the
-  **camwatcher**. 
-  
-  In a perfect world, the ``SpyGlass`` could be employed as a vehicle for specialized supplemental 
-  vision processing during a camera event in progress. There are several interesting possibilities. 
-  Further provisioning with a vision co-processor provides for an incredible amount of analytical
-  performance directly on an embedded low-voltage edge device. 
-  
-  The prototype pipeline definition can be found in 
-  `imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
-  See the `depthai.yaml <depthai.yaml>`_ file for the setups.
+Support for using an OAK camera from *Luxonis* as the primary data collection device has 
+recently been incorporated into the ``Outpost``. These devices are an "AI-included" camera 
+with an on-board VPU co-processor. 
+
+The **DepthAI** `software libraries <https://docs.luxonis.com/projects/sdk>`_
+provide for model upload and customizable pipelines. The prototype definition provided here 
+produces the following outputs from the camera.
+
+1. MobileNetSSD object detection on every frame
+2. The 640x360 RGB image data ready for OpenCV and passed into the **imagenode** pipeline as the main camera source
+3. The same image data encoded into JPEG, ready for publication to the **camwatcher**
+
+All 3 outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily consume this 
+and publish complete object detection results and captured JPEG data for storage by the **camwatcher**. 
+
+In a perfect world, the ``SpyGlass`` could also be deployed as a vehicle for specialized supplemental 
+vision processing during a camera event in progress. There are several interesting possibilities. 
+Further provisioning with a vision co-processor provides for an incredible amount of analytical
+performance directly on an embedded low-voltage edge device. 
+
+The prototype pipeline definition can be found in 
+`imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
+See the `depthai.yaml <depthai.yaml>`_ file for the setups.
 
 Data management
 ---------------
@@ -615,7 +616,7 @@ while also allowing for the production of high-quality full-motion archival vide
 There can be multiple objects of interest moving through the field of view simultaneously. 
 Collected logging data can include geometry, classification, and labeling. These datasets could 
 represent the aggregated results inferred from multiple deep neural networks, both collected 
-in real time by an Outpost node and analysis results produced by the Sentinel. 
+in real-time by an Outpost node and analysis results later produced by the Sentinel. 
 
 It adds up in a hurry. *And the rest of the story...*
 
@@ -623,7 +624,7 @@ Much of it can be meaningless, trivial, forgettable, and simply not wanted. For 
 imagine an outdoor camera with a view of both an entry into the home and the driveway. The 
 occupants and their vehicles will pass in front of that camera multiple times per day.
 
-  SentinelCam was conceived as a system providing real-time analysis of various camera events 
+  SentinelCam was conceived as a system providing for the analysis of various camera events 
   as they are occurring. Not a long-term video archival and retrieval engine. 
 
   *Built to operate exclusively on low-voltage embedded devices like the Raspberry Pi*, there
