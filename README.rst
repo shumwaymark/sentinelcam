@@ -480,9 +480,9 @@ Challenges
 There are a number of inherent challenges to the SentinelCam design that must be overcome.
 
 Partly this is related to infrastructure constraints. This system is designed to run on small 
-low-voltage embedded devices, rather than operating within a top-shelf commercial data center, or 
-virtual server farm in the clouds. The more CPU/GPU brought to bear, the more electricity and expense 
-needed to make it all work.
+low-voltage embedded devices, rather than operating on costly rackmount hardware, or a virtual
+server farm in the clouds. The more CPU/GPU brought to bear, the more electricity and 
+expense needed to make it all work.
 
 *Infrastructure is not the only challenge*. Design philosophy presents a more complex set of obstacles. 
 
@@ -528,10 +528,12 @@ These embeddings are used to train an SVM classifier based on the face captures 
 
 Whenever the probability of the determined result from the model falls below a confidence threshold, a measurement 
 using an Euclidean distance calculation is implemented as an additional confirmation. Distance is evaluated against 
-a baseline representation kept for each known individual. The fallback approach is implemented by a search for the 
+a baseline representation kept for each known individual. The plan-B fallback is implemented by a search for the 
 closest comparable known face.
 
-In turn, this distance metric then also helps to quickly identify and remember newly introduced faces.
+This ensemble approach not only bolsters classification results, it presents a solution to the open-set recognition 
+problem inherent to SentinelCam design goals. The distance metric is helpful in the quest to identify and remember 
+newly introduced faces.
 
 Sentinel
 --------

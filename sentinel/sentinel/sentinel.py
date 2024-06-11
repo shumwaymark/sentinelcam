@@ -424,6 +424,10 @@ class JobTasking:
                         msg = (TaskEngine.TaskERROR, f"No tracking data for ({e.date}, {e.evt}, {e.trk})")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
+                    except DataFeed.ImageSetEmpty as e:
+                        msg = (TaskEngine.TaskERROR, f"No images for ({e.date}, {e.evt})")
+                        publisher.send(msgpack.packb(msg))
+                        eoj_status = TaskEngine.TaskFAIL
                     except KeyError as keyval:
                         msg = (TaskEngine.TaskERROR, f"taskHost() internal key error '{keyval}'")
                         publisher.send(msgpack.packb(msg))

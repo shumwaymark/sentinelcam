@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Ongoing development
 
+Much of the following is more properly categorized as still in the *wishlist phase* of design.
+
 - Continue refinements to `Outpost` implementation. 
   - Modernize object detector capabilities with support for newer algorithms.
   - Implement filtering mechanism based on object detection results.
@@ -14,9 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     to support custom lenses as another layer beneath object detection.
 - Support multiple result sets from both `Outpost` event management, and from running 
   **sentinel** tasks. Needed to support the capture of multiple neural nets producing 
-  results in parallel from a single event. 
+  results in parallel from a single event or task. 
 - Aditional refinements for the **sentinel** module. 
-  - Support result signaling to Twilio, and to Node-RED via MQTT.
+  - Implement result signaling to Twilio, to Node-RED via MQTT, and to **imagehub** logging 
+    to help support reponsiveness to events in progress as well as for knowledge and state 
+    management throughout the larger system. 
   - Provide an abstraction to support a set of reusable design patterns for the most common
     ring buffer control techniques.
   - Implement internal housekeeping to periodically purge oldest job history. This is 
@@ -26,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     self-diagnosis. 
   - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
     based on the queue length for tasks waiting in that job class.  
-- Need maintenance shell script to clear out empty **camwatcher** data folders after last
-  event has been purged for a date.
+- **datapump** needs data sink storage and data analysis with clean-up and reporting as a nightly 
+  task. Will need control panel instrumentation for this as well, including perhaps charts
+  of the storage breakdown, utilization, and available capacity of the data sink. 
+  event has been purged for a date. 
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
   **imagenode**. 
 
@@ -36,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.0.27-alpha - 2024-06-11
+
+### Changed
+
+- The `DataFeed` now raises a `ImageSetEmpty` exception when requesting the image list and
+  no images were captured for the requested event.
 
 ## 0.0.26-alpha - 2023-12-22
 

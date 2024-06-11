@@ -178,8 +178,11 @@ def main():
     cData = CamData(CFG['datafolder'], CFG['imagefolder'])
     pump = DataPump(f"tcp://*:{CFG['control_port']}")
     logging.info("datapump response loop starting")
-    # TODO: Graceful shutdown / termination handling needed 
-    # Need a policy for sending meaningful response codes back to the DataFeed
+    # TODO: Graceful shutdown / termination handling needed. 
+    # Need a policy for sending meaningful response codes back to the DataFeed.
+    # TODO: Need disk and data analysis with clean-up and reporting as a nightly task.
+    # Will need control panel instrumentation for this as well, including perhaps charts
+    # of the storage breakdown, utilization, and available capacity of the data sink.
     while True:  
         msg = pump.zmq_socket.recv()
         request = msgpack.loads(msg)

@@ -93,6 +93,11 @@ class DataFeed(imagezmq.ImageSender):
             self.evt = evt
             self.trk = trk
 
+    class ImageSetEmpty(Exception):
+        def __init__(self, date, evt) -> None:
+            self.date = date
+            self.evt = evt
+
     def get_date_index(self, date):
         req = msgpack.dumps({'cmd': 'idx', 'date': date})
         self.zmq_socket.send(req)
@@ -123,8 +128,8 @@ class DataFeed(imagezmq.ImageSender):
             (msg, result) = self.recv_pickle()
         except Exception as e:
             logging.error(f"DataFeed.get_image_list({date},{event}) exception {str(e)}")
-        #if len(result) == 0:
-        #    result = [datetime.fromisoformat("2020-12-14T06:01:30.072559")]
+        if len(result) == 0:
+            raise DataFeed.ImageSetEmpty(date, event)
         return result
 
     def get_image_jpg(self, date, event, frametime):
