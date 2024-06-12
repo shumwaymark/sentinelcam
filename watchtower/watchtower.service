@@ -1,0 +1,14 @@
+[Unit]
+Description=Sentinelcam Watchtower
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/watchtower/watchtower
+Environment=DISPLAY=:0
+ExecStart=/home/pi/.virtualenvs/py3cv4/bin/python -u /home/pi/watchtower/watchtower/watchtower.py
+
+[Install]
+WantedBy=graphical.target

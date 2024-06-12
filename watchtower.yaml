@@ -1,0 +1,35 @@
+%YAML 1.0
+---
+# Settings file watchtower.yaml 
+socket_dir: /home/pi/watchtower/sockets
+viewfps: True
+
+# For ring buffer allocations, any potential image size must be
+# known in advance. Parameters are ((width, height), buffer_length)
+ring_buffers:
+  xga: ((1024, 768), 5)
+  vga: ((640, 480), 5)
+  sd: ((640, 360), 5)
+
+# The list of known datapumps
+datapumps: 
+  data1: tcp://data1:5556
+
+# Each outpost node is associated with a datapump
+outposts:
+  east:
+    node: tcp://east:5567
+    pump: data1 
+  outpost:
+    node: tcp://lab1:5567
+    pump: data1 
+
+# Every camera view is provided by an outpost node, 
+# each outpost can support multiple views.
+outpost_views: 
+  Front: 
+    outpost: east
+    size: (640, 360)
+  PiCamera:
+    outpost: outpost
+    size: (640, 480)
