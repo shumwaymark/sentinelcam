@@ -21,6 +21,7 @@ import simplejpeg
 import PIL.Image, PIL.ImageTk
 from ast import literal_eval
 from time import sleep
+from datetime import date, datetime
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.utils import FPS, readConfig
 import traceback
@@ -30,6 +31,10 @@ SOCKDIR = CFG["socket_dir"]
 
 VIEWER = 1  # datapump,outpost,view
 EVENT = 2   # datapump,date,event,imagesize
+
+PLAYER_PAGE = 0    # Main page, outpost and event viewer
+OUTPOST_PAGE = 1   # List of outpost views to choose from  
+SETTINGS_PAGE = 2  # To be determined: settings, controls, and tools cafe
 
 dataLock = threading.Lock()
 
@@ -42,8 +47,6 @@ def redx_image(w, h) -> np.ndarray:
     cv2.line(img, (0, 0), (w - 1, h - 1), (0, 0, 255), 4)
     cv2.line(img, (0, h - 1), (w - 1, 0), (0, 0, 255), 4)
     return img
-
-REDX = redx_image(800, 480)
 
 def convert_tkImage(cv2Image) -> PIL.ImageTk.PhotoImage:
     return PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(cv2.cvtColor(cv2Image, cv2.COLOR_BGR2RGB)))
@@ -148,16 +151,16 @@ class ImageSubscriber:
     def close(self):
         self._stop = True
 
-# multiprocessing class implementing a child subprocess for populating ring buffers of images 
+# multiprocessing class implementing a child subprocess for populating a ring buffer of images 
 class PlayerDaemon:
-    def __init__(self, cmdq, wirename, ringbuffers):
-        self.commandQ = cmdq 
+    def __init__(self, wirename, ringbuffers):
         self.wirename = wirename
         self.ringbuffers = ringbuffers
         self.datafeeds = {}
+        self.commandQueue = multiprocessing.Queue()
         self.runswitch = multiprocessing.Value('i', 0)
         self.process = multiprocessing.Process(target=self._data_monster, args=(
-            self.commandQ, self.runswitch, self.wirename, self.ringbuffers))
+            self.commandQueue, self.runswitch, self.wirename, self.ringbuffers))
         self.process.start()
 
     def _setPump(self, pump) -> DataFeed:
@@ -218,17 +221,17 @@ class PlayerDaemon:
                     # should then seamlessly step into the next event and continue playing. This would transition 
                     # into live viewing mode when reaching the end of the most recent event.
                     feed = self._setPump(datapump)
-                    if ring != imgsize:
-                        ring = imgsize
-                        ringbuffer = ringbuffers[ring]
-                    if (eventdate, eventid) != (date, event):
-                        (date, event) = (eventdate, eventid)
-                        frametimes = feed.get_image_list(eventdate, eventid)
-                        frameidx = 0
-                        forward = True
-                        ringbuffer.reset()
-                    started = False
                     try:
+                        if ring != imgsize:
+                            ring = imgsize
+                            ringbuffer = ringbuffers[ring]
+                        if (eventdate, eventid) != (date, event):
+                            (date, event) = (eventdate, eventid)
+                            frametimes = feed.get_image_list(eventdate, eventid)
+                            frameidx = 0
+                            forward = True
+                            ringbuffer.reset()
+                        started = False
                         while keepgoing.value:
                             if ringwire.ready():
                                 msg = ringwire.recv() # response here reserved for player commands, reverse/forward/other
@@ -250,17 +253,52 @@ class PlayerDaemon:
                             if ringbuffer.isEmpty():
                                 # Have reached the end, or the beginning, so just stop.
                                 keepgoing.value = 0
+                                frameidx = 0
+                    # TODO: Needs to set a REDX in the ring buffer, and then allow that image to be retrieved
+                    # before exiting. Refactor this try/catch block appropriately if feasible, or seek alternative.
+                    except KeyError as keyval:
+                        print(f"PlayerDaemon internal key error '{keyval}'")
+                        ringbuffer.put(redx_image(ring[0],ring[1]))
                     except DataFeed.ImageSetEmpty as e:
-                        ringbuffer.put(REDX)
+                        ringbuffer.put(redx_image(ring[0],ring[1]))
                     except Exception as e:
                         print(f"Failure reading images from datapump, ({datapump},{eventdate},{eventid}): {str(e)}")
+                    finally:
+                        keepgoing.value = 0
 
     def start(self, command_block):
         self.runswitch.value = 1
-        self.commandQ.put(command_block)
+        self.commandQueue.put(command_block)
 
     def stop(self):
         self.runswitch.value = 0
+
+class SentinelSubscriber:
+    def __init__(self, sentinel) -> None:
+        self.sentinel = sentinel
+        self.eventQueue = multiprocessing.Queue()
+        self.process = multiprocessing.Process(target=self._sentinel_reader, args=(
+            self.sentinel, self.eventQueue))
+        self.process.start()
+    
+    def _sentinel_reader(self, sentinel, eventQueue):
+        # subscribe to Sentinel result publication
+        sentinel_log = zmq.Context.instance().socket(zmq.SUB)
+        sentinel_log.subscribe(b'')
+        sentinel_log.connect(sentinel)
+        # consume every logging record published from the sentinel
+        while True:
+            topic, msg = sentinel_log.recv_multipart()
+            topics = topic.decode('utf8').strip().split('.')
+            message = msg.decode('ascii')
+            #if topics[1] == 'INFO':
+            #    try:
+            #        logdata = json.loads(message)
+
+            #    except (KeyError, ValueError):
+            #        pass
+            #    except Exception:  
+            #        print(f"Exception parsing sentinel log '{message}'")
 
 class TextHelper:
     def __init__(self) -> None:
@@ -336,10 +374,11 @@ class Player:
                 # The node, view, and image size for any given event come from the date index.
                 # Retrieve all tracking data and the list of image timestamps.
                 app.player_daemon.stop() 
+                sleep(0.5)
                 app.player_daemon.start(cmd)
                 (date, event, size) = cmd[2:]
-                # TODO: Don't really need an index retrieval each 
-                # time (usually has not changed) for same date.
+                # TODO: Don't really need an index retrieval each time (usually has not changed) 
+                # for same date. Redesign this so it is maintained and kept current dynamically.
                 cwIndx = datafeed.get_date_index(date)
                 evtSets = cwIndx.loc[cwIndx['event'] == event]
                 if len(evtSets.index) > 0:
@@ -360,7 +399,7 @@ class Player:
                 try:
                     frametimes = datafeed.get_image_list(date, event)
                 except DataFeed.ImageSetEmpty as e:
-                    app.player_panel.update_image(REDX)
+                    app.player_panel.update_image(redx_image(imgsize[0], imgsize[1]))
                 sleep(0.1)
             srcQ.task_done()
             while srcQ.empty():
@@ -374,17 +413,6 @@ class Player:
                         app.player_daemon.stop()
                     else:
                         app.player_daemon.start(cmd)
-                        if cmd[0] == VIEWER:  
-                            # The event list for a view can change while a live outpost viewer is actively
-                            # running, so populate a current list of events for this view on each and every start.
-                            outpost_view = cmd[3]
-                            cwIndx = datafeed.get_date_index()
-                            # All events for this view and date
-                            viewEvts = cwIndx.loc[(cwIndx['type'] == 'trk') & (cwIndx['viewname'] == outpost_view)]
-                            app.set_event_list([(rec.timestamp, rec.event, (rec.width, rec.height)) 
-                                                for rec in viewEvts.itertuples()])
-                        else:
-                            pass  #  EVENT 
                 if paused:
                     sleep(0.005)
                 else:
@@ -404,7 +432,10 @@ class Player:
 
                                 if cmd[0] == EVENT:
                                     for rec in evtData.loc[evtData['timestamp'] == frametimes[frameidx]].itertuples():
-                                        if rec.name != 'Face':  # TODO: ignore fd1 only if face recon (fr1) data is present
+                                        # TODO: Need a z-ordering priority based on tracking type. Any label for a facial
+                                        # recognition result should appear over any underlying object identification label.
+                                        # i.e. don't really want to exclude all "Face" tags. 
+                                        if rec.name != 'Face': 
                                             (x1, y1, x2, y2) = rec.rect_x1, rec.rect_y1, rec.rect_x2, rec.rect_y2
                                             texthelper.putText(image, rec.name, rec.classname, x1, y1, x2, y2)
 
@@ -427,6 +458,7 @@ class Player:
                             else:
                                 # player daemon will be in a stop() state for this condition
                                 app.player_panel.play_pause()
+                                frameidx = 0
 
                         except IndexError as ex:
                             print(f"IndexError cmd={cmd[0]} frameidx={frameidx} of {len(frametimes)}")
@@ -434,101 +466,194 @@ class Player:
                             print('Unhandled exception caught:', str(ex))
                             traceback.print_exc()                            
 
-class Application(ttk.Frame):
-    def __init__(self, master=None):
-        super().__init__(master)
-        self.master = master
-        self.grid(column=0, row=0)
-        self.winfo_toplevel().title("Sentinelcam Watchtower")
-        self.alloc_ring_buffers()
-        self.ringwire_setup()
-        self.start_player_daemon()
-        self.player_panel_setup()
-        self.gather_sources()
-        self.sourceCmds = queue.Queue()
-        self.dataReady = threading.Event()
-        self.toggle = threading.Event()
-        self.toggle.clear()
-        self.auto_pause = None
-        self.evtList = []
-        self.select_outpost_view('PiCamera')
-        self.viewer = Player(self.toggle, self.dataReady, self.sourceCmds, self.wirename, self._rawBuffers)
-        self.master.bind_all('<Any-ButtonPress>', self.reset_inactivity)
-        self.update()
+class OutpostView:
+    # NOTE: Regarding nomenclature. For SentinelCam, "event" is an outpost video event which
+    # has been stored on a data sink. Caution here, do not confuse with a tkinkter "event".
+    def __init__(self, view, node, publisher, sinktag, datapump, imgsize, description) -> None:
+        self.view = view
+        self.node = node
+        self.publisher = publisher
+        self.sinktag = sinktag
+        self.datapump = datapump
+        self.imgsize = imgsize
+        self.thumbnail = redx_image(213, 160)
+        self.description = description
+        self.menulabel = description
+        self.menuref = None
+        self.eventlist = []
 
-    def player_panel_setup(self):
-        self.player_panel = PlayerPanel(root.winfo_screenwidth(), root.winfo_screenheight(), REDX)
-        self.player_panel.grid(row=0, column=0)
+    def store_menuref(self, menuitem) -> None:
+        self.menuref = menuitem
 
-    def alloc_ring_buffers(self):
-        ringmodel = CFG["ring_buffers"]
-        ringsetups = [literal_eval(ring) for ring in ringmodel.values()]
-        self._ringbuffers = {wh: RingBuffer(wh, l) for (wh, l) in ringsetups}
-        self._rawBuffers = {wh: self._ringbuffers[wh].bufferList() for wh in self._ringbuffers}
-
-    def ringwire_setup(self):
-        self.wirename = f"{SOCKDIR}/PlayerDaemon"
-
-    def start_player_daemon(self):
-        self.commandQueue = multiprocessing.Queue()
-        self.player_daemon = PlayerDaemon(self.commandQueue, self.wirename, self._ringbuffers)
-
-    def gather_sources(self):
-        self.outpost_views = CFG['outpost_views']
-        self.outposts = CFG['outposts']
-        self.datapumps = CFG['datapumps']
-
-    def select_outpost_view(self, viewname=None):
-        if viewname is not None:
-            self.current_view = viewname
-            view = self.outpost_views[viewname]
-            self.viewsize = literal_eval(view['size'])
-            self.outpost = self.outposts[view['outpost']]
-            self.datapump = self.datapumps[self.outpost['pump']]
-        self.sourceCmds.put(((VIEWER, self.datapump, self.outpost['node'], self.current_view), self.viewsize))
-
-    def set_event_list(self, newlist):
+    def set_event_list(self, newlist) -> None:
         with dataLock:
-            self.evtList = newlist
-            self.eventIdx = 0
+            self.eventlist = newlist
+            self.update_label()
 
-    def select_event(self, idx):
-        (dt, event, size) = self.evtList[idx]
-        self.sourceCmds.put(((EVENT, self.datapump, dt.isoformat()[:10], event, size), size))
+    def add_event(self, event) -> None:
+        with dataLock:
+            self.eventlist.append(event)
+            self.update_label()
 
-    def previous_event(self):
-        if self.eventIdx < len(self.evtList):
-            self.select_event(self.eventIdx)
-            self.player_panel.play_if_paused()
-            self.eventIdx += 1
+    def event_count(self) -> int:
+        return len(self.eventlist)
+
+    def update_label(self) -> None:
+        evt_time = ''
+        if self.event_count() > 0:
+            evt_ts = self.eventlist[-1][0]
+            evt_time = evt_ts.to_pydatetime().strftime('%A %B %d, %I:%M %p')
+        self.menulabel = f"{self.description}\n{evt_time}"
+        if self.menuref is not None:
+            self.menuref.update()
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - # 
+#                                  All user interface logic follws below                                              #
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - # 
+
+class MenuPanel(ttk.Frame):
+    ''' A button-press vertically scrolled frame; with credit due to a couple of posts on Stack Overflow. 
+
+           https://stackoverflow.com/questions/16188420/tkinter-scrollbar-for-frame/
+           https://stackoverflow.com/questions/56165257/touchscreen-scrolling-tkinter-python
+
+        Use the 'interior' attribute to place widgets inside the scrollable frame.
+    '''
+    def __init__(self, parent, width, height, show_scrollbar=False):
+        ttk.Frame.__init__(self, parent)
+        # Create a canvas object and a vertical scrollbar for scrolling it.
+        vscrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL)
+        self.canvas = canvas = tk.Canvas(
+            self, background="black", borderwidth=0, highlightthickness=0, yscrollcommand=vscrollbar.set)
+        canvas.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S))
+        if show_scrollbar:
+            vscrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        vscrollbar.config(command=canvas.yview)
+
+        self.canvaswidth = width
+        self.canvasheight = height
+
+        # reset the view
+        canvas.xview_moveto(0)
+        canvas.yview_moveto(0)
+        # create a frame inside the canvas which will be scrolled with it
+        self.interior = interior = ttk.Frame(canvas, height=self.canvasheight, borderwidth=0)
+        interior_id = canvas.create_window(0, 0, window=interior, anchor=tk.NW)
+        # update the scrollbars to match the size of the inner frame
+        size = (width, height) # visible scrolling region
+        canvas.config(scrollregion="0 0 %s %s" % size)
+        # update the canvass width 
+        canvas.config(width=self.canvaswidth)
+        # update the inner frame width to fill the canvas
+        canvas.itemconfigure(interior_id, width=self.canvaswidth)
+
+        self.offset_y = 0
+        self.prevy = 0
+        self.scrollposition = 1
+
+        canvas.bind("<Enter>", lambda _: canvas.bind_all('<Button-1>', self.on_press), '+')
+        canvas.bind("<Leave>", lambda _: canvas.unbind_all('<Button-1>'), '+')
+        canvas.bind("<Enter>", lambda _: canvas.bind_all('<B1-Motion>', self.on_touch_scroll), '+')
+        canvas.bind("<Leave>", lambda _: canvas.unbind_all('<B1-Motion>'), '+')
+
+    def on_press(self, event):
+        self.offset_y = event.y_root
+        if self.scrollposition < 1:
+            self.scrollposition = 1
+        elif self.scrollposition > self.canvasheight:
+            self.scrollposition = self.canvasheight
+        self.canvas.yview_moveto(self.scrollposition / self.canvasheight)
+
+    def on_touch_scroll(self, event):
+        nowy = event.y_root
+        sectionmoved = 15
+        if nowy > self.prevy:
+            event.delta = -sectionmoved
+        elif nowy < self.prevy:
+            event.delta = sectionmoved
         else:
-            self.player_panel.update_image(REDX)
+            event.delta = 0
+        self.prevy= nowy
+        self.scrollposition += event.delta
+        self.canvas.yview_moveto(self.scrollposition / self.canvasheight)
 
-    def next_event(self):
-        if self.eventIdx > 0:
-            self.eventIdx -= 1
-            self.select_event(self.eventIdx)
-        else:
-            self.sourceCmds.put(((VIEWER, self.datapump, self.outpost['node'], self.current_view), self.viewsize))
-        self.player_panel.play_if_paused()
+class OutpostMenuitem(ttk.Frame):
+    def __init__(self, parent, view):
+        ttk.Frame.__init__(self, parent, borderwidth=0)
+        self.image = convert_tkImage(view.thumbnail)
+        self.label = tk.StringVar(value=view.menulabel)
+        self.v = tk.Label(self, image=self.image, borderwidth=0, highlightthickness=0)
+        self.t = tk.Label(self, textvariable=self.label, font=('TkCaptionFont', 12), 
+                          background="black", foreground="chartreuse", justify="center")
+        self.v.grid(column=0, row=0)
+        self.t.grid(column=0, row=1)
+        self.v.bind('<Double-1>', self.select_me)
+        self.outpost_view = view
+        self.outpost_view.store_menuref(self)
+    def select_me(self, event=None):
+        # TODO: This needs to be refactored into standard logic up at the app level
+        app.select_outpost_view(self.outpost_view.view)
+        app.show_page(PLAYER_PAGE)
+        app.player_panel.play_if_paused()
+    def update(self) -> None:
+        self.label.set(self.outpost_view.menulabel)
+        self.image = convert_tkImage(self.outpost_view.thumbnail)
+        self.v['image'] = self.image
 
-    def reset_inactivity(self, event=None):
-        if self.auto_pause is not None:
-            self.after_cancel(self.auto_pause)
-        self.auto_pause = self.after(30000, self.player_panel.forced_pause)
+class OutpostList(MenuPanel):
+    def __init__(self, parent, width, height, outpost_views):
+        MenuPanel.__init__(self, parent, width, height)
+        col, row = 0, 0
+        for v in outpost_views.values():
+            item = OutpostMenuitem(self.interior, v)
+            item.grid(column=col, row=row, padx=10, pady=10)
+            if col + 1 > 2:
+                col = -1
+                row += 1
+            col += 1
 
-    def update(self):
-        _delay = 1
-        if self.dataReady.is_set():
-            self.player_panel.update_image(self.viewer.get_imgdata())
-            self.dataReady.clear()
-            _delay += 1
-        self.master.after(_delay, self.update)
+class SettingsPage(tk.Canvas):
+    def __init__(self):
+        tk.Canvas.__init__(self, width=800, height=480, borderwidth=0, highlightthickness=0, background="black")
+        list_width = 730
+        item_height = 50
+        item_count = 0
+        height = item_height * (item_count + 1)
+        self.settings_panel = MenuPanel(self, list_width, height)
+        self.create_window(0, 0, window=self.settings_panel, anchor=tk.NW)
+        self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
+        id = self.create_image(730, 10, anchor="nw", image=self.close_img)
+        self.tag_bind(id, "<Button-1>", lambda e: app.show_page(PLAYER_PAGE))
+        self.quit_img = PIL.ImageTk.PhotoImage(file="images/quit.png")
+        id = self.create_image(730, 80, anchor="nw", image=self.quit_img)
+        self.tag_bind(id, "<Button-1>", quit)
 
-class PlayerPanel(tk.Canvas):
-    def __init__(self, width, height, image):
-        super().__init__(width=width, height=height, bg="black")
-        self.current_image = convert_tkImage(image)
+class OutpostPage(tk.Canvas):
+    # Provide room on the right for a non-scrolling region. This is a 3-across 
+    # presentation, allowing for padding in all directions around each item. 
+    # That plus an optional scrollbar should leave enough space on the far 
+    # right for a vertical button panel. 
+    # Currently assumes a (213, 160) sized thumbnail.
+    def __init__(self, outpost_views):
+        tk.Canvas.__init__(self, width=800, height=480, borderwidth=0, highlightthickness=0, background="black")
+        list_width = 730
+        item_height = 230
+        item_count = len(outpost_views)
+        list_height = item_height * ((item_count // 3) + 2)
+        self.outpost_panel = OutpostList(self, list_width, list_height, outpost_views)
+        self.create_window(0, 0, window=self.outpost_panel, anchor=tk.NW)
+        self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
+        id = self.create_image(730, 10, anchor="nw", image=self.close_img)
+        self.tag_bind(id, "<Button-1>", lambda e: app.show_page(PLAYER_PAGE))
+        self.settings_img = PIL.ImageTk.PhotoImage(file="images/settings.png")
+        id = self.create_image(730, 80, anchor="nw", image=self.settings_img)
+        self.tag_bind(id, "<Button-1>", lambda e: app.show_page(SETTINGS_PAGE))
+
+class PlayerPage(tk.Canvas):
+    # Raspberry Pi 7-inch touch screen display: (800,480)
+    def __init__(self):
+        tk.Canvas.__init__(self, width=800, height=480, borderwidth=0, highlightthickness=0, background="black")
+        self.current_image = convert_tkImage(redx_image(800,480))
         self.pause_img = PIL.ImageTk.PhotoImage(file="images/pausebutton.png")
         self.play_img = PIL.ImageTk.PhotoImage(file="images/playbutton.png")
         self.prev_img = PIL.ImageTk.PhotoImage(file="images/prevbutton.png")
@@ -587,6 +712,7 @@ class PlayerPanel(tk.Canvas):
         app.toggle.set()
 
     def forced_pause(self):
+        app.show_page(PLAYER_PAGE)
         if not self.paused:
             self.play_pause()
         self.itemconfig('player_buttons', state='normal')
@@ -594,7 +720,7 @@ class PlayerPanel(tk.Canvas):
 
     def menu(self, event=None):
         self.hide_buttons_now()
-        #print('menu button pressed')
+        app.show_page(OUTPOST_PAGE)
 
     def prev(self, event=None):
         self.hide_buttons_now()
@@ -607,6 +733,124 @@ class PlayerPanel(tk.Canvas):
     def share(self, event=None):
         self.hide_buttons_now()
         #print('share button pressed')
+
+class Application(ttk.Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        self.grid(column=0, row=0)
+        self.set_styling()
+        self.winfo_toplevel().title("Sentinelcam Watchtower")
+        self.gather_view_definitions()
+        self.alloc_ring_buffers()
+        self.wirename = f"{SOCKDIR}/PlayerDaemon"
+        self.player_daemon = PlayerDaemon(self.wirename, self._ringbuffers)
+        self.sentinel_subscriber = SentinelSubscriber(CFG['sentinel'])
+        self.pages = [PlayerPage(), 
+                      OutpostPage(self.outpost_views), 
+                      SettingsPage()]
+        self.sourceCmds = queue.Queue()
+        self.dataReady = threading.Event()
+        self.toggle = threading.Event()
+        self.toggle.clear()
+        self.auto_pause = None
+        self.select_outpost_view(CFG['default_view'])
+        self.player_panel = self.pages[PLAYER_PAGE]
+        self.player_panel.grid(row=0, column=0)
+        self.current_page = PLAYER_PAGE
+        self.viewer = Player(self.toggle, self.dataReady, self.sourceCmds, self.wirename, self._rawBuffers)
+        # TODO: Kick-off an initialization thread to populate outpost_views with current thumbnails
+        self.master.bind_all('<Any-ButtonPress>', self.reset_inactivity)
+        self.update()
+
+    def alloc_ring_buffers(self):
+        ringmodel = CFG["ring_buffers"]
+        ringsetups = [literal_eval(ring) for ring in ringmodel.values()]
+        self._ringbuffers = {wh: RingBuffer(wh, l) for (wh, l) in ringsetups}
+        self._rawBuffers = {wh: self._ringbuffers[wh].bufferList() for wh in self._ringbuffers}
+
+    def gather_view_definitions(self):
+        self.outpost_views = {}
+        outpost_views = CFG['outpost_views']
+        outposts = CFG['outposts']
+        datapumps = CFG['datapumps']
+        # setup the dictionary of outpost views
+        for viewname in outpost_views:
+            outpost_view = outpost_views[viewname]
+            outpost = outposts[outpost_view['outpost']]
+            viewdef = OutpostView(
+                view = viewname,
+                node = outpost_view['outpost'],
+                publisher = outpost['image_publisher'] ,
+                sinktag = outpost['datapump'],
+                datapump = datapumps[outpost['datapump']],
+                imgsize = literal_eval(outpost_view['size']),
+                description = outpost_view['description']
+            )
+            self.outpost_views[viewname] = viewdef
+        # populate an initial event list for each view 
+        self.today = datetime.now().isoformat()[:10]
+        sink_events = {}
+        for (sink, pump) in CFG['datapumps'].items():
+            with DataFeed(pump) as feed:
+                cwIndx = feed.get_date_index(self.today).sort_values('timestamp')
+            sink_events[sink] = cwIndx.loc[cwIndx['type']=='trk']
+        for v in self.outpost_views.values():
+            viewEvts = sink_events[v.sinktag].iloc[
+                (sink_events[v.sinktag]['node'] == v.node) &
+                (sink_events[v.sinktag]['viewname'] == v.view)]
+            if len(viewEvts.index) > 0:
+                v.set_event_list([(rec.timestamp, self.today, rec.event, (rec.width, rec.height)) 
+                    for rec in viewEvts.itertuples()])
+
+    def select_outpost_view(self, viewname=None):        
+        if viewname is not None:
+            self.current_view = viewname
+        view = self.outpost_views[self.current_view]
+        self.sourceCmds.put(((VIEWER, view.datapump, view.publisher, viewname), view.imgsize))
+
+    def set_styling(self):
+        style = ttk.Style()
+        style.configure("TFrame", background="black")
+    
+    def show_page(self, page):
+        if page != self.current_page:
+            self.pages[self.current_page].grid_remove()
+            self.pages[page].grid(row=0, column=0)
+            self.current_page = page
+
+    def select_event(self, idx):
+        (dt, date, event, size) = self.evtList[idx]
+        self.sourceCmds.put(((EVENT, self.datapump, date, event, size), size))
+
+    def previous_event(self):
+        if self.eventIdx < len(self.evtList):
+            self.select_event(self.eventIdx)
+            self.player_panel.play_if_paused()
+            self.eventIdx += 1
+        else:
+            pass  # self.player_panel.update_image(REDX)
+
+    def next_event(self):
+        if self.eventIdx > 0:
+            self.eventIdx -= 1
+            self.select_event(self.eventIdx)
+        else:
+            self.sourceCmds.put(((VIEWER, self.datapump, self.outpost['node'], self.current_view), self.viewsize))
+        self.player_panel.play_if_paused()
+
+    def reset_inactivity(self, event=None):
+        if self.auto_pause is not None:
+            self.after_cancel(self.auto_pause)
+        self.auto_pause = self.after(30000, self.player_panel.forced_pause)
+
+    def update(self):
+        _delay = 1
+        if self.dataReady.is_set():
+            self.player_panel.update_image(self.viewer.get_imgdata())
+            self.dataReady.clear()
+            _delay += 1
+        self.master.after(_delay, self.update)
 
 def quit(event=None):
      root.destroy()

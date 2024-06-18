@@ -43,6 +43,14 @@ Much of the following is more properly categorized as still in the *wishlist pha
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.29-alpha - 2024-06-18
+
+### Changed
+
+- Another premature push. Untested work-in-progress on the **watchtower** wall console. This
+  has nearly, ~80%, of all the core functionality required for its primary use cases. The full 
+  feature list is still only conceptual at this point. 
+
 ## 0.0.28-alpha - 2024-06-11
 
 ### Added
