@@ -2,6 +2,8 @@
 ---
 # Settings file watchtower.yaml 
 socket_dir: /home/pi/watchtower/sockets
+sentinel: tcp://sentinel:5565  # result publisher 
+default_view: PiCamera
 viewfps: True
 
 # For ring buffer allocations, any potential image size must be
@@ -15,21 +17,23 @@ ring_buffers:
 datapumps: 
   data1: tcp://data1:5556
 
-# Each outpost node is associated with a datapump
+# Each outpost (node) has an image publisher and an associated datapump.
 outposts:
   east:
-    node: tcp://east:5567
-    pump: data1 
+    image_publisher: tcp://east:5567
+    datapump: data1 
   outpost:
-    node: tcp://lab1:5567
-    pump: data1 
+    image_publiser: tcp://lab1:5567
+    datapump: data1 
 
-# Every camera view is provided by an outpost node, 
-# each outpost can support multiple views.
+# Every camera view is provided by an outpost node. Note that
+# each outpost can potentially support multiple views.
 outpost_views: 
   Front: 
     outpost: east
+    description: Front Driveway
     size: (640, 360)
   PiCamera:
     outpost: outpost
+    description: Lab Workstation Desktop 
     size: (640, 480)
