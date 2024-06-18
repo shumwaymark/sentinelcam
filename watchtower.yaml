@@ -23,7 +23,7 @@ outposts:
     image_publisher: tcp://east:5567
     datapump: data1 
   outpost:
-    image_publiser: tcp://lab1:5567
+    image_publisher: tcp://lab1:5567
     datapump: data1 
 
 # Every camera view is provided by an outpost node. Note that
