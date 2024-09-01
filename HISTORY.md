@@ -33,7 +33,6 @@ Much of the following is more properly categorized as still in the *wishlist pha
 - **datapump** needs data sink storage and data analysis with clean-up and reporting as a nightly 
   task. Will need control panel instrumentation for this as well, including perhaps charts
   of the storage breakdown, utilization, and available capacity of the data sink. 
-  event has been purged for a date. 
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
   **imagenode**. 
 
@@ -42,6 +41,17 @@ Much of the following is more properly categorized as still in the *wishlist pha
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.0.30-alpha - 2024-08-31
+
+### Fixed
+
+- Clean-up on the **watchtower** wall console. Has 99.94% of the core functionality needed for 
+  both live viewing, and previous event display.
+
+### Changed
+
+- Revised EOJ status message from **sentinel** for event syncrhonization with the **watchtower**.
 
 ## 0.0.29-alpha - 2024-06-18
 
