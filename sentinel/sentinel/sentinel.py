@@ -125,6 +125,9 @@ class JobRequest:
             'task': self.jobTask,
             'from': self.sourceNode,
             'sink': self.dataSink,
+            'pump': self.datapump,
+            'date': self.eventDate,
+            'event': self.eventID,
             'status': JobRequest.Status[self.jobStatus],
             'elapsed': elapsed_time,
             'taskstats': [self.image_cnt, self.image_rate]
