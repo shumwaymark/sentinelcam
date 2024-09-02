@@ -562,6 +562,9 @@ class OutpostView:
             # TODO: New thumbnail should be a selected image from the actual event, 
             # assuming something of interest was captured. Effectively: for updating 
             # the thumbnail / menu refdata, ignore any uninteresting motion events.
+            # Certain critical events should push the selected image out to the main
+            # console display, and select that outpost view as active; but only when 
+            # the console is not actively being used.
             self.update_thumbnail(image)
             self.update_label()
 
