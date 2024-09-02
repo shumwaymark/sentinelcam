@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import imagezmq
+import imutils
 import json
 import zmq
 import threading
@@ -177,6 +178,7 @@ class PlayerDaemon:
         frametimes = []
         frameidx = 0
         date, event, ring = None, None, None
+        print(f"PlayerDaemon subprocess started.")
         while True:
             cmd = commandQueue.get()
             if len(cmd) > 1 and cmd[0] in [VIEWER, EVENT]:
@@ -333,6 +335,7 @@ class Player:
         outpost_view = None
         current_pump = None
         date_in_use = None
+        print(f"Player thread started.")
         while True:
             datasource = srcQ.get()
             cmd = datasource[0]
@@ -350,8 +353,8 @@ class Player:
                 # from the date index. Retrieve all tracking data and the list of image timestamps.
                 (date, event, size) = cmd[2:]
                 if date != date_in_use:
-                    cwIndx  = datafeed.get_date_index(date)
                     date_in_use = date
+                cwIndx  = datafeed.get_date_index(date)  # TODO: current date is dynamic, not needed for prior 
                 evtSets = cwIndx.loc[cwIndx['event'] == event]
                 if len(evtSets.index) > 0:
                     evt = evtSets.loc[evtSets['type']=='trk'].iloc[0]
@@ -417,7 +420,7 @@ class Player:
 
                                     #  # whenever elapsed time within event > playback elapsed time,
                                     #  # estimate a sleep time to dial back the replay framerate
-                                    #  playback_elaps = datetime.utcnow() - playback_begin
+                                    #  playback_elaps = datetime.now() - playback_begin
                                     #  if frame_elaps > playback_elaps:
                                     #      pause = frame_elaps - playback_elaps
                                     #      time.sleep(pause.seconds + pause.microseconds/1000000)
@@ -497,9 +500,30 @@ class EventListUpdater:
             (viewkey, evtkey) = self._eventQ.get()
             with DataFeed(evtkey[2]) as feed:
                 cwIndx = feed.get_date_index(evtkey[0])
-                evtRec = cwIndx.loc[(cwIndx['event']==evtkey[1])&(cwIndx['type']=='trk')][0]
-                evtRef = (evtRec.timestamp, evtkey[0], evtkey[1], (evtRec.width, evtRec.height))
-                app.outpost_views[viewkey[1]].add_event(evtRef)
+                trkevts = cwIndx.loc[(cwIndx['event']==evtkey[1])&(cwIndx['type']=='trk')]
+                if len(trkevts.index) > 0:
+                    evtRec = trkevts.iloc[0] 
+                    evtRef = (evtRec.timestamp, evtkey[0], evtkey[1], (evtRec.width, evtRec.height))
+                    app.outpost_views[viewkey[1]].add_event(evtRef)
+                else:
+                    print(f"Unexpected: EventListUpdater has no 'trk' data found for event {evtkey[0]}, {evtkey[1]}")
+
+class ThumbnailCollector:
+    def __init__(self, viewlist):
+        self.viewlist = viewlist
+        self._thread = threading.Thread(target=self._run, args=())
+        self._thread.daemon = True
+        self._thread.start()
+    def _run(self):
+        for v in self.viewlist.values():
+            try:
+                receiver = ImageSubscriber(v.publisher, v.view)
+                image = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
+                receiver.close()
+                v.update_thumbnail(image)
+            except Exception:
+                pass
+        print('ThumbnailCollector complete.')
 
 class OutpostView:
     # NOTE: Regarding nomenclature. For SentinelCam, "event" is an outpost video event which
@@ -520,26 +544,38 @@ class OutpostView:
     def store_menuref(self, menuitem) -> None:
         self.menuref = menuitem
 
-    def set_event_list(self, newlist) -> None:
-        with dataLock:
-            self.eventlist = newlist
-        self.update_label()
-
-    def add_event(self, event) -> None:
-        with dataLock:
-            self.eventlist.append(event)
-        self.update_label()
-
     def event_count(self) -> int:
         with dataLock:
             return len(self.eventlist)
 
+    def set_event_list(self, newlist) -> None:
+        with dataLock:
+            self.eventlist = newlist
+            self.update_label()
+
+    def add_event(self, event) -> None:
+        with dataLock:
+            self.eventlist.append(event)
+            receiver = ImageSubscriber(self.publisher, self.view)
+            image = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
+            receiver.close()
+            # TODO: New thumbnail should be a selected image from the actual event, 
+            # assuming something of interest was captured. Effectively: for updating 
+            # the thumbnail / menu refdata, ignore any uninteresting motion events.
+            self.update_thumbnail(image)
+            self.update_label()
+
     def update_label(self) -> None:
         evt_time = ''
-        if self.event_count() > 0:
+        if len(self.eventlist) > 0:
             evt_ts = self.eventlist[-1][0]
             evt_time = evt_ts.to_pydatetime().strftime('%A %B %d, %I:%M %p')
         self.menulabel = f"{self.description}\n{evt_time}"
+        if self.menuref is not None:
+            self.menuref.update()
+
+    def update_thumbnail(self, image):
+        self.thumbnail = imutils.resize(image, width=213)
         if self.menuref is not None:
             self.menuref.update()
 
@@ -627,9 +663,7 @@ class OutpostMenuitem(ttk.Frame):
         self.outpost_view = view
         self.outpost_view.store_menuref(self)
     def select_me(self, event=None):
-        # TODO: This needs to be refactored into standard logic up at the app level
         app.select_outpost_view(self.outpost_view.view)
-        app.show_page(PLAYER_PAGE)
         app.player_panel.play()
     def update(self) -> None:
         self.label.set(self.outpost_view.menulabel)
@@ -786,7 +820,6 @@ class Application(ttk.Frame):
         self.alloc_ring_buffers()
         self.gather_view_definitions()
         self.sourceCmds = queue.Queue()
-        self.select_outpost_view(CFG['default_view'])
         self.wirename = f"{SOCKDIR}/PlayerDaemon"
         self.player_daemon = PlayerDaemon(self.wirename, self._ringbuffers)
         self.sentinel_subscriber = SentinelSubscriber(CFG['sentinel'])
@@ -802,8 +835,9 @@ class Application(ttk.Frame):
         self.player_panel.grid(row=0, column=0)
         self.current_page = PLAYER_PAGE
         self.viewer = Player(self.toggle, self.dataReady, self.sourceCmds, self.wirename, self._rawBuffers)
-        # TODO: Kick-off an initialization thread to populate outpost_views with current thumbnails
         self.master.bind_all('<Any-ButtonPress>', self.reset_inactivity)
+        self.select_outpost_view(CFG['default_view'])
+        ThumbnailCollector(self.outpost_views)
         self.update()
 
     def alloc_ring_buffers(self):
@@ -854,6 +888,7 @@ class Application(ttk.Frame):
         view = self.outpost_views[viewname]
         self.sourceCmds.put(((VIEWER, view.datapump, view.publisher, viewname), view.imgsize))
         self.eventIdx = view.event_count() 
+        self.show_page(PLAYER_PAGE)
         self.view = view
 
     def set_styling(self):

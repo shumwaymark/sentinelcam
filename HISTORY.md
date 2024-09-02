@@ -42,6 +42,13 @@ Much of the following is more properly categorized as still in the *wishlist pha
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.31-alpha - 2024-09-02
+
+### Fixed
+
+- Bug sweep on the **watchtower** wall console. Working now. Has core functionality in place 
+  for both live viewing, and previous event display.
+
 ## 0.0.30-alpha - 2024-08-31
 
 ### Fixed
