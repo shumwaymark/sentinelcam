@@ -68,7 +68,7 @@ class ImageStreamWriter:
         self.node_view = node_view
         self._writeImages = multiprocessing.Value('i', 0)
         self._eventQueue = multiprocessing.Queue()
-        self.process = multiprocessing.Process(target=self._image_subsriber, args=(
+        self.process = multiprocessing.Process(target=self._image_subscriber, args=(
             self._writeImages, self._eventQueue, publisher, node_view[1], imagedir))
         self.process.start()
         logging.debug(f"ImageStreamWriter started for {node_view} pid {self.process.pid}")
@@ -81,7 +81,7 @@ class ImageStreamWriter:
             pass
         return path
 
-    def _image_subsriber(self, writeImages, eventQueue, publisher, view, outdir):
+    def _image_subscriber(self, writeImages, eventQueue, publisher, view, outdir):
         while True:
             eventID = eventQueue.get()
             processEvent = True
