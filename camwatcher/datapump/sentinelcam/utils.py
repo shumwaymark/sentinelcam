@@ -1,6 +1,7 @@
 import os
-from time import time
+import time
 from collections import deque
+from datetime import datetime
 import yaml
 
 class FPS:
@@ -9,7 +10,7 @@ class FPS:
 
     def update(self) -> None:
         # capture current timestamp
-        self._deque.append(time())
+        self._deque.append(time.time())
 
     def reset(self) -> None:
         # restart the measurement
@@ -24,10 +25,10 @@ class FPS:
     
     def get_min(self) -> int:
         # return minute from the last timestamp
-        if len(self._deque) > 0:
-            return time.localtime(self._deque[-1]).tm_min
-        else:
-            return None
+        return time.localtime(self._deque[-1]).tm_min
+        
+    def lastStamp(self) -> datetime.timestamp:
+         return datetime.fromtimestamp(self._deque[-1])
 
 def readConfig(path):
 	cfg = {}
