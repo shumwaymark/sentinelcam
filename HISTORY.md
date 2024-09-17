@@ -32,7 +32,7 @@ Much of the following is more properly categorized as still in the *wishlist pha
     based on the queue length for tasks waiting in that job class.  
 - **datapump** needs data sink storage and data analysis with clean-up and reporting as a nightly 
   task. Will need control panel instrumentation for this as well, including perhaps charts
-  of the storage breakdown, utilization, and available capacity of the data sink. 
+  of the storage breakdown, utilization, and available capacity of the data sinks. 
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
   **imagenode**. 
 
@@ -41,6 +41,22 @@ Much of the following is more properly categorized as still in the *wishlist pha
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.0.32-alpha - 2024-09-16
+
+### Fixed
+
+- Moved results selection and sorting for each frame outisde the **watchtower** event review loop.
+  This allowed for reaching expected performance goals, and required the reintroduction of a delay 
+  between frames to slow down the replay so that it aligns with the capture rate.
+- The **watchtower** now selects an appropriate white or black text color for result labels based 
+  on a lumninace factor of the randomly selected background color assigned to each distinct item.
+
+### Changed
+
+- A complete refactoring of the `DataFeed` for conciseness and clarity. Will now raise a `TimeoutError` 
+  exception for an unresponsive **datapump** connection, including a close and reconnect on the 0MQ socket.
+- Change from UTC to localtime for all timestamps.
 
 ## 0.0.31-alpha - 2024-09-02
 
