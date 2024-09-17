@@ -57,7 +57,7 @@ class JobRequest:
         self.jobTask = taskname
         self.jobClass = 1
         self.jobStatus = JobRequest.Status_QUEUED
-        self.jobSubmitTime = datetime.utcnow()
+        self.jobSubmitTime = datetime.now()
         self.jobStartTime = None
         self.jobEndTime = None
         self.sourceNode = node
@@ -74,7 +74,7 @@ class JobRequest:
             taskList[self.jobID] = self
 
     def registerJOB(self, engine) -> None:
-        self.jobStartTime = datetime.utcnow()
+        self.jobStartTime = datetime.now()
         self.jobStatus = JobRequest.Status_RUNNING
         self.engine = engine
         logging.info(str(self.start_Message('START')))
@@ -82,7 +82,7 @@ class JobRequest:
             jobList[self.jobID] = self
 
     def deregisterJOB(self, status, stats) -> None:
-        self.jobEndTime = datetime.utcnow()
+        self.jobEndTime = datetime.now()
         self.jobStatus = status
         self.image_cnt = stats[0]
         self.image_rate = stats[1]

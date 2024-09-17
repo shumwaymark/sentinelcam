@@ -84,7 +84,7 @@ class FaceList:
         facemarks = (rightEye, leftEye, distance, angle, focus)
         return (facerect, facemarks)
    
-    def set_status(self, idx, status, date=datetime.utcnow().isoformat()[:10]) -> None:
+    def set_status(self, idx, status, date=datetime.now().isoformat()[:10]) -> None:
         # 0=candidate, 1=selected, 2=in_use, 3=revoked, 4=remove
         self.faces.loc[idx, 'status'] = status
         if status == 2:

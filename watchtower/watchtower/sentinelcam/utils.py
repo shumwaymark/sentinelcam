@@ -21,6 +21,13 @@ class FPS:
             return 0.0
         else:
             return (len(self._deque) / (self._deque[-1] - self._deque[0]))
+    
+    def get_min(self) -> int:
+        # return minute from the last timestamp
+        if len(self._deque) > 0:
+            return time.localtime(self._deque[-1]).tm_min
+        else:
+            return None
 
 def readConfig(path):
 	cfg = {}

@@ -54,7 +54,7 @@ class ImageSubscriber:
         while not self._stop:
             imagedata = receiver.recv_jpg()
             if imagedata[0].split('|')[0].split(' ')[1] == self.view:
-                self._data = (datetime.utcnow().isoformat(), imagedata[1])
+                self._data = (datetime.now().isoformat(), imagedata[1])
                 self._data_ready.set()
         receiver.close()
 
@@ -212,7 +212,7 @@ class SentinelTaskData:
         self.status = 'Started'
         self.elapsed = None
         self.framelist = []
-        self._framestart = datetime.utcnow()
+        self._framestart = datetime.now()
         self._startidx = 0
 
     # TODO: Tasks running on the Sentinel can produce multiple result types,
@@ -418,7 +418,7 @@ class SentinelAgent:
         request = {
             'task': self._cfg['post_event'],
             'node': node_view,
-            'date': datetime.utcnow().isoformat()[:10],
+            'date': datetime.now().isoformat()[:10],
             'event': event,
             'sink': self._cfg['datasink'], 
             'pump': self._cfg['datapump'] 
