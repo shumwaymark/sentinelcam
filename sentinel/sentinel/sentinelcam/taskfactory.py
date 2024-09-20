@@ -14,6 +14,7 @@ import imutils
 import simplejpeg
 from collections import namedtuple
 from sentinelcam.utils import readConfig
+from sentinelcam.datafeed import DataFeed
 from sentinelcam.facedata import FaceBaselines, FaceList
 from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace, FaceAligner
 from sentinelcam.tasklibrary import dhash
@@ -335,39 +336,118 @@ class DailyCleanup(Task):
         self.dataFeed = feed
         self.event_date = jobreq.eventDate
         self.performing_deletes = cfg["run_deletes"]
-        self.face_ratio_cutoff = cfg["fail_safe"]['face_ratio']
+        self.face_ratio_cutoff = cfg['face_ratio']
+        self.face_confidence = cfg['confidence']
 
     def pipeline(self, frame) -> bool:
         # This is a one-shot pipeline to process all events within the eventDate 
         cwIndx = self.dataFeed.get_date_index(self.event_date)
         types = cwIndx['type'].value_counts()
-        trk_cnt = types['trk'] if 'trk' in types else 0
-        obj_cnt = types['obj'] if 'obj' in types else 0
-        faces_cnt = types['fd1'] if 'fd1' in types else 0
+        trk_cnt = types.get('trk', 0)  # event count
+        faces_cnt = types.get('fd1', 0)
         if trk_cnt:
             face_ratio = faces_cnt / trk_cnt
             if face_ratio > self.face_ratio_cutoff: 
-                face_evts = cwIndx.loc[cwIndx['type'] == 'fd1']['event'].to_list()
                 trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
+                face_evts = cwIndx.loc[cwIndx['type'] == 'fd1']['event'].to_list()
+                recon_evts = cwIndx.loc[cwIndx['type'] == 'fr1']['event'].to_list()
+                # Purge any events with no detected faces.
                 delete_evts = [e for e in trk_evts if not e in face_evts]
+                # Also include any face events with no recon result.
+                delete_evts.extend([e for e in face_evts if not e in recon_evts])
+                for event in recon_evts:
+                    recon = self.dataFeed.get_tracking_data(self.event_date, event, 'fr1')
+                    recon['proba'] = recon.apply(lambda x: float(str(x['classname']).split()[1][:-1])/100, axis=1)
+                    recon['usable'] = recon.apply(lambda x: str(x['classname'])[-1:], axis=1)
+                    bestfaces = recon.loc[recon['usable'] == '*']
+                    if len(bestfaces.index) > 0:
+                        continue
+                    highscores = recon.loc[recon['proba'] > self.face_confidence]
+                    if len(highscores.index) > 0:
+                        continue
+                    # Purge any event where face recon found only poor quality face images and low confidence recognitions.
+                    delete_evts.append(event)
                 if self.performing_deletes:
                     for event in delete_evts: self.dataFeed.delete_event(self.event_date, event)
-                    stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, events deleted: {len(delete_evts)}"
                 else:
                     for event in delete_evts:
-                        setlen = {'trk': 0, 'obj': 0}
                         trkrs = cwIndx.loc[cwIndx['event'] == event]['type'].to_list()
                         started = cwIndx.loc[cwIndx['event'] == event]['timestamp'].min()
                         imgs = self.dataFeed.get_image_list(self.event_date, event)
-                        for trk in trkrs:
-                            trkset = self.dataFeed.get_tracking_data(self.event_date, event, trk)
-                            setlen[trk] = len(trkset.index)
-                        stats = f"{event} {started}  imgs {len(imgs):3}  trk {setlen['trk']:3}  obj {setlen['obj']:3}"
-                        self.publish(stats)
-                    stats = f"DailyCleanup, events {trk_cnt}, with faces {faces_cnt}, todelete: {len(delete_evts)}, ratio: {round(face_ratio,2)}"
+                        setlen = {trk: len(self.dataFeed.get_tracking_data(self.event_date, event, trk).index) for trk in trkrs}
+                        self.publish(f"DailyCleanup, [{event}] {started}, imgs: {len(imgs):3} trkrs: {setlen}")
+                stats = f"DailyCleanup {self.event_date}, trk: {trk_cnt}, fd1: {faces_cnt}, fr1: {len(recon_evts)}, to delete: {len(delete_evts)} ({self.performing_deletes})"
             else:
-                stats = f"DailyCleanup, delete ratio not met: events {trk_cnt}, with faces {faces_cnt}"
+                stats = f"DailyCleanup, face detection ratio of {round(face_ratio,2)} below cutoff threshold, (trk: {trk_cnt}, fd1: {faces_cnt}), no action taken"
             self.publish(stats)
+        return False
+
+class DiskMonitor(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:    
+        self.startDate = jobreq.eventDate
+        self.feed = feed
+
+    def pipeline(self, frame) -> bool:
+        # Get the complete list of dates available through the DataFeed
+        event_dates = self.feed.get_date_list()
+        target_dates = [d for d in event_dates if d >= self.startDate]  
+        for evtDate in target_dates:  
+            dateTag = ('DiskMonitor', evtDate)
+            try:
+                # Get the camwatcher event index for a given date
+                cwIndx = self.feed.get_date_index(evtDate)
+                trkrs = cwIndx.loc[cwIndx['type'] == 'trk']
+                if len(trkrs.index) > 0:
+                    for evt in trkrs[:].itertuples():
+                        event = evt.event
+                        node = evt.node
+                        view = evt.viewname
+                        imgs = self.feed.get_image_list(evtDate, event)
+                        evt_time, objcnt, persons, tails, tail_time = 0, 0, 0, 0, 0
+                        if len(imgs) > 0:
+                            evtData = cwIndx.loc[cwIndx['event'] == evt]
+                            evtelaps = imgs[-1]-imgs[0]
+                            evt_time = round(evtelaps.seconds + evtelaps.microseconds/100000,2)
+                            trkTypes = [t for t in evtData['type']]
+                            # TODO: Need a full analysis of event data by date. For now,
+                            # just focusing on "person" detections. Looking to trim the 
+                            # tail end of the image captures beyond the last detection.
+                            objs = self.feed.get_tracking_data(evtDate, event, 'obj')
+                            if len(objs.index):
+                                objcnt = len(objs.index)
+                                objs['name'] = objs.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
+                                persons = objs.loc[objs['name'] == 'person']
+                                if len(persons.index) > 0:
+                                    personcnt = len(persons.index)
+                                    lastTrk = persons.iloc[-1].timestamp
+                                    tailend = [t for t in imgs if t > lastTrk]
+                                    tails = len(tailend)
+                                    if tails > 0:
+                                        tailelaps = tailend[-1]-tailend[0]
+                                        tail_time = round(tailelaps.seconds + tailelaps.microseconds/100000,2)
+                                        result = dateTag + (event, node, view, len(imgs), evt_time, len(trkTypes), 
+                                                            objcnt, personcnt, tails, round(tails/len(imgs)*100,2), tail_time) 
+                                        self.publish(result)
+                                        # TODO: Just logging these, so not practical. If trimming the tail of the 
+                                        # image captures from events is to be a thing, need a better solution.
+                                        for img in [t.isoformat() for t in tailend]:
+                                            fpath = "{}/{}_{}_{}.jpg".format(
+                                                evtDate,
+                                                event,
+                                                img[:10], 
+                                                img[11:].replace(':','.')
+                                            )
+                                            self.publish(('DiskMonitor', 'framefile', fpath))
+                else:
+                    result = dateTag + ("ERROR", "camwatcher index is empty")
+                    self.publish(result)
+            except DataFeed.ImageSetEmpty as e:
+                result = dateTag + ("ERROR", f"No image data for {e.date},{e.evt}")
+            except DataFeed.TrackingSetEmpty as e:
+                result = dateTag + ("ERROR", f"No tracking data for {e.date},{e.evt},{e.trk}")
+            except Exception as e:
+                result = dateTag + ("ERROR", f"exception retrieving event data: {str(e)}")
+                self.publish(result)
         return False
 
 class CollectImageSizes(Task):
@@ -464,6 +544,7 @@ def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
         'FaceDataUpdate'         : FaceDataUpdate,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
         'DailyCleanup'           : DailyCleanup,
+        'DiskMonitor'            : DiskMonitor,
         'CollectImageSizes'      : CollectImageSizes,
         'MeasureRingLatency'     : MeasureRingLatency
     }

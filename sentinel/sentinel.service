@@ -1,5 +1,5 @@
 # sentinel service unit file
-# Mark K Shumway, shumway@blog.swanriver.dev
+# Mark K Shumway, mark.shumway@swanriver.dev
 # Defines sentinel.py as a systemd service
 # This file should be copied to /etc/systemd/system as root
 #   e.g. sudo cp sentinel.service /etc/systemd/system

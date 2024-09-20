@@ -1,0 +1,18 @@
+# SentinelCam daily cleanup service unit file
+# Mark K Shumway, mark.shumway@swanriver.dev
+# Sets up sentinel_task.py as a service under a systemd timer
+# This file should be copied to /etc/systemd/system as root:
+#    sudo cp sentinel_cleanup.service /etc/systemd/system
+#    sudo systemctl enable sentinel_cleanup.service
+
+[Unit]
+Description=Sentinel DailyCleanup
+Wants=sentinel_cleanup.timer
+
+[Service]
+User=pi
+Type=oneshot
+ExecStart=/home/pi/.virtualenvs/py3cv4/bin/python -u /home/pi/sentinel/sentinel_task.py -t DailyCleanup
+
+[Install]
+WantedBy=multi-user.target

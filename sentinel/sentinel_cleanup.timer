@@ -1,0 +1,18 @@
+# SentinelCam daily timer unit file
+# Mark K Shumway, mark.shumway@swanriver.dev
+# Setup daily systemd timer for sentinel_cleanup.service
+# This file should be copied to /etc/systemd/system as root:
+#    sudo cp sentinel_cleanup.timer /etc/systemd/system
+#    sudo systemctl enable sentinel_cleanup.timer
+#    sudo systemctl start sentinel_cleanup.timer
+
+[Unit]
+Description=SentinelCam daily cleanup event
+Requires=sentinel_cleanup.service
+
+[Timer]
+Unit=sentinel_cleanup.service
+OnCalendar=*-*-* 00:30:00
+
+[Install]
+WantedBy=timers.target
