@@ -48,9 +48,10 @@ class JobRequest:
     Status_RUNNING = 2 
     Status_DONE = 3
     Status_FAILED = 4
-    Status_CANCELED = 5
+    Status_CHAINED = 5
+    Status_CANCELED = 6
 
-    Status = ["Undefined", "Queued", "Running", "Done", "Failed", "Canceled"]
+    Status = ["Undefined", "Queued", "Running", "Done", "Failed", "Chained", "Canceled"]
 
     def __init__(self, sink, node, date, event, pump, taskname) -> None:
         self.jobID = uuid.uuid1().hex
@@ -92,10 +93,6 @@ class JobRequest:
                 logging.debug(f"strike jobList[{self.jobID}], status now {JobRequest.Status[status]}")
                 del jobList[self.jobID]
 
-    def chainJOB(self, task) -> None:
-         chained = JobRequest(self.dataSink, self.sourceNode, self.eventDate, self.eventID, self.datapump, task)
-         logging.debug(f"Chained job {chained.jobID} added to taskList[]")
-
     def _timeVals(self) -> tuple:
         # Returns tuple with 3 formatted strings, or None when factor missing
         start_time, end_time, elapsed_time = None, None, None
@@ -136,26 +133,30 @@ class JobRequest:
     def summary_JSON(self) -> str:
         (start_time, end_time, elapsed_time) = self._timeVals()
         return json.dumps({
-            'Node': self.sourceNode,
-            'Date': self.eventDate,
-            'Task': self.jobTask,
-            'DataSink': self.dataSink,
-            'Status': JobRequest.Status[self.jobStatus],
-            'SubmitTime': self.jobSubmitTime.isoformat(),
-            'StartTime': start_time,
-            'EndTime': end_time,
-            'ElapsedTime': elapsed_time,
-            'TaskEngine': self.engine,
-            'EventID': self.eventID,
-            'JobID': self.jobID,
-            'ImageCnt': self.image_cnt,
-            'ImageRate': self.image_rate
+            'flag': 'JOB',
+            'node': self.sourceNode,
+            'date': self.eventDate,
+            'task': self.jobTask,
+            'class': self.jobClass,
+            'sink': self.dataSink,
+            'status': JobRequest.Status[self.jobStatus],
+            'submited': self.jobSubmitTime.isoformat(),
+            'started': start_time,
+            'ended': end_time,
+            'elapsed': elapsed_time,
+            'engine': self.engine,
+            'event': self.eventID,
+            'jobid': self.jobID,
+            'images': self.image_cnt,
+            'rate': self.image_rate
         })
     
     def full_history_report() -> None:
         with jobLock:
+            logging.info("Start of history.")
             for jobreq in taskList.values():
                 logging.info(jobreq.summary_JSON())
+        logging.info("End of history.")
 
 class RingWire:
     def __init__(self, socketDir, engineName) -> None:
@@ -344,7 +345,7 @@ class JobTasking:
             failCnt = 0
             while failCnt < TaskEngine.FAIL_LIMIT:
                 if taskQ.empty():
-                    time.sleep(1)
+                    time.sleep(0.05)
                 else:
                     self.jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
@@ -478,10 +479,10 @@ class TaskEngine:
     TaskSTARTED = 2
     TaskDONE = 3
     TaskFAIL = 4
-    TaskCANCELED = 5
-    TaskWARNING = 6
-    TaskERROR = 7
-    TaskCHAIN = 8
+    TaskCHAIN = 5
+    TaskCANCELED = 6
+    TaskWARNING = 7
+    TaskERROR = 8
     TaskBOMB = -1
 
     def __init__(self, engineName, config, ringCFG, taskCFG, pump, asyncSUB) -> None:
@@ -514,16 +515,10 @@ class TaskEngine:
         return self.job_classes
 
     def getJobID(self) -> str:
-        if self.jobreq:
-            return self.jobreq.jobID
-        else:
-            return None
+        return self.jobreq.jobID if self.jobreq else None
         
     def getJobRequest(self) -> JobRequest:
-        if self.jobreq:
-            return self.jobreq
-        else:
-            return None
+        return self.jobreq
  
     def newEvent(self, date, evt, wh) -> None:
         self.jobreq.eventDate = date
@@ -537,7 +532,7 @@ class TaskEngine:
                 self.imagesize = jobreq.camsize
                 self.ringBuffer = self.ringbuffers[self.imagesize]
             else:
-                logging.error("{}: RingBuffer definition {} not supported ({},{},{})".format(
+                logging.error("engine[{}]: RingBuffer definition {} not supported ({},{},{})".format(
                     jobreq.engine, jobreq.camsize, jobreq.dataSink, jobreq.eventDate, jobreq.eventID)
                 )
                 confirm_start = False
@@ -616,6 +611,25 @@ class JobManager:
             jreq.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
             self.ondeck[jreq.jobClass] = None
 
+    def _chainJob(self, jobid, task):
+        logging.debug(f"Job {jobid} requested chain to {task}")
+        jreq = taskList[jobid]
+        engine = self.engines[jreq.engine]
+        chained = JobRequest(jreq.dataSink, 
+                             jreq.sourceNode, 
+                             jreq.eventDate, 
+                             jreq.eventID, 
+                             jreq.datapump, 
+                             task)
+        chained.camsize = jreq.camsize
+        chained.jobClass = self.taskmenu[task]['class']
+        if chained.jobClass in engine.getClasses():
+            task_stats = (engine.get_image_cnt(), engine.get_image_rate())
+            jreq.deregisterJOB(TaskEngine.TaskDONE, task_stats)
+            chained.registerJOB(jreq.engine)
+            if not engine.start_job(chained):
+                chained.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
+
     def _getFrameDimensons(self, jreq) -> tuple:
         datafeed = self.datafeeds[jreq.datapump]
         cwIndx = datafeed.get_date_index(jreq.eventDate)
@@ -688,9 +702,19 @@ class JobManager:
             logging.error(f"_get_frame(), abandon cursor, ({jreq.eventDate},{jreq.eventID},{frametime}): {str(e)}")
             taskEngine.cursor = None
 
+    def _ondeck_status(self): # debug helper
+        now_ondeck = {}
+        for c in self.ondeck.keys():
+            if self.ondeck[c] is None:
+                now_ondeck[c] = None
+            else:
+                now_ondeck[c] = self.ondeck[c].jobID
+        return now_ondeck
+
     def _jobThread(self) -> None:
         logging.debug(f"Job Manager thread started.")
         while not self._stop:
+            # Have a task start request or job status update?
             if not taskFeed.empty():
                 (tag, msg) = taskFeed.get()
                 logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
@@ -703,14 +727,20 @@ class JobManager:
                 elif tag == TaskEngine.TaskSTARTED:
                     jobreq = taskList[msg]
                     self.ondeck[jobreq.jobClass] = None
+                elif tag == TaskEngine.TaskCHAIN:
+                    (jobid, task) = msg
+                    jobreq = taskList[jobid]
+                    self._chainJob(jobid, task)
                 elif tag in [TaskEngine.TaskDONE,
                              TaskEngine.TaskFAIL,
                              TaskEngine.TaskCANCELED]:
                     jobreq = taskList[msg]
                     engine = self.engines[jobreq.engine]
-                    engine.jobreq = None
-                    task_stats = (engine.get_image_cnt(), engine.get_image_rate())
-                    jobreq.deregisterJOB(tag, task_stats)
+                    if engine.jobreq.jobID == msg:
+                        engine.jobreq = None
+                        task_stats = (engine.get_image_cnt(), engine.get_image_rate())
+                        jobreq.deregisterJOB(tag, task_stats)
+                        logging.debug(f"Engine {engine.getName()} gone idle.")
                     if self.ondeck[jobreq.jobClass] == jobreq:
                         self.ondeck[jobreq.jobClass] = None
                 elif tag == TaskEngine.TaskBOMB:
@@ -721,7 +751,9 @@ class JobManager:
                 else:
                     logging.error(f"Undefined status '{tag}' for job {msg}")
                 taskFeed.task_done()
+                logging.debug(f"Now ondeck {str(self._ondeck_status())}")
             
+            # Service the ring buffers for running tasks.
             runningTasks = 0
             for engineName in self.engines:
                 engine = self.engines[engineName]
@@ -750,10 +782,22 @@ class JobManager:
                         for jobclass in engine[1].getClasses():
                             if self.ondeck[jobclass] is not None:
                                 jreq = self.ondeck[jobclass]
-                                logging.debug(f"Found on deck for class {jobclass}: {jreq.jobID}")
-                                self._releaseJob(jreq.jobID, engine[0])
-                                break
-                # Assign next queued job to any open on-deck classes 
+                                # confirm that another engine has not already been assigned this request
+                                if jreq.jobID not in [taskengine.getJobID() for taskengine in self.engines.values()]:
+                                    logging.debug(f"Found on deck for class {jobclass}: {jreq.jobID}")
+                                    self._releaseJob(jreq.jobID, engine[0])
+                                    break
+                # Assign next pending job request to any open on-deck matching class. Ventilation goes here. 
+                # TODO: When running in real-time, need to implement a priority based on the event start time 
+                # and/or task type for waiting requests. Is it best to gather results in the order events happened, 
+                # or better to give priority to the most recent event, even though the prior event has not yet been 
+                # fully analyzed? i.e. Perhaps tasks for an "event in progress" should always receive the highest 
+                # priority. Might not be the best approach for a fast-moving environment where multiple views could 
+                # each be triggering events around the same time. Where should attention be focused? The risk is to
+                # mostly be playing a game of catch-up, always behind what's happening in real time, with limited
+                # understanding of what just occured. Each view could be producing requests for the same event as 
+                # action progresses from one view to another. Alternatively, they could be completely unrelated, 
+                # where distinct events are being simultaneously captured from one or more non-adjacent views.
                 for jobclass in self.ondeck:
                     if self.ondeck[jobclass] is None:
                         with jobLock:
@@ -763,8 +807,9 @@ class JobManager:
                             logging.debug(f"Queue up for ondeck, class {jobclass}: {pending[0]}")
                             taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
 
-            if runningTasks == 0:
-                time.sleep(1)
+            if taskFeed.empty() and runningTasks == 0:
+                # nothing currently running or waiting to run
+                time.sleep(0.05)
 
     def close(self):
         self._stop = True
@@ -780,7 +825,8 @@ async def task_loop(asyncREP, taskCFG):
             request = json.loads(payload)
             if 'task' in request:
                 task = request['task']
-                if task == 'HISTORY':   JobRequest.full_history_report()
+                if task == 'HISTORY':
+                    JobRequest.full_history_report()
                 elif task == 'STATUS':  
                     pass
                     #   Stats:  Job Count, Failures, average run time
@@ -828,13 +874,10 @@ async def task_feedback(asyncSUB):
             if msgTag in [TaskEngine.TaskSTARTED,
                           TaskEngine.TaskDONE,
                           TaskEngine.TaskFAIL,
+                          TaskEngine.TaskCHAIN,
                           TaskEngine.TaskCANCELED]:
                 logging.debug(f"{taskMsg}: status update {JobRequest.Status[msgTag]}.")
                 taskFeed.put((msgTag, taskMsg))
-            elif msgTag == TaskEngine.TaskCHAIN:
-                (jobid, task) = taskMsg
-                taskList[jobid].chainJOB(task)
-                logging.debug(f"Job {jobid} chained to Task {task}")
             elif msgTag == TaskEngine.TaskWARNING:
                 logging.warning(str(taskMsg))
             elif msgTag == TaskEngine.TaskERROR:
