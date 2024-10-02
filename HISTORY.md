@@ -42,6 +42,26 @@ Much of the following is more properly categorized as still in the *wishlist pha
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.0.33-alpha - 2024-10-01
+
+### Fixed
+
+- Vaccinations against zombie subscriber syndrome.
+- Cleaned up **sentinel** job history dump.
+- Correct tracking timestamps published for **outpost** *DepthAI* pipelines.
+- Addressed oversleeping in the **sentinel** Task Engines and Job Monitor thread.
+
+### Changed
+
+- Include face recon status as criterion in **sentinel** `DailyCleanup` task. See explanation in
+  the YAML configuration file within the Tasks folder.
+- Refactored **sentinel** task chaining logic for efficiency. Execute chained tasks immediately on
+  the same engine if the target job class is supported. 
+
+### Added
+
+- Added systemd timer setups for daily maintenance **sentinel** task.
+
 ## 0.0.32-alpha - 2024-09-16
 
 ### Fixed
