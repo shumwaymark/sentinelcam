@@ -106,6 +106,9 @@ class ImageStreamWriter:
             except Exception as ex:
                 print(f"ImageStreamWriter failure {self.node_view}")
                 traceback.print_exc()  # see syslog for traceback
+            finally:
+                receiver.close()
+                self.stop()
 
     def start(self, eventID):
         self._writeImages.value = 1
@@ -226,7 +229,7 @@ class SentinelTaskData:
         self.view = view
 
     def get_taskref(self) -> tuple:
-        return (self.node, self.view, self.jobID, self.trkType)
+        return (self.node, self.view, self.eventID, self.trkType)
     
     def done(self, status, elapsed) -> None:
         self.status = status
@@ -281,29 +284,25 @@ class SentinelAgent:
             topic, msg = sentinel_log.recv_multipart()
             topics = topic.decode('utf8').strip().split('.')
             message = msg.decode('ascii')
-            if topics[1] == 'INFO':
+            if topics[1] == 'INFO' and message[0] == '{':
                 try:
                     logdata = json.loads(message)
                     if 'flag' in logdata:
-                        # This is a SUBMIT, START, or STOP
+                        # This is a SUBMIT, START, or EOJ
                         _flag = logdata['flag']
                         _jobid = logdata['jobid']
-                        if _flag in ['SUBMIT', 'START'] and logdata['sink'] == config['datasink']:
+                        if _flag == 'START' and logdata['sink'] == config['datasink']:
                             # Event data belongs here, it is managed by this camwatcher instance.
                             _task = logdata['task']
                             _from = logdata['from']
                             _date = logdata['date']
                             _event = logdata['event']
                             logging.debug(f"{_flag} _task[{_task}] _from[{_from}] _date[{_date}] _event[{_event}] _job[{_jobid}]")
-                            if _flag == 'SUBMIT':
-                                pass             # Ignoring SUBMIT for now, does not seem to be needed for anything?
-                            else:                # else job has a START, begin tracking this result set for storage.
-
-                                runningJobs[_jobid] = SentinelTaskData(_jobid, _task, _from, _date, _event)
-                        else:
+                            runningJobs[_jobid] = SentinelTaskData(_jobid, _task, _from, _date, _event)
+                        elif _flag == 'EOJ':
                             if _jobid in runningJobs:
                                 task_data = runningJobs[_jobid]
-                                logging.debug(f"STOP _job[{_jobid}] status[{logdata['status']}] elapsed[{logdata['elapsed']}]")
+                                logging.debug(f"EOJ _job[{_jobid}] status[{logdata['status']}] elapsed[{logdata['elapsed']}]")
                                 runningJobs[_jobid].done(logdata['status'], logdata['elapsed'])
                                 if task_data.csvOpened:
                                     # EOJ, close the CSV file
@@ -315,12 +314,12 @@ class SentinelAgent:
 
                             logging.info("EOJ ({}, {}), elapsed time: {} {}, Target sink ({}), source ({}).".format(
                                 logdata['task'], logdata['status'], logdata['elapsed'], logdata['taskstats'], logdata['sink'], logdata['from']))
+                        elif _flag != 'SUBMIT':
+                            logging.info(message)
 
                     elif 'jobid' in logdata:
                         _jobid = logdata['jobid']
-                        if _jobid not in runningJobs:
-                            logging.info(message)
-                        else:
+                        if _jobid in runningJobs:
                             task_data = runningJobs[_jobid]
                             _event = task_data.eventID
                             _refkey = logdata['refkey']
@@ -364,7 +363,7 @@ class SentinelAgent:
                                     csvQueue.put(_startBlock)
                                     task_data.csvOpened = True
                                 else:
-                                    logging.warning(f"No images loaded, task {task_data.get_taskref()} ignored")
+                                    logging.error(f"No images loaded, task {task_data.get_taskref()} ignored")
                                     del runningJobs[_jobid]
                                     continue
                             # map frame offset to the correct timetamp 
@@ -384,18 +383,23 @@ class SentinelAgent:
                             }
                             _dataBlock = (_taskref, _csvData)
                             csvQueue.put(_dataBlock)
+                        else:
+                            logging.info(message)
                     else:
                         logging.info(message)
 
-                except (KeyError, ValueError):  # Yes, this is luxuriously lazy. Most of the high-volume logging content
-                    logging.info(message)       # should be JSON. Some status tracking is intended to be human readable.
+                except ValueError as e:
+                    logging.error(f"JSON exception {str(e)}, reading from log: {message}")
+                except KeyError as keyval:
+                    logging.error(f"Invalid logging record, '{keyval}' missing: {message}")
                 except Exception:  
-                    logging.exception(f"Exception parsing sentinel log '{message}'")
+                    logging.exception(f"Exception parsing sentinel log: {message}")
             else:
                 if topics[1]   == 'ERROR'   : logging.error(message)
                 elif topics[1] == 'WARNING' : logging.warning(message)
                 elif topics[1] == 'CRITICAL': logging.critical(message)
                 elif topics[1] == 'DEBUG'   : logging.debug(message)
+                elif topics[1] == 'INFO'    : logging.info(message)
                 else:
                     logging.critical(f"Sentinel logging disruption: {topics}")
 
@@ -526,7 +530,7 @@ async def control_loop(control_socket, log_socket):
             logging.error(f"Invalid camera handoff, missing '{keyval}' in message: '{msg[1]}'")
         except Exception as e:  
             result = 'Error'
-            logging.error(f"CamWatcher subscription failure {str(e)}")
+            logging.error(f"CamWatcher control message failure, '{msg}': {str(e)}")
         logging.debug(f"CamWatcher control port reply {result}")
         await control_socket.send(result.encode("ascii"))
 
