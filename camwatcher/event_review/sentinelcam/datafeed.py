@@ -162,7 +162,6 @@ class DataFeed(imagezmq.ImageSender):
                     time.sleep(0.001)
                 if not self._happy:
                     break
-        self.zmq_socket.close()
 
     def pump_action(self, cmd, request) -> object:
         self._haveResult.clear()
@@ -172,7 +171,9 @@ class DataFeed(imagezmq.ImageSender):
             self._happy = False
             timedout = f"Timed out reading from datapump {self._pump}"
             logging.error(timedout)
-            self.init_reqrep(self._pump)
+            self.zmq_socket.close()
+            self.zmq_socket = self.zmq_context.socket(zmq.REQ)
+            self.zmq_socket.connect(self._pump)
             self._registerPoller()
             self._startThread()            
             raise TimeoutError(timedout)

@@ -77,7 +77,7 @@ if __name__ == "__main__":
                 text = "FPS: {:.2f}/{:.2f}".format(receiver.velocity.fps(),viewfps.fps()) 
                 cv2.putText(image, text, (10, image.shape[0]-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)            
-            cv2.imshow(msg, image)
+            cv2.imshow(msg.split('|')[0], image)
             cv2.waitKey(1)
     except (KeyboardInterrupt, SystemExit):
         print('Exit due to keyboard interrupt')

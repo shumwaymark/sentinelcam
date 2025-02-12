@@ -16,7 +16,7 @@ from flask import render_template, g
 import cv2
 import numpy as np
 import simplejpeg
-from datafeed import DataFeed
+from sentinelcam.datafeed import DataFeed
 
 app = Flask(__name__) # initialize a flask object
 
@@ -70,17 +70,23 @@ def create_tiny_jpeg() -> bytes:
 
 class TextHelper:
     def __init__(self, camevt) -> None:
-        self._textColor = (0, 0, 0)
         self._lineType = cv2.LINE_AA
         self._textType = cv2.FONT_HERSHEY_SIMPLEX
+        self._textSize = 0.5
+        self._thickness = 1
+        self._textColors = {}
         self._bboxColors = {}
         for objid in camevt['objid'].unique():
-            self._bboxColors[objid] = np.random.randint(256, size=3)
+            self._bboxColors[objid] = tuple(int(x) for x in np.random.randint(256, size=3))
+            self._textColors[objid] = self.setTextColor(self._bboxColors[objid])
+    def setTextColor(self, bgr) -> tuple:
+        luminance = ((bgr[0]*.114)+(bgr[1]*.587)+(bgr[2]*.299))/255
+        return (0,0,0) if luminance > 0.5 else (255,255,255)
     def putText(self, frame, objid, text, x1, y1, x2, y2):
-        color = tuple(int(x) for x in self._bboxColors[objid])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.rectangle(frame, (x1, (y1 - 28)), ((x1 + 110), y1), color, cv2.FILLED)
-        cv2.putText(frame, text, (x1 + 5, y1 - 10), self._textType, 0.5, self._textColor, 1, self._lineType)
+        (tw, th) = cv2.getTextSize(text, self._textType, self._textSize, self._thickness)[0]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), self._bboxColors[objid], 2)
+        cv2.rectangle(frame, (x1, (y1 - 28)), ((x1 + tw + 10), y1), self._bboxColors[objid], cv2.FILLED)
+        cv2.putText(frame, text, (x1 + 5, y1 - 10), self._textType, self._textSize, self._textColors[objid], self._thickness, self._lineType)
 
 def generate_video(date, event, type='trk'):
     _cwFeed = DataFeed(cfg["datapump"])
@@ -94,7 +100,7 @@ def generate_video(date, event, type='trk'):
             tracker = _cwEvt[:].itertuples()
             trk = next(tracker)
             trkr_time = trk.timestamp
-            playback_begin = datetime.utcnow()
+            playback_begin = datetime.now()
             for frame_time in image_list:
                 jpeg = _cwFeed.get_image_jpg(date, event, frame_time)
                 frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
@@ -112,7 +118,7 @@ def generate_video(date, event, type='trk'):
                         objects = {}
 
                 # draw timestamp on image frame
-                tag = "{} UTC".format(frame_time.isoformat())
+                tag = f"{format(frame_time.isoformat())}"
                 cv2.putText(frame, tag, (30, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
 
                 # re-encode the frame back into JPEG format
@@ -121,7 +127,7 @@ def generate_video(date, event, type='trk'):
 
                 # whenever elapsed time within event > playback elapsed time,
                 # estimate a sleep time to dial back the replay framerate
-                playback_elaps = datetime.utcnow() - playback_begin
+                playback_elaps = datetime.now() - playback_begin
                 if frame_elaps > playback_elaps:
                     pause = frame_elaps - playback_elaps
                     time.sleep(pause.seconds + pause.microseconds/1000000)

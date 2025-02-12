@@ -15,19 +15,19 @@
     </script>
   </head>
   <body>
-    <h1>Sentinelcam Video Review</h1>
+    <h1>Sentinelcam Event Review</h1>
     <table>
       <tr>
         <td><img src="{{ url_for('video_display', date=date, event=event, type=type) }}"></td>
         <td>
           <form name="controls">
-            <p><strong>Select Date</strong></p>
+            <p><strong>Date selection</strong></p>
             <select name="pickdate" onchange="change_date()">
               {% for d in datelist %}
                 <option value="{{ d[0] }}"{% if d[0] is eq(date) %} selected{% endif %}>{{ d[1] }}</option>
               {% endfor %}
             </select>
-            <p><strong>Select Event</strong></p>
+            <p><strong>Events and tracking sets</strong></p>
             <select name="pickevent" size="15" onchange="change_event()">
               {% for e in eventlist %}
                 <option value="{{ e[0]+'/'+e[1] }}"{% if e[0] is eq(event) and e[1] is eq(type) %} selected{% endif %}>{{ e[2] }}</option>
@@ -43,7 +43,7 @@
       <li>Type {{ type }}</li>
       <li>Node {{ node }}</li>
       <li>View {{ view }}</li>
-      <li>Start time {{ start }} UTC</li>
+      <li>Start time {{ start }}</li>
     </ul>
   </body>
 </html>
