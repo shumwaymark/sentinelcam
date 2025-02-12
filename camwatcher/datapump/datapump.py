@@ -1,13 +1,11 @@
 import io
 import os
+import json
 import logging
-import logging.handlers
+import logging.config
 from datetime import datetime
 from time import sleep
 import pickle 
-import queue
-import subprocess
-import threading
 import traceback
 import zlib
 import zmq
@@ -118,51 +116,6 @@ class DataPump(imagezmq.ImageHub):
         self.zmq_socket.send_json(md, flags | zmq.SNDMORE)
         return self.zmq_socket.send(z, flags, copy=copy, track=track)
 
-class BackgroundTasks:
-    def __init__(self, tasks, facelist, csvdir, imgdir):
-        self._tasks = tasks
-        self._facelist = facelist
-        self._csvdir = csvdir
-        self._imgdir = imgdir
-        self._stop = False
-        self._thread = threading.Thread(target=self._run, args=())
-        self._thread.daemon = True
-        self._thread.start()
-
-    def _getDelCmds(self, event) -> list:
-        cmdlist = []
-        # delete event entry from date index
-        cmdlist.append((False, ["sed", "-i", f"/{event[1]}/d", os.path.join(self._csvdir, event[0], 'camwatcher.csv')])) 
-        # purge event data
-        cmdlist.append((True, f"rm {os.path.join(self._csvdir, event[0], ''.join([event[1],'*']))}"))
-        # purge captured image data
-        cmdlist.append((True, f"ls {os.path.join(self._imgdir, event[0], ''.join([event[1],'*']))} | xargs rm"))
-        return cmdlist
-    
-    def _run(self):
-        logging.debug("Background Tasks thread started")
-        while not self._stop:
-            if self._tasks.empty():
-                sleep(1)
-                continue
-            while not self._tasks.empty():
-                (cmd, args) = self._tasks.get()
-                logging.debug(f"background task '{cmd}': {args}")
-                try:
-                    if cmd == 'del':
-                        for step in self._getDelCmds(args):
-                            logging.debug(f"Event deletion: {step}")
-                            result = subprocess.run(step[1], shell=step[0], capture_output=True, text=True)
-                            if result.returncode != 0:
-                                logging.error(f"Deletion error {result.returncode} for {args[0]}/{args[1]} on {step[0]}: {result.stderr}")
-                except Exception as ex:
-                    logging.error(f"Background Tasks unhandled exception: {str(ex)}")
-                self._tasks.task_done()
-
-    def close(self):
-        self._stop = True
-        self._thread.join()
-
 def create_tiny_jpeg() -> bytes:
     pixel = np.zeros((1, 1, 3), dtype=np.uint8)  # 1-pixel image
     buffer = simplejpeg.encode_jpeg(pixel)
@@ -170,14 +123,15 @@ def create_tiny_jpeg() -> bytes:
 
 def main():
     CFG = readConfig(os.path.join(os.path.expanduser("~"), "datapump.yaml"))
-    start_logging(CFG['logfile'])
+    logging.config.dictConfig(CFG['logconfig'])
+    log = logging.getLogger()
     tinyJPG = create_tiny_jpeg()
-    taskQueue = queue.Queue()
     facelist = FaceList(CFG['facefile'])
-    bgTasks = BackgroundTasks(taskQueue, facelist, CFG['datafolder'], CFG['imagefolder'])
     cData = CamData(CFG['datafolder'], CFG['imagefolder'])
     pump = DataPump(f"tcp://*:{CFG['control_port']}")
-    logging.info("datapump response loop starting")
+    camwatcher = zmq.Context.instance().socket(zmq.REQ)
+    camwatcher.connect(CFG['camwatcher'])
+    log.info("datapump response loop starting")
     # TODO: Graceful shutdown / termination handling needed. 
     # Need a policy for sending meaningful response codes back to the DataFeed.
     # TODO: Need disk and data analysis with clean-up and reporting as a nightly task.
@@ -231,37 +185,29 @@ def main():
                     if facelist.event_locked(date, event):
                         reply = b'Locked'
                     else:
-                        task = ('del', (date, event))
-                        taskQueue.put(task)
                         reply = b'OK'
+                        camwatcher_control = {}
+                        camwatcher_control['cmd'] = 'DelEvt'
+                        camwatcher_control['date'] = date
+                        camwatcher_control['event'] = event
+                        camwatcher.send(json.dumps(camwatcher_control).encode('ascii'))
+                        camwatcher.recv()
                 elif request['cmd'] == 'HC':  # health check
                     reply = b'OK'
                 else:
-                    logging.warning(f"Unrecognized command: {request}")
+                    log.warning(f"Unrecognized command: {request}")
                     reply = b'Error'
             except KeyError:
-                logging.warning(f"Malformed request: {request}")
+                log.warning(f"Malformed request: {request}")
                 reply = b'Error'
             except Exception as e:
-                logging.error(f'unexpected exception: {str(e)}')
+                log.error(f'unexpected exception: {str(e)}')
                 traceback.print_exc()
                 reply = b'Error'
         else:
-            logging.warning(f"Invalid request: {request}")
+            log.warning(f"Invalid request: {request}")
             reply = b'Error'
         pump.send_reply(reply) 
-
-    bgTasks.close() 
-
-def start_logging(logfile):
-    log = logging.getLogger()
-    handler = logging.handlers.RotatingFileHandler(logfile,
-        maxBytes=524288, backupCount=5)
-    formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
-    handler.setFormatter(formatter)
-    log.addHandler(handler)
-    log.setLevel(logging.WARN)
-    return log
 
 if __name__ == "__main__":
     main()
