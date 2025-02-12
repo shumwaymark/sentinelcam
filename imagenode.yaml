@@ -1,9 +1,8 @@
-# Settings file imagenode.yaml -- version 4 for sentinelcam testing
+# Settings file imagenode.yaml -- version 7 for sentinelcam testing
 ---
 node:
-  name: outpost
+  name: alpha5
   heartbeat: 10
-  patience: 5
   REP_watcher: False                 # Not recommended for sentinelcam
   queuemax: 50
   send_type: jpg
@@ -13,39 +12,36 @@ hub_address:
   H1: tcp://data1:5555
 cameras:
   P1:
-    viewname: PiCamera
+    viewname: PiCam3
     resolution: (640, 480)
     framerate: 32
     vflip: False
+    threaded_read: False             # use direct image retrieval through picamera2 library
     detectors:
-      outpost:
-        publish_cam: 5567            # activate image frame publishing
-        publish_log: 5565            # activate logfile publishing over ZMQ
-        camwatcher: tcp://data1:5566 # connect to camwatcher control port
-        spyglass: (640, 480)         # must match camera "resolution" above
-        accelerator: none            # [none, ncs2, coral]
-        tracker: dlib                # [dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
-        detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
-        skip_factor: 25
-        mobilenetssd:
-            prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-            model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
-            confidence: 0.5
-            target: cpu     # [cpu, myriad]
-        yolov3:  
-            yolo_path: /home/pi/imagenode/outpost/yolo-coco
-            confidence: 0.5
-            threshold: 0.3
-            consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
-        ROI: (10,10),(85,80)
-        draw_roi: ((255,0,0),1)
-        draw_time: ((255,0,0),1)  
-        draw_time_org: (5,5)  
-        draw_time_fontScale: 0.5  
-sensors:
-  T1:
-    name: Temperature
-    type: DS18B20
-    gpio: 4
-    read_interval_minutes: 10  # check temperature every 10 minutes
-    min_difference: 1          # send reading when changed by 1 degree
+        outpost:
+            publish_cam: 5567        # ZMQ port for image frame publishing
+            publish_log: 5565        # ZMQ port for log publishing, must match logconfig below
+            logconfig:               # logging configuration dictionary 
+                version: 1
+                handlers:
+                    zmq:
+                        class: zmq.log.handlers.PUBHandler
+                        interface_or_socket: tcp://*:5565
+                        root_topic: alpha5
+                        level: INFO
+                root:
+                    handlers: [zmq]
+                    level: INFO
+            camwatcher: tcp://data1:5566         # optional self-introduction to a running camwatcher 
+            spyglass: (640, 480)                 # must match camera "resolution" above
+            detectobjects: mobilenetssd          # [mobilenetssd, yolov3]
+            accelerator: none                    # [none, ncs2, coral]
+            tracker: none                        # [none, dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
+            sentinel_tasks:
+                person: GetFaces2                # Priority 1 sentinel task submission for "person" detections
+                default: MobileNetSSD_allFrames  # optional catch-all task, submitted with priority 2
+            mobilenetssd:
+                prototxt_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+                model_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+                confidence: 0.5
+                target: cpu     # [cpu, myriad]
