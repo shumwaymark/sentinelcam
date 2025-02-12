@@ -7,7 +7,10 @@ all_frames: False         # restrict face detection to images with 'person' dete
 camwatcher_update: True
 
 dnn_face: 
+    confidence: 0.0
+    # OpenCV DNN
     prototxt_path: /home/pi/sentinel/models/opencv_dnn_face/deploy.prototxt
     model_path: /home/pi/sentinel/models/opencv_dnn_face/res10_300x300_ssd_iter_140000.caffemodel
     target: myriad  # [cpu, myriad]
-    confidence: 0.5
+    # Google Coral USB 
+    edgetpu_model: /usr/share/edgetpu/examples/models/ssd_mobilenet_v2_face_quant_postprocess_edgetpu.tflite

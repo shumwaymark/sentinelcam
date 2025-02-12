@@ -7,7 +7,11 @@ trk_type: obj
 camwatcher_update: True
 
 mobilenetssd: 
-    prototxt_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-    model_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
-    target: myriad  # [cpu, myriad]
     confidence: 0.5
+    # OpenCV DNN
+    prototxt_path: /home/ops/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/ops/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    target: myriad  # [cpu, myriad]
+    # Google Coral USB 
+    edgetpu_model: /usr/share/edgetpu/examples/models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite
+    model_labels: /usr/share/edgetpu/examples/models/coco_labels.txt

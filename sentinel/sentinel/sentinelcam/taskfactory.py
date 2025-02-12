@@ -11,12 +11,12 @@ import pandas as pd
 import pickle
 import time
 import imutils
-import simplejpeg
+#import simplejpeg
 from collections import namedtuple
 from sentinelcam.utils import readConfig
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.facedata import FaceBaselines, FaceList
-from sentinelcam.tasklibrary import MobileNetSSD, OpenCV_dnnFace, OpenFace, FaceAligner
+from sentinelcam.tasklibrary import MobileNetSSD, FaceDetector, FaceAligner, OpenFace
 from sentinelcam.tasklibrary import dhash
 
 class Task:
@@ -57,7 +57,7 @@ class MobileNetSSD_allFrames(Task):
 
 class GetFaces(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
-        self.fd = OpenCV_dnnFace(cfg['dnn_face'], accelerator)
+        self.fd = FaceDetector(cfg['dnn_face'], accelerator)
         self.cwUpd = cfg['camwatcher_update']
         self.refkey = cfg['trk_type']
         self.allFrames = cfg['all_frames']
@@ -108,20 +108,21 @@ class GetFaces(Task):
                     else:
                         return False
                 search_not_completed = True
-                while self.trkRec.timestamp <= self.frametime:
-                    # There could be multiple persons detected in the image, so will have a 
-                    # tracking record for each. Once face detection has executed for this frame,
-                    # continue iterating through the tracker until next timestamp found.
-                    if search_not_completed:
-                        faces = self.fd.detect(image)  # finds every face in the image
-                        if len(faces) > 0: self._publish_face_rects(faces)
-                        search_not_completed = False
-                        self._search_cnt += 1
-                    try:
+                try:
+                    while self.trkRec.timestamp <= self.frametime:
+                        # There could be multiple persons detected in the image, so will have a 
+                        # tracking record for each. Once face detection has executed for this frame,
+                        # continue iterating through the tracker until next timestamp found.
+                        if search_not_completed:
+                            faces = self.fd.detect(image)  # finds every face in the image
+                            if len(faces) > 0: self._publish_face_rects(faces)
+                            search_not_completed = False
+                            self._search_cnt += 1
                         self.trkRec = next(self.cursor)
-                    except StopIteration:
-                        return False                 # Reached last detected person, end the task.
-                self.frametime = next(self.frames)   # Internal tracking for timestamp of current frame.
+                    # Internal tracking for timestamp of current frame.
+                    self.frametime = next(self.frames)
+                except StopIteration:
+                    return False      # Reached last detected person, end the task.
         return True
     
     def finalize(self) -> None:
@@ -479,7 +480,8 @@ class CollectImageSizes(Task):
                             try:
                                 jpeg = self.feed.get_image_jpg(evtDate, event, imgs[0])
                                 if jpeg is not None:
-                                    frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
+                                    #frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
+                                    frame = cv2.imdecode(np.frombuffer(jpeg, dtype='uint8'), -1)
                                     imgSize = (frame.shape[1], frame.shape[0])
                                     result = dateTag + (event, imgSize, node, view, len(imgs))
                                 else:
