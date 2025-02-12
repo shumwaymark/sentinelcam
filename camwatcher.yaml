@@ -2,6 +2,7 @@
 ---
 # Settings file camwatcher.yaml 
 control_port: 5566
+datapump_port: 5556
 
 # The list of known outpost nodes. Subscriptions to these are established 
 # at start-up. New nodes may also be added dynamically whenever introduced
@@ -17,25 +18,62 @@ outpost_nodes:
     view: PiCamera                 # view name for the camera
     logger: tcp://lab1:5565        # log publisher subscriptions for node
     images: tcp://lab1:5567        # image publisher subscriptions for node
+  hilltop:
+    view: PiCam3
+    logger: tcp://alpha5:5565
+    images: tcp://alpha5:5567
 
 # Defines camwatcher to sentinel communication channels. The datapump connection 
 # specified below is provided to the sentinel for DataFeed queries. Must match the 
 # datapump configuration for this host. 
 sentinel:
-   requests: tcp://sentinel:5566       # task requests to sentinel
+   requests:  tcp://sentinel:5566      # task requests to sentinel
    publisher: tcp://sentinel:5565      # for subscriptions to sentinel publisher 
-   post_event: MobileNetSSD_allFrames  # camwatcher post-event task request
-   datapump: tcp://data1:5556          # datapump connection for use by sentinel
-   datasink: data1                     # tag identifying this data sink
+   datapump:  tcp://data1:5556         # datapump connection for use by sentinel
+   datasink:  data1                    # tag identifying this data sink
 
-      ##   Data storage locations  ##
+       ##   Data storage locations  ##
 data:  
-  images: /mnt/usb1/sentinelcam/images        # JPG file storage
+  images:   /mnt/usb1/sentinelcam/images      # JPG file storage
   csvfiles: /mnt/usb1/sentinelcam/camwatcher  # CSV file storage
 
-# Log file directories. The sentinel does not write to a logfile on disk. All logging 
-# activity, including full task results along with internal warnings and errors, 
-# are published over 0MQ. See the sentinel settings above for this connection.
-logs: 
-  camwatcher: /mnt/usb1/sentinelcam/logs
-  sentinel: /mnt/usb1/sentinelcam/logs
+logconfigs: 
+    # Internal logging for the camwatcher along with messages from outpost nodes
+    camwatcher_internal:
+        version: 1
+        formatters:
+            default:
+                format: '%(asctime)s %(levelname)s: %(message)s'
+        handlers:
+            file:
+                class: logging.handlers.RotatingFileHandler
+                filename: /mnt/usb1/sentinelcam/logs/camwatcher.log
+                formatter: default
+                maxBytes: 524288
+                backupCount: 10
+                level: INFO
+        root:
+            handlers: [file]
+            level: INFO
+
+    # The sentinel does not write to a logfile on disk. All logging activity, 
+    # including full task results along with internal warnings and errors, are
+    # published over 0MQ. A sentinel agent, as a child subprocess, subscribes to 
+    # this and manages updates to the data sink. Other collected status and logging 
+    # content will be captured as specified below. 
+    sentinel_agent: 
+        version: 1
+        formatters:
+            default:
+                format: '%(asctime)s %(levelname)s: %(message)s'
+        handlers:
+            file:
+                class: logging.handlers.TimedRotatingFileHandler
+                filename: /mnt/usb1/sentinelcam/logs/sentinel.log
+                formatter: default
+                when: midnight
+                backupCount: 120
+                level: INFO
+        root:
+            handlers: [file]
+            level: INFO

@@ -2,14 +2,29 @@
 ---
 # Settings file datapump.yaml 
 control_port: 5556
+camwatcher: tcp://127.0.0.1:5566
 
-# Logfile pathname
-logfile: /mnt/usb1/sentinelcam/logs/datapump.log
-
-## Data storage locations  ##
-
+# Data storage locations  
 imagefolder: /mnt/usb1/sentinelcam/images
 datafolder:  /mnt/usb1/sentinelcam/camwatcher
 
 # Current FaceList CSV file, defines the population of locked events
-facefile: /mnt/usb1/sentinelcam/faces/facebeta4.csv
+facefile: /mnt/usb1/sentinelcam/faces/facebeta6.csv
+
+# Logging configuration
+logconfig:
+    version: 1
+    formatters:
+        default:
+            format: '%(asctime)s %(levelname)s: %(message)s'
+    handlers:
+        file:
+            class: logging.handlers.RotatingFileHandler
+            filename: /mnt/usb1/sentinelcam/logs/datapump.log
+            formatter: default
+            maxBytes: 524288
+            backupCount: 5
+            level: WARN
+    root:
+        handlers: [file]
+        level: WARN
