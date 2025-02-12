@@ -25,7 +25,7 @@ import simplejpeg
 from ast import literal_eval
 import time
 from time import sleep
-from datetime import datetime
+from datetime import date, datetime
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.utils import FPS, readConfig
 
@@ -135,6 +135,16 @@ class ImageSubscriber:
         self._thread.daemon = True
         self._thread.start()
 
+    def _run(self):
+        receiver = imagezmq.ImageHub(self.publisher, REQ_REP=False)
+        while not self._stop:
+            imagedata = receiver.recv_jpg()
+            msg = imagedata[0].split('|')
+            if msg[0].split(' ')[1] == self.view:
+                self._data = (msg[2], imagedata[1])
+                self._data_ready.set()
+        receiver.close()
+
     def receive(self, timeout=15.0):
         flag = self._data_ready.wait(timeout=timeout)
         if not flag:
@@ -142,17 +152,11 @@ class ImageSubscriber:
         self._data_ready.clear()
         return self._data
 
-    def _run(self):
-        receiver = imagezmq.ImageHub(self.publisher, REQ_REP=False)
-        while not self._stop:
-            imagedata = receiver.recv_jpg()
-            if imagedata[0].split('|')[0].split(' ')[1] == self.view:
-                self._data = imagedata
-                self._data_ready.set()
-        receiver.close()
-
     def close(self):
         self._stop = True
+
+    def __del__(self) -> None:
+        self.close()
 
 # multiprocessing class implementing a child subprocess for populating a ring buffer of images 
 class PlayerDaemon:
@@ -182,93 +186,93 @@ class PlayerDaemon:
         print(f"PlayerDaemon subprocess started.")
         while True:
             cmd = commandQueue.get()
-            if len(cmd) > 1 and cmd[0] in [VIEWER, EVENT]:
-                # Connect to image source: outpost/view or datapump. 
-                # Establish ringbuffer selection by image size.
-                # Reset the buffer, then recv, send, read, and iterate.
-                # Keep ring buffer populated until stopped or out of data.
-                if cmd[0] == VIEWER:
-                    (datapump, publisher, view) = cmd[1:]
-                    # This taps into a live image publication stream. There is
-                    # no end to this; it always represents current data capture.
-                    # Just keep going here forever until explicity stopped. 
-                    try:
-                        receiver = ImageSubscriber(publisher, view)
-                        frame = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
-                        wh = (frame.shape[1], frame.shape[0])
-                        started = False
-                        if ring != wh:  
-                            ring = wh
-                            ringbuffer = ringbuffers[ring]  # TODO: handle exception for unexpected sizes
+            # Connect to image source: outpost/view or datapump. 
+            # Establish ringbuffer selection by image size.
+            # Reset the buffer, then recv, send, read, and iterate.
+            # Keep ring buffer populated until stopped or out of data.
+            if cmd[0] == VIEWER:
+                (datapump, publisher, view) = cmd[1:]
+                # This taps into a live image publication stream. There is
+                # no end to this; it always represents current data capture.
+                # Just keep going here forever until explicity stopped. 
+                try:
+                    receiver = ImageSubscriber(publisher, view)
+                    frame = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
+                    wh = (frame.shape[1], frame.shape[0])
+                    started = False
+                    if ring != wh:  
+                        ring = wh
+                        ringbuffer = ringbuffers[ring]  # TODO: handle exception for unexpected sizes
+                    ringbuffer.reset()
+                    ringbuffer.put(frame)
+                    while keepgoing.value:
+                        if ringwire.ready():
+                            msg = ringwire.recv()
+                            if not started:
+                                started = True
+                            else:
+                                ringbuffer.frame_complete()
+                            ringwire.send(ringbuffer.get())
+                        elif ringbuffer.isFull():
+                            sleep(0.005)
+                        else:
+                            ringbuffer.put(simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR'))
+                except Exception as ex:
+                    # TODO: need recovery / reattempt management here?
+                    print(f"ImageSubscriber failure reading from {publisher}, {str(ex)}")
+                finally:
+                    receiver.close()
+            else:                                                             # cmd[0] == EVENT
+                (datapump, viewname, eventdate, eventid, imgsize) = cmd[1:]   
+                # Unlike a live outpost viewer, datapump events have a definite end. Maintain state and keep
+                # the ring buffer populated. An exhausted ring buffer is considered EOF wWhen reading in either 
+                # direction. Send an EOF response to the Player and reset to the beginning in either event.
+                feed = self._setPump(datapump)
+                try:
+                    if ring != imgsize:
+                        ring = imgsize
+                        ringbuffer = ringbuffers[ring]
+                    if (eventdate, eventid) != (date, event):
+                        (date, event) = (eventdate, eventid)
                         ringbuffer.reset()
-                        ringbuffer.put(frame)
-                        while keepgoing.value:
-                            if ringwire.ready():
-                                msg = ringwire.recv()
-                                if not started:
-                                    started = True
-                                else:
-                                    ringbuffer.frame_complete()
+                        frametimes = feed.get_image_list(eventdate, eventid)
+                        jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[0])
+                        ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+                        forward = True
+                        frameidx = 1
+                    started = False
+                    while keepgoing.value:
+                        if ringwire.ready():
+                            msg = ringwire.recv() # response here reserved for player commands, reverse/forward/other
+                            if not started:
+                                started = True
+                            else:
+                                ringbuffer.frame_complete() 
+                            if ringbuffer.isEmpty():
+                                ringwire.send(-1)
+                                forward = True
+                                frameidx = 0
+                            else:
                                 ringwire.send(ringbuffer.get())
-                            elif ringbuffer.isFull():
-                                sleep(0.005)
-                            else:
-                                ringbuffer.put(simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR'))
-                        receiver.close()
-                    except Exception as ex:
-                        # TODO: need recovery / reattempt management here
-                        print(f"ImageSubscriber failure reading from {publisher}, {str(ex)}")
-                else:
-                    (datapump, viewname, eventdate, eventid, imgsize) = cmd[1:]
-                    # Unlike a live outpost viewer, datapump events have a definite end. Maintain state and keep
-                    # the ring buffer populated. An exhausted ring buffer is considered EOF wWhen reading in either 
-                    # direction. Send an EOF response to the Player and reset to the beginning in either event.
-                    feed = self._setPump(datapump)
-                    try:
-                        if ring != imgsize:
-                            ring = imgsize
-                            ringbuffer = ringbuffers[ring]
-                        if (eventdate, eventid) != (date, event):
-                            (date, event) = (eventdate, eventid)
-                            ringbuffer.reset()
-                            frametimes = feed.get_image_list(eventdate, eventid)
-                            jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[0])
-                            ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
-                            forward = True
-                            frameidx = 1
-                        started = False
-                        while keepgoing.value:
-                            if ringwire.ready():
-                                msg = ringwire.recv() # response here reserved for player commands, reverse/forward/other
-                                if not started:
-                                    started = True
-                                else:
-                                    ringbuffer.frame_complete() 
-                                if ringbuffer.isEmpty():
-                                    ringwire.send(-1)
-                                    forward = True
-                                    frameidx = 0
-                                else:
-                                    ringwire.send(ringbuffer.get())
-                            elif ringbuffer.isFull():
-                                sleep(0.005)
-                            else:
-                                if (forward and frameidx < len(frametimes)) or (not forward and frameidx > -1): 
-                                    jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[frameidx])
-                                    ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
-                                    frameidx = frameidx + 1 if forward else frameidx - 1
+                        elif ringbuffer.isFull():
+                            sleep(0.005)
+                        else:
+                            if (forward and frameidx < len(frametimes)) or (not forward and frameidx > -1): 
+                                jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[frameidx])
+                                ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+                                frameidx = frameidx + 1 if forward else frameidx - 1
 
-                    # TODO: Need to flood the ring bufffer with REDX images, and then allow for image retrieval
-                    # before exiting? Refactor this try/catch block appropriately if feasible, or seek alternative.
-                    # Perhaps implement recovery / reattempt management. 
-                    # Need clear communication to Player thread regarding state.
-                    except KeyError as keyval:
-                        print(f"PlayerDaemon internal key error '{keyval}'")
-                        ringbuffer.put(redx_image(ring[0],ring[1]))
-                    except DataFeed.ImageSetEmpty as e:
-                        ringbuffer.put(redx_image(ring[0],ring[1]))
-                    except Exception as e:
-                        print(f"Failure reading images from datapump, ({datapump},{eventdate},{eventid}): {str(e)}")
+                # TODO: Need to flood the ring bufffer with REDX images, and then allow for image retrieval
+                # before exiting? Refactor this try/catch block appropriately if feasible, or seek alternative.
+                # Perhaps implement recovery / reattempt management. 
+                # Need clear communication to Player thread regarding state.
+                except KeyError as keyval:
+                    print(f"PlayerDaemon internal key error '{keyval}'")
+                    ringbuffer.put(redx_image(ring[0],ring[1]))
+                except DataFeed.ImageSetEmpty as e:
+                    ringbuffer.put(redx_image(ring[0],ring[1]))
+                except Exception as e:
+                    print(f"Failure reading images from datapump, ({datapump},{eventdate},{eventid}): {str(e)}")
 
     def start(self, command_block):
         self.runswitch.value = 1
@@ -347,19 +351,19 @@ class Player:
             self.current_pump = datapump
         cwIndx  = self.datafeed.get_date_index(date)  
         evtSets = cwIndx.loc[cwIndx['event'] == event]
-        refsort = {'trk': 0, 'obj': 1, 'fd1': 2, 'fr1': 3}
+        refsort = {'trk': 0, 'obj': 1, 'fd1': 2, 'fr1': 3}  # z-ordering for tracking result labels
         if len(evtSets.index) > 0:
             trkTypes = [t for t in evtSets['type']]
             try:
                 evtData = pd.concat([self.datafeed.get_tracking_data(date, event, t) for t in trkTypes], 
                                     keys=[t for t in trkTypes], 
                                     names=['ref'])
+                evtData['name'] = evtData.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
+                self.texthelper.setColors(evtData['name'].unique())
             except DataFeed.TrackingSetEmpty as e:
                 print(f"No tracking data for {e.date},{e.evt},{e.trk}")
             except Exception as e: 
                 print(f"Failure retrieving tracking data for {e.date},{e.evt},{e.trk}: {str(e)}")
-            evtData['name'] = evtData.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
-            self.texthelper.setColors(evtData['name'].unique())
         #else:
             # TODO: Should never occur; set evtData to an empty dataframe: pandas.DataFrame(columns=CamData.TRKCOLS)
             # Better: log as exception. Will need an option for an error log display from the console.
@@ -401,7 +405,7 @@ class Player:
                 self.set_imgdata(cv2.blur(image, (15, 15))) 
                 dataReady.set()
                 (frametimes, refresults) = self._gatherEventResults(date, event, cmd[1])
-                when = frametimes[0].strftime('%I:%M %p - %A %B %d, %Y')
+                when = frametimes[0].strftime('%I:%M %p - %A %B %d, %Y') if len(frametimes) > 0 else ''
             else:
                 view = cmd[3]
                 when = 'current view'
@@ -475,8 +479,8 @@ class Player:
 
 class SentinelSubscriber:
     # TODO: This will need some housekeeping logic. Events can accumulate throughout the 
-    # day. Watch for daily cleanup event, and purge history. Rebuild from cleaned-up date. 
-    # This will need to include reference lists associated with OutpostView menu items. Also,
+    # day. Watch for daily cleanup event, and purge history. Rebuild from cleaned-up date, 
+    # including refreshing labels and thumbnails associated with OutpostView menu items. Also,
     # perhaps just keep a fixed-length history to better support views with infrequent events.
     def __init__(self, sentinel) -> None:
         self.eventQueue = multiprocessing.Queue()
@@ -496,13 +500,14 @@ class SentinelSubscriber:
             topic, msg = sentinel_log.recv_multipart()
             topics = topic.decode('utf8').strip().split('.')
             message = msg.decode('ascii')
-            if topics[1] == 'INFO':
+            if topics[1] == 'INFO' and message[0] == '{':
                 try:
                     logdata = json.loads(message)
                     if 'flag' in logdata:
-                        if logdata['flag'] == 'EOJ':
+                        if logdata['flag'] == 'EOJ' and logdata['event'] is not None:
                             viewkey = (logdata['from'][0], logdata['from'][1], logdata['sink'])
                             evtkey = (logdata['date'], logdata['event'], logdata['pump'])
+                            task = logdata['task']
                             if viewkey in event_lists:
                                 if evtkey not in event_lists[viewkey]:
                                     event_lists[viewkey].append(evtkey)
@@ -524,8 +529,7 @@ class EventListUpdater:
         self._eventQ = eventQ
         self._newEvt = newEvent
         self._eventData = None
-        self._thread = threading.Thread(target=self._run, args=())
-        self._thread.daemon = True
+        self._thread = threading.Thread(daemon=True, target=self._run, args=())
         self._thread.start()
 
     def _run(self):
@@ -599,9 +603,8 @@ class OutpostView:
         with dataLock:
             self.eventlist.append(event)
             try:
-                receiver = ImageSubscriber(self.publisher, self.view)
-                image = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
-                receiver.close()
+                with ImageSubscriber(self.publisher, self.view) as receiver:
+                    image = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
                 # TODO: New thumbnail should be a selected image from the actual event, 
                 # assuming something of interest was captured. Effectively: for updating 
                 # the thumbnail / menu refdata, ignore any uninteresting motion events.
@@ -617,7 +620,7 @@ class OutpostView:
         evt_time = ''
         if len(self.eventlist) > 0:
             evt_ts = self.eventlist[-1][0]
-            evt_time = evt_ts.to_pydatetime().strftime('%A %B %d, %I:%M %p')
+            evt_time = evt_ts.to_pydatetime().strftime('%A %b %d, %I:%M %p')
         self.menulabel = f"{self.description}\n{evt_time}"
         if self.menuref is not None:
             self.menuref.update()
@@ -906,7 +909,7 @@ class Application(ttk.Frame):
             viewdef = OutpostView(
                 view = viewname,
                 node = outpost_view['outpost'],
-                publisher = outpost['image_publisher'] ,
+                publisher = outpost['image_publisher'],
                 sinktag = outpost['datapump'],
                 datapump = datapumps[outpost['datapump']],
                 imgsize = literal_eval(outpost_view['size']),
@@ -914,7 +917,7 @@ class Application(ttk.Frame):
             )
             self.outpost_views[viewname] = viewdef
         # populate an initial event list for each view 
-        self.today = datetime.now().isoformat()[:10]
+        self.today = str(date.today())
         sink_events = {}
         for (sink, pump) in CFG['datapumps'].items():
             try:
