@@ -7,7 +7,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 import asyncio
 import json
 import logging
-import logging.handlers
+import logging.config
 import cv2
 import numpy as np
 import pandas as pd
@@ -23,12 +23,11 @@ import queue
 import uuid
 import zmq
 from zmq.asyncio import Context as AsyncContext
-from zmq.log.handlers import PUBHandler
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.taskfactory import TaskFactory
 from sentinelcam.utils import readConfig
 import msgpack
-import simplejpeg
+#import simplejpeg
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "sentinel.yaml"))
 SOCKDIR = CFG["socket_dir"]
@@ -53,10 +52,10 @@ class JobRequest:
 
     Status = ["Undefined", "Queued", "Running", "Done", "Failed", "Chained", "Canceled"]
 
-    def __init__(self, sink, node, date, event, pump, taskname) -> None:
+    def __init__(self, sink, node, date, event, pump, taskname, priority=2) -> None:
         self.jobID = uuid.uuid1().hex
         self.jobTask = taskname
-        self.jobClass = 1
+        self.jobClass = None
         self.jobStatus = JobRequest.Status_QUEUED
         self.jobSubmitTime = datetime.now()
         self.jobStartTime = None
@@ -68,6 +67,7 @@ class JobRequest:
         self.datapump = pump  # datapump connection string
         self.camsize = (0,0)  # required per event; learn up front, dynamically
         self.engine = None
+        self.priority = priority
         self.image_cnt = 0
         self.image_rate = 0.0
         logging.info(str(self.start_Message('SUBMIT')))
@@ -144,6 +144,7 @@ class JobRequest:
             'started': start_time,
             'ended': end_time,
             'elapsed': elapsed_time,
+            'priority': self.priority,
             'engine': self.engine,
             'event': self.eventID,
             'jobid': self.jobID,
@@ -620,7 +621,8 @@ class JobManager:
                              jreq.eventDate, 
                              jreq.eventID, 
                              jreq.datapump, 
-                             task)
+                             task,
+                             jreq.priority)
         chained.camsize = jreq.camsize
         chained.jobClass = self.taskmenu[task]['class']
         if chained.jobClass in engine.getClasses():
@@ -631,13 +633,14 @@ class JobManager:
                 chained.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
 
     def _getFrameDimensons(self, jreq) -> tuple:
-        datafeed = self.datafeeds[jreq.datapump]
+        datafeed = self._setPump(jreq.datapump)
         cwIndx = datafeed.get_date_index(jreq.eventDate)
         trkevt = cwIndx.loc[(cwIndx['event'] == jreq.eventID) & (cwIndx['type'] == 'trk')]
         if len(trkevt.index) > 0:
             _camsize = (trkevt.iloc[0].width, trkevt.iloc[0].height)
         else:
             _camsize = (0,0)
+            logging.error(f"_getFrameDimensions() failed for event {(jreq.eventDate,jreq.eventID)}")
         logging.debug(f"Learned image dimensions: {_camsize}")
         return _camsize
 
@@ -697,7 +700,8 @@ class JobManager:
         jreq = taskEngine.getJobRequest()
         try:
             jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametime)
-            taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+            #taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+            taskEngine.ringBuffer.put(cv2.imdecode(np.frombuffer(jpeg, dtype='uint8'), -1))
         except Exception as e:
             logging.error(f"_get_frame(), abandon cursor, ({jreq.eventDate},{jreq.eventID},{frametime}): {str(e)}")
             taskEngine.cursor = None
@@ -712,7 +716,7 @@ class JobManager:
         return now_ondeck
 
     def _jobThread(self) -> None:
-        logging.debug(f"Job Manager thread started.")
+        logging.debug(f"Job Manager thread started")
         while not self._stop:
             # Have a task start request or job status update?
             if not taskFeed.empty():
@@ -802,7 +806,10 @@ class JobManager:
                     if self.ondeck[jobclass] is None:
                         with jobLock:
                             pending = [r.jobID for r in taskList.values() 
-                                if r.jobStatus == JobRequest.Status_QUEUED and r.jobClass == jobclass]
+                                if r.jobStatus == JobRequest.Status_QUEUED and r.jobClass == jobclass and r.priority == 1]
+                            if len(pending) == 0:
+                                pending = [r.jobID for r in taskList.values() 
+                                    if r.jobStatus == JobRequest.Status_QUEUED and r.jobClass == jobclass]
                         if len(pending) > 0:
                             logging.debug(f"Queue up for ondeck, class {jobclass}: {pending[0]}")
                             taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
@@ -816,7 +823,7 @@ class JobManager:
         self._thread.join()
 
 async def task_loop(asyncREP, taskCFG):
-    logging.debug("Sentinel control loop started.")
+    logging.debug("Sentinel control loop started")
     while True:
         reply = 'OK'
         msg = await asyncREP.recv()
@@ -841,7 +848,8 @@ async def task_loop(asyncREP, taskCFG):
                             request['date'],
                             request['event'],
                             request['pump'],
-                            request['task']
+                            request['task'],
+                            request.get('priority', 2)
                         )
                         taskFeed.put((JobManager.JobSUBMIT, job.jobID))
                         reply = job.jobID
@@ -891,7 +899,6 @@ async def task_feedback(asyncSUB):
 
 async def main():
     log = start_logging(CFG["logging_port"])
-    log.info("Sentinel started.")
     asyncREP = ctxAsync.socket(zmq.REP)  # task loop control socket
     asyncSUB = ctxAsync.socket(zmq.SUB)  # subscriptions for job result publishers
     asyncREP.bind(f"tcp://*:{CFG['control_port']}")
@@ -902,6 +909,7 @@ async def main():
                          CFG["default_pump"],
                          asyncSUB)
     try:
+        log.info("Sentinel started")
         await asyncio.gather(task_loop(asyncREP, CFG["task_list"]), 
                              task_feedback(asyncSUB))
     except (KeyboardInterrupt, SystemExit):
@@ -915,12 +923,12 @@ async def main():
         log.info("Sentinel shutdown")
 
 def start_logging(publish):
+    logconfig = CFG['logconfig']
+    socket = ctxBlocking.socket(zmq.PUB)
+    socket.bind(f"tcp://*:{publish}") 
+    logconfig['handlers']['zmq']['interface_or_socket'] = socket
+    logging.config.dictConfig(logconfig)
     log = logging.getLogger()
-    zmq_log_handler = PUBHandler(f"tcp://*:{publish}")
-    zmq_log_handler.setFormatter(logging.Formatter(fmt='{message}', style='{'))
-    zmq_log_handler.root_topic = 'Sentinel'
-    log.addHandler(zmq_log_handler)
-    log.setLevel(logging.INFO)
     return log
 
 if __name__ == '__main__':
