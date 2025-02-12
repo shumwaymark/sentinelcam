@@ -84,12 +84,12 @@ options are specified.
               tracker: none                  # [none, dlib csrt, kcf, boosting, mil, tld, medianflow, mosse]
               skip_factor: 7                 # (only relevant when a tracker is also specified)
               mobilenetssd:
-                  prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-                  model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+                  prototxt_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+                  model_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
                   confidence: 0.5
                   target: cpu                # [cpu, myriad]          
               yolov3:  
-                  yolo_path: /home/pi/imagenode/outpost/yolo-coco
+                  yolo_path: /home/ops/imagenode/outpost/yolo-coco
                   confidence: 0.5
                   threshold: 0.3
                   consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
@@ -454,7 +454,7 @@ The third common field is the ``evt`` field, which can contain one of three valu
        "view": "PiCam3",
        "id": "42fc4bb46cc611ebb942dca63261a32e",
        "timestamp": "2024-10-15T07:32:12.856029",
-       "obj": 'xyzzy',
+       "obj": "xyzzy",
        "class": "person",
        "rect": [0, 0, 0, 0]
      }
@@ -465,13 +465,13 @@ The third common field is the ``evt`` field, which can contain one of three valu
    .. code-block:: json
 
      {
-       "evt": 'end',
-       "view": 'PiCam3',
-       "id": '42fc4bb46cc611ebb942dca63261a32e',
+       "evt": "end",
+       "view": "PiCam3",
+       "id": "42fc4bb46cc611ebb942dca63261a32e",
        "tasks": [
-           ['sometask', 1], 
-           ['anothertask', 1],
-           ['sweep', 2]
+           ["sometask", 1], 
+           ["anothertask", 1],
+           ["sweep", 2]
         ]
      }
 
