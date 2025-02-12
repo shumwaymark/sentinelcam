@@ -42,6 +42,52 @@ Much of the following is more properly categorized as still in the *wishlist pha
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.1.0-alpha - 2025-02-12
+
+This push marks the start of the migration to Raspberry Pi OS, *Debian 12 (bookworm)*. 
+Now employing Python 3.11 and the `picamera2` library for camera image captures. Additional
+work towards this effort is still ongoing. 
+
+### Fixed
+
+- Corrected prior repair to the `DataFeed` for unresponsive connections to now properly close,
+  then allocate a new 0MQ `Socket` instance for reconnecting to the **datapump**. This often
+  lives in multi-threaded applications where more than a single `DataFeed` instance may be 
+  active. Avoids unwarranted destruction of the `Context`. Which could bring the roof down.
+- Moved **camwatcher** index updates into a separate chid subprocess to prevent index corruption.
+  Single threading is needed for this task since mulitple events can be initiated simultaneously, 
+  while new **sentinel** task results could also be arriving in parallel. This new subprocess now
+  manages all event deletion also. The **datapump** delegates event deletion through this same
+  choke point via a command sent to the **camwatcher** control port.
+- Removed **outpost** image publication throttling logic based on elapsed time. This was an unreliable 
+  approach since that measurement can vary significantly from one cycle tick to another. The correct 
+  solution here was to abandon use of the threaded read logic in favor of direct image retrieval through 
+  the `picamera2` library. This resulted in close to ideal throughput and dramatically reduced CPU load.
+- Tossed a floaty into the **outpost** *DepthAI event-trigger-whirlpool-of-death*. Didn't realize it
+  couldn't swim. Should've known. It was never properly introduced to deep water.
+
+### Changed
+
+- Moved post-event trigger to **outpost** configuration as a list of tasks for the **sentinel**.
+  Multiple tasks are supported based on object detection results, these run with job priority=1. 
+  An optional `default` task, submitted as priority=2, can be specified as a catch-all to always 
+  run at the end of each event.
+- Moved logging configuration into the application YAML setup files for each component.
+- A quick-and-dirty hack on `PiCameraUnthreadedStream` within the **imagenode** to use the `picamera2` 
+  library. Legacy configuration options to support camera settings such as exposure, contrast, shutter
+  speed, white balance, etc. were all implemented with the original `picamera` library, and are abandoned 
+  by this shortcut. 
+
+### Added
+
+- Added support for using a *Google Coral USB Accelerator* with the **sentinel**. Activated When the 
+  task engine is configured for Coral, this adds support for using the `edgetpu` library for specifying 
+  *TensorFlow Lite* models for both object detection and face detection. 
+- Added a job priority field to the **sentinel** task list. Post-event tasks initiated from real time
+  **outpost** analysis are assigned a priority 1. Chained jobs receive the same priority as the prior 
+  job in the chain. Other analytical tasks are assigned the default priority of 2. The `JobManager` 
+  will attempt  to place tasks on-deck by priority.
+
 ## 0.0.33-alpha - 2024-10-01
 
 ### Fixed

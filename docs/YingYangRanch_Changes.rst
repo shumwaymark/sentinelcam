@@ -31,26 +31,24 @@ to fulfill its existing role without change.
 Modifications to imagenode
 ==========================
 
-Modifications to **imagenode** are fully encapsulated by the implementation of the ``outpost`` detector.
+Modifications to **imagenode** are primarily encapsulated by the implementation of the ``outpost`` detector.
 There are two aspects to this effort. Providing support for log and image publishing, and developing an 
 object tracker to fuel the **camwatcher** engine.
 
 Example configuration with new options
 ======================================
 
-An expanded example imagenode.yaml file is provided below to demonstrate how the new configuration
-options are specified. All **SentinelCam** configuration items are specified as settings for the 
-``outpost`` detector.
+An expanded example ``imagenode.yaml`` file is provided below to demonstrate how the new configuration
+options are specified.
 
 .. code-block:: yaml
 
-  # Settings file imagenode.yaml -- sentinelcam test #4
+  # Settings file imagenode.yaml -- for a sentinelcam outpost, version 7 
   ---
   node:
     name: outpost
-    heartbeat: 10
-    patience: 5
-    REP_watcher: True
+    heartbeat: 15
+    REP_watcher: False            # Not recommended for sentinelcam
     queuemax: 50
     send_type: jpg
     send_threading: True
@@ -59,42 +57,55 @@ options are specified. All **SentinelCam** configuration items are specified as 
     H1: tcp://data1:5555
   cameras:
     P1:
-      viewname: PiCamera
+      viewname: PiCam3
       resolution: (640, 480)
       framerate: 32
+      threaded_read: False         # use direct image retrieval through picamera2 library
       vflip: False
       detectors:
-        outpost:
-          publish_cam: 5567            # activates image frame publishing
-          publish_log: 5565            # activates logfile publishing over ZMQ
-          camwatcher: tcp://data1:5566 # connect to camwatcher control port
-          spyglass: (640, 480)         # important, must match camera "resolution" above
-          accelerator: none            # [none, ncs2, coral]
-          tracker: dlib                # [dlib csrt, kcf, boosting, mil, tld, medianflow, mosse]
-          skip_factor: 25
-          detectobjects: mobilenetssd  # [mobilenetssd, yolov3]
-          mobilenetssd:
-            prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-            model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
-            confidence: 0.5
-            target: cpu                # [cpu, myriad]          
-          yolov3:  
-            yolo_path: /home/pi/imagenode/outpost/yolo-coco
-            confidence: 0.5
-            threshold: 0.3
-            consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
-          ROI: (10,20),(70,80)
-          draw_roi: ((255,0,0),1)
-          draw_time: ((255,0,0),1)  
-          draw_time_org: (5,5)  
-          draw_time_fontScale: 0.5 
+          outpost:
+              publish_cam: 5567        # ZMQ port for image frame publishing
+              publish_log: 5565        # ZMQ port for log publishing, must match logconfig below
+              logconfig:               # logging configuration dictionary 
+                  version: 1
+                  handlers:
+                      zmq:
+                          class: zmq.log.handlers.PUBHandler
+                          interface_or_socket: tcp://*:5565
+                          root_topic: outpost
+                          level: INFO
+                  root:
+                      handlers: [zmq]
+                      level: INFO
+              camwatcher: tcp://data1:5566   # optional self-introduction to a running camwatcher 
+              spyglass: (640, 480)           # important, must match camera "resolution" above
+              detectobjects: mobilenetssd    # [mobilenetssd, yolov3]
+              accelerator: none              # [none, ncs2, coral]
+              tracker: none                  # [none, dlib csrt, kcf, boosting, mil, tld, medianflow, mosse]
+              skip_factor: 7                 # (only relevant when a tracker is also specified)
+              mobilenetssd:
+                  prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+                  model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+                  confidence: 0.5
+                  target: cpu                # [cpu, myriad]          
+              yolov3:  
+                  yolo_path: /home/pi/imagenode/outpost/yolo-coco
+                  confidence: 0.5
+                  threshold: 0.3
+                  consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
+              ROI: (10,20),(70,80)
+              draw_roi: ((255,0,0),1)
+              draw_time: ((255,0,0),1)  
+              draw_time_org: (5,5)  
+              draw_time_fontScale: 0.5 
+  # Other cameras, detectors, and sensors can be supported - such as for ambient temperature: 
   sensors:
     T1:
       name: Temperature
       type: DS18B20
       gpio: 4
-      read_interval_minutes: 10  # check temperature every 10 minutes
-      min_difference: 1          # send reading when changed by 1 degree
+      read_interval_minutes: 10
+      min_difference: 1
 
 Camwatcher connection settings
 ==============================
@@ -105,70 +116,70 @@ There are three basic configuration settings related to communication with the *
 
   publish_cam: port nunber to use for image frame publishing 
   publish_log: port number to use for log publishing
-  camwatcher: connection string to the camwatcher control port
+  logconfig:   logging configuration dictionary
 
 publish_cam
 ------------
 
-The optional ``publish_cam`` setting takes a single argument: a numeric port number. This 
-activates image publishing as an ``imagezmq.ImageSender``, binding to the specified port. 
-Each image passing through the pipeline for the camera is published. This allows any client
-to subscribe as an ``imagezmq.ImageHub`` for access to a live camera feed as needed.
+The ``publish_cam`` setting takes a single argument: a numeric port number. This is used to
+activate image publishing as an ``imagezmq.ImageSender``. Each image passing through the pipeline 
+for the camera is published. This allows any client to subscribe as an ``imagezmq.ImageHub`` for 
+access to a live camera feed as needed.
 
 Each frame is published as a JPEG-compressed image. The publishing frame rate depends on the
 length of the vision processing pipeline of the **imagenode**. Multiple cameras, large image
 sizes, additional detectors, and processing complexity, can each have compounding adverse 
-effects on the velocity out to the client endpoint.
-
-To avoid over-publishing when the pipeline cycle rate exceeds the configured frame rate for
-the camera, a speed limiter is implemented to keep things reasonable. This helps conserve
-system resources on the **imagenode**, and insures that images will not be published at
-speeds higher than the actual camera frame rate.  
+effects on the velocity out to the client endpoint for capture or display.
 
 publish_log
 -----------
 
-The optional ``publish_log`` setting also has a numeric port number argument. This activates 
-logfile publishing over **PyZMQ**, binding to the specified port. Once activated, all calls to the 
-logger use this mechanism. The root topic for the logger will be set to the configured node name. 
-This helps any interested subscriber easily filter messages based on the source of the data.
+The ``publish_log`` setting also has a numeric port number argument. Used for log publishing 
+over 0MQ. Should match the value specified in the ``logconfig`` dictionary below. 
+
+logconfig
+---------
+
+Required configuration dictionary for logging over a ZeroMQ PUB socket. Once activated, all calls 
+to the logger use this mechanism. A few notes on configuration...
+
+.. code-block:: yaml
+
+  interface_or_socket: Local connection string for binding to the socket; see "publish_log" above
+  root_topic:          Must match the node name specified at the top of the YAML file
+  level:               INFO is required for basic outpost functionality
+
+The ``root_topic`` for the logger should match the configured node name from the top of the YAML file. A 
+logging level of INFO is required to support basic functionality, though DEBUG can be used when needed. The
+connection string specified for ``interface_or_socket`` should specify a port number that matches the value
+given for ``publish_log``.
 
 camwatcher
 ----------
 
-This configuration option introduces the outpost to the **camwatcher**. The ``publish_log`` option
-must also be specifed, or this setting will be ignored. For intended use as designed, ``publish_cam`` 
-should also be included. 
+This is an optional configuration item which can be used to introduce an outpost node to a running **camwatcher**
+instance. Production deployments include **camwatcher** configurations with connection strings for the specific 
+list of outpost nodes which should always be established. This option provides for a dynamic, though 
+temporary, introduction. A restart of the camwatcher will clear any such ad hoc outpost registrations. 
 
-During startup, a camera handoff message is constructed and sent to the **camwatcher** during initialization.
-This happens immediately after logfile publishing has been activtated. This startup message provides the 
-**camwatcher** with a description of the camera, and information for establishing subscriptions to **imagenode** 
-publishing services. The format of this startup message is in 2 parts, using the "|" character as a field delimiter.
+During startup, a JSON-encoded camera introduction message is constructed and sent to the **camwatcher** 
+control port specified in this connection string. The camwatcher will establish subscriptions and note the
+node and view of the new outpost. 
 
-.. code-block::
+  The following camera handoff message reflects the example YAML configuration file presented earlier.
+  Connection strings for the log and image publishers are constructed based on the port numbers specified
+  for ``publish_log`` and ``publish_cam``, along with the actual hostname of the node learned from the
+  running network configuration.
 
-  CameraUp|camera_handoff_msg
+.. code-block:: json
 
-These two fields are defined as follows:
-
-- ``CameraUp`` - The literal text as shown. Used to indicate that an ``Outpost`` initialization is in
-  progress. 
-- ``camera_handoff_msg`` - A dictionary structure in JSON format containing publishing parameters
-  to be passed to a **camwatcher** process. A basic set of values related to the **imagenode** itself. 
-  The following camera handoff structure reflects the example YAML configuration file presented earlier.
-  The ``host`` field is the actual hostname of the node needed for network addressing.
-  
-  .. code-block:: json
-
-     {
-       "node": "outpost",
-       "host": "lab1",
-       "log": 5565,
-       "video": 5567
-     }
-
-If this message exchange is successful, an ``OK`` response is returned to the **imagenode** and
-initialization continues. Otherwise, **imagenode** initialization fails.  
+   {
+      "cmd": "CamUp",
+      "node": "outpost",
+      "view": "PiCam3",
+      "logger": "tcp://lab1:5565",
+      "images": "tcp://lab1:5567"
+   }
 
 --------------------------------
 Publishing with multiple cameras
@@ -282,10 +293,13 @@ which provides additional details and background information.
 tracker
 -------
 
-This setting selects the object tracking algorithm to use. 
+This setting selects the object tracking algorithm to use. *Deprecated*
+
+``none``
+  *Current recommendation*. Tracking logic as originally implemented to be scrapped and redesigned.
 
 ``dlib``
-  Use the dlib correlation tracker. *Required for operation under OpenVINO*.
+  Use the dlib correlation tracker. *Required if contributed trackers below are not available*.
 
 The following subset of the OpenCV legacy contributed object trackers are also supported.
 
@@ -321,23 +335,26 @@ in accuracy.
 
 .. code-block:: yaml
 
-  tracker: kcf  # [csrt, kcf, boosting, mil, tld, medianflow, mosse]
+  tracker: none  # [none, csrt, kcf, boosting, mil, tld, medianflow, mosse]
 
 skip_factor
 -----------
 
-Once objects are in view, the correlation tracking alogorithm specified above is used to track 
-movement from one frame to the next. This tends to improve efficiency, since object detection is 
+Once objects are in view, the correlation tracking algorithm specified above is used to track 
+movement from one frame to the next. The goal is to improve efficiency, since object detection is 
 a relatively expensive operation in terms of CPU resources relative to object tracking. 
 
 This setting controls the frequency for which object detection is re-applied to the view, measured by
 a tick count for the **outpost**. The value specified here is not based on the number of frames actually
-analyzed by the ``Outpost``.  This trigger is measured against a cycle count for the image processing 
-pipeline. *This is currently more art than a well-understood factor. Sorry about that*.
+analyzed by the ``Outpost``. This trigger is measured against a cycle count for the image processing 
+pipeline.
+
+  *Understanding the best value to use for this, now deprecated, setting requires more art and magic 
+  than what should be appropriate. Clearly not a reasoned, well-understood factor*.
 
 .. code-block:: yaml
 
-  skip_factor: 25
+  skip_factor: 13
 
 detectobjects
 -------------
@@ -378,6 +395,20 @@ when ``yolov3`` is specifed for object detection.
     consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
 
 
+IMPORTANT - Note regarding status of migration to picamera2
+===========================================================
+
+As part of the ongoing migration to current software versions for operating system and supporting 
+application libraries, the ``picamera`` library is being replaced with ``picamera2``.
+
+Currently, the **imagenode** version in use here includes only an interim migration to the new library. 
+For further details see comments below regarding changes to python source code.
+
+The legacy configuration options to support camera settings such as exposure, contrast, shutter
+speed, white balance, etc. were all implemented via the original `picamera` library. These options
+have been abandoned by this shortcut. All cameara settings, except for ``resolution`` and ``framerate``, 
+are *untested and assumed to be broken*. 
+
 Logging for tracking events
 ===========================
 
@@ -391,28 +422,24 @@ Each tracking message is associated with a specific event and camera view. The `
 event identifier, this is a UUID value for uniqueness. The ``view`` field contains the configured ``viewname`` 
 for the ``camera``. Note that the ``node`` name is not included in these messages since it is already being 
 passed as the root topic of the logger. This pairing of node and view allows the **camwatcher** to differentiate 
-between messages when subscribing to multiple *outpost* nodes simultaneously.
+between messages when subscribing to an outpost node supporting multiple views.
 
 The third common field is the ``evt`` field, which can contain one of three values as described below. 
 
-To keep messages sizes small, a timestamp is not currently included in these messages. Timestamps must 
-be added by the receiving system. As a general rule there should be, at most, about a half-dozen milliseconds 
-of latency between the actual time of the observation and the logged/reported time. These logging records 
-always reflect current events. i.e. *What is happening right now?*
-
 1) Event start, the ``evt`` field contains the text ``start``. This message is sent once, when
-   the tracking event begins. The ``fps`` field reflects the velocity of the **outpost** pipeline
-   at the start of the event in frames per second. This value is calculated based on a rolling 
-   average looking back over the previous 160 frames. A reported rate of 32 frames/second would 
-   reflect the average pipelne velocity for the 5 seconds prior to the start of the event.  
+   the tracking event begins. The ``fps`` field reflects the velocity of the **outpost** image 
+   publisher at the start of the event in frames per second. This value is calculated as a 
+   rolling average over a moving window across the prior few seconds. 
 
    .. code-block:: json
 
      {
-       "view": "PiCamera",
-       "id": "42fc4bb46cc611ebb942dca63261a32e",
        "evt": "start",
-       "fps": 34
+       "view": "PiCam3",
+       "id": "42fc4bb46cc611ebb942dca63261a32e",
+       "timestamp": "2024-10-15T07:32:12.856029",
+       "camsize": [640, 480]
+       "fps": 31.7
      }
 
 2) Object tracking data, the ``evt`` field contains the text ``trk``. This message is sent multiple
@@ -423,24 +450,29 @@ always reflect current events. i.e. *What is happening right now?*
    .. code-block:: json
 
      {
-       "view": "PiCamera",
-       "id": "42fc4bb46cc611ebb942dca63261a32e",
        "evt": "trk",
-       "obj": 999999,
+       "view": "PiCam3",
+       "id": "42fc4bb46cc611ebb942dca63261a32e",
+       "timestamp": "2024-10-15T07:32:12.856029",
+       "obj": 'xyzzy',
        "class": "person",
        "rect": [0, 0, 0, 0]
      }
 
-3) End of the event, the ``evt`` field contains the text ``end``. Any other fields contained in the 
-   structure beyond what is portrayed in the example below should be ignored. There could be extraneous 
-   data carried in this message left over from the prior tracking event. 
+3) End of the event, the ``evt`` field contains the text ``end``. An optional list of tasks to be submitted 
+   to the **sentinel** will be included when configured, based on detction results.
 
    .. code-block:: json
 
      {
-       "view": "PiCamera",
-       "id": "42fc4bb46cc611ebb942dca63261a32e",
-       "evt": "end"
+       "evt": 'end',
+       "view": 'PiCam3',
+       "id": '42fc4bb46cc611ebb942dca63261a32e',
+       "tasks": [
+           ['sometask', 1], 
+           ['anothertask', 1],
+           ['sweep', 2]
+        ]
      }
 
 Outpost implementation
@@ -467,19 +499,62 @@ to the baseline, as detailed below, can be found in ``imagenode/tools/imaging.py
   ├───tests
   └───yaml  
 
-*import tooling for the outpost*
+Import tooling for the outpost...
 
 .. code-block:: python
 
-  from sentinelcam.outpost import Outpost # SentinelCam outpost support
+  from sentinelcam.outpost import Outpost, OAKcamera # SentineCam outpost support
 
-*initializaton hook for the Detector instance*
+Initializaton hook within the Camera instance for an OAK camera...
+
+.. code-block:: python
+
+      self.cam_type = 'PiCamera'
+  elif camera[0].lower() == 'o':  # OAK camera
+      self.cam = OAKcamera(self.viewname)
+      self.cam_type = 'OAKcamera'
+  else:  # this is a webcam (not a picam)
+
+Initializaton hook for the Detector instance...
 
 .. code-block:: python
 
   elif detector == 'outpost':
     self.outpost = Outpost(self, detectors[detector], nodename, viewname)
     self.detect_state = self.outpost.object_tracker
+
+A hastily-coded rewrite of the PiCamera direct read to utilize the ``picamera2`` library.
+
+  *Current status of all the legacy camera settings such as exposure, contrast, shutter speed, 
+  white balance, etc. are undetermined and assumed to be broken.* These features were all 
+  implemented with the original picamera library. Only the resolution and framerate should 
+  be expected to work correctly at this time.
+
+.. code-block:: python
+
+  class PiCameraUnthreadedStream():
+      def __init__(self, resolution=(320, 240), framerate=32, **kwargs):
+          from picamera2 import Picamera2
+          Picamera2.set_logging(Picamera2.INFO)
+          self.camera = Picamera2()
+          # setup the camera and start it
+          self.camera.still_configuration.main.size = resolution
+          self.camera.still_configuration.main.format = "RGB888"
+          self.camera.still_configuration.buffer_count = 2
+          self.camera.still_configuration.controls.FrameRate = framerate
+          self.camera.configure("still")
+          self.camera.start()
+          self.frame = None
+
+      def read(self):
+          self.frame = self.camera.capture_array('main')
+          return self.frame
+
+      def stop(self):
+          self.close()
+
+      def close(self):
+          None
 
 That is all.
 
@@ -488,8 +563,8 @@ Legacy OpenCV contributed object trackers
 
 Note regarding more recent versions of the OpenCV library. The object tracking code
 within OpenCV is currently being updated and refactored. The legacy contributed object
-trackers have been moved into an ``OpenCV.legacy`` library.  The **spyglass** module 
-as posted, currently still specifies the original hooks.
+trackers have been moved into an ``OpenCV.legacy`` library which must be available for
+their use.
 
 Provisioning the Outpost
 ------------------------

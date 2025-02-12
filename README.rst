@@ -88,7 +88,7 @@ role.
 Project status
 ==============
 
-**SentinelCam** is an incomplete, and largely experimental, work in progress. 
+**SentinelCam** is a functional work in progress. A continually evolving and on-going research experiment.
 
 Outpost design
 --------------
@@ -137,10 +137,9 @@ The following general strategy provides an overview of this technique.
   of view. This is a relatively quick background subtraction model which easily runs within the main 
   image processing pipeline.
 - A motion event triggers the application of an object identification lens to the spyglass.
-- Each object of interest is tagged for tracking.
-- With objects of interest in view, a tracking lens is applied to subsequent frames whenever the 
-  spyglass is not already busy.
-- Object identification is periodically reapplied to refresh the tracking data.
+- Each object of interest is logged for tracking.
+- With objects of interest in view, additional lenses may be selected and applied to subsequent frames 
+  whenever the spyglass is not already busy.
 - The newest image passing through the pipeline is only provided to the spyglass after results 
   from the prior task have been returned. This signals its availability for new work.
 
@@ -205,17 +204,15 @@ queued data records and writing them into CSV-format text files based on the fol
 Data model
 ----------
 
-The data model is beginning to stabilize, though continues to evolve. Two types of data are collected
-by the **camwatcher**. Data related to the analysis of the event and captured images. All 
-data is stored in the filesystem, within a separate folder for each category. 
+Two types of data are collected by the **camwatcher**. Data related to the analysis of the event and 
+captured images. All data is stored in the filesystem, within a separate folder for each category. 
 
 Event tracking data and results from event analysis are written to the filesystem as a set of 
 CSV-format text files. For each date, there is an event index file and a separate file with
 the detailed result sets from each analysis task executed for the event.
 
 The index file for each date folder is named ``camwatcher.csv`` as described below. There is no 
-header row included in the data. All dates and timestamps reflect Coordinated Universal Time (UTC), 
-rather than the local time zone.
+header row included in the data.
 
 .. csv-table:: Event Index 
   :header: "Name", "Type", "Description"
@@ -353,8 +350,8 @@ The network address for a running **datapump** process is specified at that time
    :alt: DataPump to DataFeed flow
 
 The ``DataFeed`` and ``DataPump`` subclasses extend the imageZMQ base classes with support 
-for sending and receiving both pandas DataFrame objects, and lists of timestamps. Built upon 
-the same serialization context underpinning imageZMQ, this helps maintain consistent image 
+for transmitting both pandas DataFrame objects, and lists of timestamps. Built upon the
+same serialization context underpinning imageZMQ, this helps maintain consistent image 
 transport technology throughout the system.
 
 Internally, the first element of the (text, data) tuple returned to the Data Feed has been 
@@ -388,8 +385,6 @@ This function provides a list of ``datetime.timestamp`` objects reflecting the c
 on images published by the Outpost. These are provided in chronological order. Function arguments 
 are identical to what is described above for ``get_tracking_data()``.
 
-All date and time references are in Coordinated Universal Time (UTC), not the local time zone.
-
 .. code-block:: python
 
   DataFeed.get_image_jpeg (date, event, timestamp) -> bytes
@@ -415,8 +410,7 @@ ring buffers in shared memory.
    :alt: Sketch of Sentinel internal architecture
 
 The **sentinel** module is conceived as the primary inference and signaling center; the very 
-heartbeat of the larger system. One or more dispatchers are responsible for firing events 
-that are deemed worthy of deeper analysis by the **sentinel**. 
+heartbeat of the larger system.
 
   **Status**: stable working prototype.  
 
@@ -481,8 +475,8 @@ There are a number of inherent challenges to the SentinelCam design that must be
 
 Partly this is related to infrastructure constraints. This system is designed to run on small 
 low-voltage embedded devices, rather than operating on costly rackmount hardware, or a virtual
-server farm in the clouds. The more CPU/GPU brought to bear, the more electricity and 
-expense needed to make it all work.
+server farm in the clouds. The more CPU/GPU brought to bear, the more energy and expense needed 
+to make it all work.
 
 *Infrastructure is not the only challenge*. Design philosophy presents a more complex set of obstacles. 
 
@@ -570,7 +564,7 @@ Support for using an OAK camera from *Luxonis* as the primary data collection de
 recently been incorporated into the ``Outpost``. These devices are an "AI-included" camera 
 with an on-board VPU co-processor. 
 
-The **DepthAI** `software libraries <https://docs.luxonis.com/projects/sdk>`_
+their **DepthAI** `software libraries <https://docs.luxonis.com/software>`_
 provide for model upload and customizable pipelines. The prototype definition provided here 
 produces the following outputs from the camera.
 
@@ -667,23 +661,25 @@ Additional documentation
 Technology foundation
 =====================
 
-**SentinelCam** is being developed and tested on top of the following core technologies
-and libraries.
+**SentinelCam** is being developed and tested in a labratory built on top of the following core 
+technologies and libraries.
 
 - Raspberry Pi 4B
-- Raspbian Buster
-- Python 3.7
+- Raspberry Pi 5
+- Raspberry Pi OS, *Debian 12 (bookworm)*
+- Python 3.11
 - OpenCV 4.1.1
 - OpenVINO
-- picamera
+- picamera2
 - Luxonis OAK-1
 - Intel NCS2
 - NVIDIA Jetson Nano DevKit
 - Google Coral USB Accelerator
-- imageZMQ
-- ZeroMQ
+- DepthAI
 - scikit-learn
 - NumPy
+- imageZMQ
+- ZeroMQ
 - pandas
 - papermill
 - MessagePack
