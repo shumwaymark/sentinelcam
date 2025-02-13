@@ -375,8 +375,8 @@ when ``mobilenetssd`` is specifed for object detection.
 .. code-block:: yaml
 
   mobilenetssd:
-    prototxt_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-    model_path: /home/pi/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    prototxt_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
     confidence: 0.5
     target: cpu     # [cpu, myriad]          
 
@@ -389,7 +389,7 @@ when ``yolov3`` is specifed for object detection.
 .. code-block:: yaml
 
   yolov3:
-    yolo_path:  /home/pi/imagenode/outpost/yolo-coco
+    yolo_path:  /home/ops/imagenode/outpost/yolo-coco
     confidence: 0.5
     threshold:  0.3
     consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
@@ -419,17 +419,16 @@ each frame reviewed and tracked object within. All of the data being reported fo
 conditions is published over the logger in JSON format.
 
 Each tracking message is associated with a specific event and camera view. The ``id`` field serves as the 
-event identifier, this is a UUID value for uniqueness. The ``view`` field contains the configured ``viewname`` 
-for the ``camera``. Note that the ``node`` name is not included in these messages since it is already being 
-passed as the root topic of the logger. This pairing of node and view allows the **camwatcher** to differentiate 
-between messages when subscribing to an outpost node supporting multiple views.
+event identifier, which is a UUID value for uniqueness. The ``view`` field contains the configured ``viewname`` 
+for the ``camera``. Note that the ``node`` name is not included since it is already being passed as the root 
+topic of the logger. This pairing of node and view allows the **camwatcher** to differentiate between messages 
+when subscribing to an outpost node supporting multiple views.
 
 The third common field is the ``evt`` field, which can contain one of three values as described below. 
 
-1) Event start, the ``evt`` field contains the text ``start``. This message is sent once, when
-   the tracking event begins. The ``fps`` field reflects the velocity of the **outpost** image 
-   publisher at the start of the event in frames per second. This value is calculated as a 
-   rolling average over a moving window across the prior few seconds. 
+1) Event start. This message is sent once, when the tracking event begins. The ``fps`` field reflects 
+   the velocity of the **outpost** image publisher at the start of the event in frames per second. This 
+   value is calculated as a rolling average over a moving window across the prior few seconds. 
 
    .. code-block:: json
 
@@ -442,10 +441,10 @@ The third common field is the ``evt`` field, which can contain one of three valu
        "fps": 31.7
      }
 
-2) Object tracking data, the ``evt`` field contains the text ``trk``. This message is sent multiple
-   times while the event is in progress, for each analyzed frame and tracked object within the frame.
-   The ``obj`` and ``class`` fields contain an object identifier and classification name if available.
-   The ``rect`` field has the x1,y1,x2,y2 corners of the bounding rectangle for the object being reported. 
+2) Object tracking data. This message is sent multiple times while the event is in progress, for each 
+   analyzed frame and tracked object within the frame. The ``obj`` and ``class`` fields contain an object 
+   identifier and classification name if available. The ``rect`` field has the x1,y1,x2,y2 corners of the 
+   bounding rectangle for the object being reported. 
 
    .. code-block:: json
 
@@ -459,8 +458,8 @@ The third common field is the ``evt`` field, which can contain one of three valu
        "rect": [0, 0, 0, 0]
      }
 
-3) End of the event, the ``evt`` field contains the text ``end``. An optional list of tasks to be submitted 
-   to the **sentinel** will be included when configured, based on detction results.
+3) End of the event. An optional list of tasks to be submitted to the **sentinel** will be included when 
+   configured, based on detction results.
 
    .. code-block:: json
 
