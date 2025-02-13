@@ -28,7 +28,7 @@ request = {'task': task_id,
            'date': event_date, 
            'event': event_id,
            'sink': datasink, 
-           'node': 'injected_task',
+           'node': ['admin','internal'],
            'pump': f'tcp://{datasink}:5556'}
            
 msg = json.dumps(request)
