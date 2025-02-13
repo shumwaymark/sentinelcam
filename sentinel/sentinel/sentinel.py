@@ -442,6 +442,10 @@ class JobTasking:
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
+                    #except TimeoutError as e:
+                    #    msg (TaskEngine.TaskERROR, str(e))
+                    #    publisher.send(msgpack.packb(msg))
+                    #    eoj_status = TaskEngine.TaskFAIL
                     except Exception as e:
                         traceback.print_exc()  # see syslog for traceback  
                         msg = (TaskEngine.TaskERROR, f"taskHost({self.jobreq.eventDate}, {self.jobreq.eventID}), {str(e)}")
@@ -637,7 +641,7 @@ class JobManager:
         cwIndx = datafeed.get_date_index(jreq.eventDate)
         trkevt = cwIndx.loc[(cwIndx['event'] == jreq.eventID) & (cwIndx['type'] == 'trk')]
         if len(trkevt.index) > 0:
-            _camsize = (trkevt.iloc[0].width, trkevt.iloc[0].height)
+            _camsize = (int(trkevt.iloc[0].width), int(trkevt.iloc[0].height))
         else:
             _camsize = (0,0)
             logging.error(f"_getFrameDimensions() failed for event {(jreq.eventDate,jreq.eventID)}")
@@ -722,6 +726,7 @@ class JobManager:
             if not taskFeed.empty():
                 (tag, msg) = taskFeed.get()
                 logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
+                #try:
                 if tag == TaskEngine.TaskSUBMIT:
                     jobreq = taskList[msg]
                     jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
@@ -749,11 +754,15 @@ class JobManager:
                         self.ondeck[jobreq.jobClass] = None
                 elif tag == TaskEngine.TaskBOMB:
                     # TODO: Need an engine restart here 
-                    logging.error(f"TaskEngine '{msg}' bombed out.")
+                    logging.critical(f"TaskEngine '{msg}' bombed out.")
                     if msg in self.engines:
                         del self.engines[msg]
                 else:
                     logging.error(f"Undefined status '{tag}' for job {msg}")
+                #except TimeoutError as e:
+                #    logging.error(f"JobManager timeout {e}")
+                #except Exception as e:
+                #    logging.error(f"JobManager unexpected exception: {e}")
                 taskFeed.task_done()
                 logging.debug(f"Now ondeck {str(self._ondeck_status())}")
             
@@ -774,6 +783,8 @@ class JobManager:
                                 engine.send_response(engine.ringBuffer.get())
                         elif engine.cursor:
                             self._feedNext(engine)
+                        # TODO: Need a mechanism to cleanly shutdown a 
+                        # running task in the event of DataFeed timeouts.
                 else:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{engineName}' found dead.")
@@ -823,7 +834,7 @@ class JobManager:
         self._thread.join()
 
 async def task_loop(asyncREP, taskCFG):
-    logging.debug("Sentinel control loop started")
+    logging.info("Sentinel control loop started")
     while True:
         reply = 'OK'
         msg = await asyncREP.recv()

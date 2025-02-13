@@ -182,7 +182,7 @@ class CamData:
             self._event_start = self._event_subset["timestamp"].min()
             self._event_types = self._event_subset["type"].to_list()
             trk = self._event_subset.loc[self._event_subset['type'] == 'trk']
-            self._event_camsize = (trk.iloc[0].width, trk.iloc[0].height)
+            self._event_camsize = (int(trk.iloc[0].width), int(trk.iloc[0].height))
         else:
             self._event_node = None
             self._event_view = None
