@@ -107,6 +107,20 @@ options are specified.
       read_interval_minutes: 10
       min_difference: 1
 
+IMPORTANT - Note regarding status of migration to picamera2
+===========================================================
+
+As part of the ongoing migration to current software versions for operating system and supporting 
+application libraries, the ``picamera`` library is being replaced with ``picamera2``.
+
+Currently, the **imagenode** version in use here includes only an interim migration to the new library. 
+For further details see comments below regarding changes to python source code.
+
+The legacy configuration options to support camera settings such as exposure, contrast, shutter
+speed, white balance, etc. were all implemented via the original `picamera` library. These options
+have been abandoned by this shortcut. All cameara settings, except for ``resolution`` and ``framerate``, 
+are *untested and assumed to be broken*. 
+
 Camwatcher connection settings
 ==============================
 
@@ -393,21 +407,6 @@ when ``yolov3`` is specifed for object detection.
     confidence: 0.5
     threshold:  0.3
     consider: [person, car, truck, dog, cat, bird, bicycle, motorbike] 
-
-
-IMPORTANT - Note regarding status of migration to picamera2
-===========================================================
-
-As part of the ongoing migration to current software versions for operating system and supporting 
-application libraries, the ``picamera`` library is being replaced with ``picamera2``.
-
-Currently, the **imagenode** version in use here includes only an interim migration to the new library. 
-For further details see comments below regarding changes to python source code.
-
-The legacy configuration options to support camera settings such as exposure, contrast, shutter
-speed, white balance, etc. were all implemented via the original `picamera` library. These options
-have been abandoned by this shortcut. All cameara settings, except for ``resolution`` and ``framerate``, 
-are *untested and assumed to be broken*. 
 
 Logging for tracking events
 ===========================
