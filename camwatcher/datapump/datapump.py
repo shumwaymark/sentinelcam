@@ -3,10 +3,7 @@ import os
 import json
 import logging
 import logging.config
-from datetime import datetime
-from time import sleep
 import pickle 
-import traceback
 import zlib
 import zmq
 import numpy as np
@@ -14,6 +11,7 @@ import imagezmq
 import msgpack
 import pandas
 import simplejpeg
+from datetime import datetime
 from sentinelcam.camdata import CamData
 from sentinelcam.facedata import FaceList
 from sentinelcam.utils import readConfig
@@ -185,29 +183,29 @@ def main():
                     if facelist.event_locked(date, event):
                         reply = b'Locked'
                     else:
-                        reply = b'OK'
                         camwatcher_control = {}
                         camwatcher_control['cmd'] = 'DelEvt'
                         camwatcher_control['date'] = date
                         camwatcher_control['event'] = event
+                        log.info(f"camwatcher send request {camwatcher_control}")
                         camwatcher.send(json.dumps(camwatcher_control).encode('ascii'))
-                        camwatcher.recv()
-                elif request['cmd'] == 'HC':  # health check
+                        reply = camwatcher.recv()
+                        log.info(f"camwatcher delete response {reply}")
+                elif request['cmd'] == 'HC':  # health checkcd 
                     reply = b'OK'
                 else:
-                    log.warning(f"Unrecognized command: {request}")
-                    reply = b'Error'
-            except KeyError:
-                log.warning(f"Malformed request: {request}")
+                    log.error(f"Unrecognized command: {str(request)}")
+                    reply = b'Error'    
+            except KeyError as keyval:
+                log.error(f'Request field "{keyval}" missing for [{request["cmd"]}] command')
                 reply = b'Error'
             except Exception as e:
-                log.error(f'unexpected exception: {str(e)}')
-                traceback.print_exc()
-                reply = b'Error'
+                log.exception(f'Unexpected exception [{request}] command: {str(e)}')
+                reply = b'Exception'
         else:
-            log.warning(f"Invalid request: {request}")
+            log.error(f"Invalid request: {request}")
             reply = b'Error'
-        pump.send_reply(reply) 
+        pump.send_reply(reply)   # TypeError: not all arguments converted during string formatting
 
 if __name__ == "__main__":
     main()
