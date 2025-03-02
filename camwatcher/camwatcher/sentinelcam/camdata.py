@@ -86,7 +86,6 @@ class CamData:
         self._event_subset = None
         self._event_types = None
         self._event_data = None
-        self._event_camsize = (0,0)
         if self._indexfile:
             try:
                 # read camwatcher index into pandas DataFrame
@@ -181,27 +180,11 @@ class CamData:
             self._event_view = self._event_subset.iloc[0].viewname
             self._event_start = self._event_subset["timestamp"].min()
             self._event_types = self._event_subset["type"].to_list()
-            trk = self._event_subset.loc[self._event_subset['type'] == 'trk']
-            self._event_camsize = (int(trk.iloc[0].width), int(trk.iloc[0].height))
         else:
             self._event_node = None
             self._event_view = None
             self._event_start = None
             self._event_types = []
-            self._event_camsize = (0,0)
-
-    def get_event_camsize(self) -> tuple:
-        """ Return image size from event
-            
-        Must have first invoked `set_event()` to load camera detail for the event.
-        
-        Returns
-        -------
-        tuple
-            The (width, height) of the captured images for this event
-        """
-
-        return self._event_camsize
 
     def get_event_node(self) -> str:
         """ Return node name from event
@@ -342,7 +325,7 @@ class CamData:
             imagePath = os.path.join(basePath, filename)
             yield imagePath
 
-    def __init__(self, csvdir, imgdir, date = datetime.utcnow().isoformat()[:10]):
+    def __init__(self, csvdir, imgdir, date = datetime.now().isoformat()[:10]):
         self._index_path = csvdir
         self._image_path = imgdir
         self.set_date(date)

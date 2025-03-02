@@ -325,7 +325,7 @@ class CamData:
             imagePath = os.path.join(basePath, filename)
             yield imagePath
 
-    def __init__(self, csvdir, imgdir, date = datetime.utcnow().isoformat()[:10]):
+    def __init__(self, csvdir, imgdir, date = datetime.now().isoformat()[:10]):
         self._index_path = csvdir
         self._image_path = imgdir
         self.set_date(date)
