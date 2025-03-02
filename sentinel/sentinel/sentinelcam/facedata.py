@@ -7,6 +7,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 import h5py
 import numpy as np
 import pandas as pd
+from ast import literal_eval
 from datetime import datetime
 
 def findEuclideanDistance(source_representation, test_representation):
@@ -14,6 +15,33 @@ def findEuclideanDistance(source_representation, test_representation):
     euclidean_distance = np.sum(np.multiply(euclidean_distance, euclidean_distance))
     euclidean_distance = np.sqrt(euclidean_distance)
     return euclidean_distance
+
+class FaceStats:
+    def __init__(self, distance, margin, candidate, facecnt) -> None:
+        self.distance = distance
+        self.margin = margin
+        self.candidate = candidate
+        self.facecnt = facecnt
+
+    def format(self) -> str:
+        return f"({self.distance:.6f}|{self.margin:.6f}|{self.candidate}|{self.facecnt})"
+    
+    def parse(self, istr) -> tuple:
+        flds = literal_eval(istr.replace('|',','))
+        if len(flds) == 4:
+            (self.distance, self.margin, self.candidate, self.facecnt) = flds
+        return flds
+
+    def df_apply(self, df) -> pd.DataFrame:
+        df['name']     = df.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
+        df['proba']    = df.apply(lambda x: float(str(x['classname']).split()[1][:-1])/100, axis=1)
+        df['distance'] = df.apply(lambda x: self.parse(str(x['classname']).split()[2])[0], axis=1)
+        df['margin']   = df.apply(lambda x: self.parse(str(x['classname']).split()[2])[1], axis=1)
+        df['usable']   = df.apply(lambda x: self.parse(str(x['classname']).split()[2])[2], axis=1)
+        df['facecnt']  = df.apply(lambda x: self.parse(str(x['classname']).split()[2])[3], axis=1)
+        df['cx']       = df.apply(lambda x: int(x['rect_x1']+(x['rect_x2']-x['rect_x1'])//2), axis=1)
+        df['cy']       = df.apply(lambda x: int(x['rect_y1']+(x['rect_y2']-x['rect_y1'])//2), axis=1)
+        return df
     
 class FaceBaselines:
     def __init__(self, baselines, names) -> None:
