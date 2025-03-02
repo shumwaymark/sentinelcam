@@ -2,15 +2,15 @@
 
 All notable changes to the **SentinelCam** project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Ongoing development
 
-Much of the following is more properly categorized as still in the *wishlist phase* of design.
+This list includes a few current lower priority, *still on the whiteboard*, design efforts.
 
 - Continue refinements to `Outpost` implementation. 
-  - Modernize object detector capabilities with support for newer algorithms.
+  - Modernize object detector capabilities with support for newer algorithms, hardware.
   - Implement filtering mechanism based on object detection results.
   - Begin designing support for a model deployment framework that can be used
     to support custom lenses as another layer beneath object detection.
@@ -21,13 +21,16 @@ Much of the following is more properly categorized as still in the *wishlist pha
   - Implement result signaling to Twilio, to Node-RED via MQTT, and to **imagehub** logging 
     to help support reponsiveness to events in progress as well as for knowledge and state 
     management throughout the larger system. 
-  - Provide an abstraction to support a set of reusable design patterns for the most common
-    ring buffer control techniques.
+  - Provide an abstraction to support a reusable design pattern for ring buffer control 
+    based on an object detection result filter.
   - Implement internal housekeeping to periodically purge oldest job history. This is 
     needed to avoid an obvious memory leak. Perform as a routine task during quiet periods.
     Incorporate a job history report of statistics and performance metrics as an output. This
     could ultimately fuel a **sentinel** health check, perhaps built to support agency based on 
     self-diagnosis. 
+  - Add priority=3 for background sweep tasks, which should only go on-deck when higher priority 
+    queues are cleared. Limit frequency based on time, i.e. no more often than every five minutes.
+    These should be isolated by job class to a single task engine. 
   - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
     based on the queue length for tasks waiting in that job class.  
 - **datapump** needs data sink storage and data analysis with clean-up and reporting as a nightly 
@@ -41,6 +44,38 @@ Much of the following is more properly categorized as still in the *wishlist pha
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.1.1-alpha - 2025-03-02
+
+### Deprecated
+
+- Real time *OpenCV* correlation tracking from the **outpost**, as currently implemented, to be 
+  removed for a future release. At this level, any `SpyGlass` correlation tracking should be refactored 
+  and based solely on geometric centroids of objects detected across result sets. Some newer detection 
+  models support this directly as a factor within the output tensor. 
+
+### Changed
+
+- Improved stats collection from the `FaceRecon` task, which now include the missing facial distance 
+  results. The `FaceSweep` task considers these factors when selecting candidate images for modeling
+  purposes. 
+- Produce a standard `ImageSubscriber` class for subscribing to **outpost** image publishers. This
+  supports a load-and-stay-resident use pattern with `start()`, `stop()`, and `subscribe()` methods
+  allowing a publication stream to be paused and restarted, and changed from one node to another.
+- The `Task.finalze()` method of the **sentinel** task factory now supports a boolean return value.
+  A false result indicates that any chained task should not be executed. For example, there is no need
+  to invoke a downstream facial recon task when no faces were detected in the result set. 
+
+### Fixed
+
+- Added a background process to the **watchtower** for maintaining a list of events. Work to eliminate 
+  Tk thread abuse, by not calling into Tk from the background. This new module is almost stable for its 
+  base use cased of switching between current camera views and replaying prior events. Some issues remain. 
+  Additional work continues towards a stable touchscreen wall console. 
+- Further work towards the pursuit of iron-clad resiliency around timeout handling for failed and/or
+  unresponsive communication connections.
+- Flag waving and declarations of war from the campaign to eliminate abuse of the 0MQ layer. Battles 
+  fought and won. A happy road paved over the carnage.
 
 ## 0.1.0-alpha - 2025-02-12
 
@@ -86,7 +121,7 @@ work towards this effort is still ongoing.
 - Added a job priority field to the **sentinel** task list. Post-event tasks initiated from real time
   **outpost** analysis are assigned a priority 1. Chained jobs receive the same priority as the prior 
   job in the chain. Other analytical tasks are assigned the default priority of 2. The `JobManager` 
-  will attempt  to place tasks on-deck by priority.
+  will attempt to place tasks on-deck by priority.
 
 ## 0.0.33-alpha - 2024-10-01
 
