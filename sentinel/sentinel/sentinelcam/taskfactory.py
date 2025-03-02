@@ -15,7 +15,7 @@ import imutils
 from collections import namedtuple
 from sentinelcam.utils import readConfig
 from sentinelcam.datafeed import DataFeed
-from sentinelcam.facedata import FaceBaselines, FaceList
+from sentinelcam.facedata import FaceBaselines, FaceList, FaceStats
 from sentinelcam.tasklibrary import MobileNetSSD, FaceDetector, FaceAligner, OpenFace
 from sentinelcam.tasklibrary import dhash
 
@@ -36,9 +36,10 @@ class Task:
         # Return True to reiterate with the next frame 
         # Return False to shutdown the pipeline and task
         return False 
-    def finalize(self) -> None:
-        # Optional, for implementing end of task finalization logic 
-        pass
+    def finalize(self) -> bool:
+        # Optional, for implementing end of task finalization logic.
+        # Return False to cancel any chained task. 
+        return True
 
 class MobileNetSSD_allFrames(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -125,14 +126,17 @@ class GetFaces(Task):
                     return False      # Reached last detected person, end the task.
         return True
     
-    def finalize(self) -> None:
+    def finalize(self) -> bool:
         results = ('Faces', self.event_date, self.event_id, len(self.imgs), len(self.persons.index), self._search_cnt, self.face_cnt)
         self.publish(results)
+        return self.face_cnt > 0
 
 class FaceRecon(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.cwUpd = cfg['camwatcher_update']
         self.refkey = cfg['trk_type']
+        self.trkdata = trkdata
+        #self.trkcnt = len(trkdata.index)
         self.trkrecs = iter(trkdata[:].itertuples())
         self.fa = FaceAligner(cfg["face_aligner"])
         self.fe = OpenFace(cfg["face_embeddings"])
@@ -153,6 +157,7 @@ class FaceRecon(Task):
             self.frametime = None
 
     def pipeline(self, frame) -> bool:
+        facecnt = len(self.trkdata.loc[self.trkdata['timestamp'] == self.frametime].index)
         while self.trkRec.timestamp <= self.frametime:
             x1, y1, x2, y2 = self.trkRec.rect_x1, self.trkRec.rect_y1, self.trkRec.rect_x2, self.trkRec.rect_y2
             if x1<0:x1=0
@@ -173,16 +178,18 @@ class FaceRecon(Task):
             j = np.argmax(preds)
             proba = preds[0,j]
             name = self.labels.classes_[j]
+            distance, margin = 0,0
             if proba > 0.97:
                 (distance, margin) = self.fb.compare(embeddings, j)
                 if distance > 0.99:
-                    # almost certainly someone else
+                    # seek confirmation, have high confidence with a large distance
                     (k, distance) = self.fb.search(embeddings)
                     margin = distance - self.fb.thresholds()[k]
                     if k != j:
                         proba = 0
                         if distance > 0.99:
-                            name, j = 'Unknown', self.unk
+                            if candidate:
+                                name, j = 'Unknown', self.unk
                         else:
                             name, j = self.labels.classes_[k], k
             else:
@@ -191,16 +198,18 @@ class FaceRecon(Task):
                 if k != j:
                     proba = 0
                     if distance > 0.99:
-                        name, j = 'Unknown', self.unk
+                        if candidate:
+                            name, j = 'Unknown', self.unk
                     else:
                         name, j = self.labels.classes_[k], k
             if margin < 0.05:  
                 # TODO: Parameterize (or improve) this. Always consider these as possible candidates 
-                # for inclusion in recognition model, since distance within fudge factor over threshold.
+                # for inclusion in recognition model, since distance within fudge factor over threshold?
                 candidate = True
-            flag = '*' if candidate else ''
+            flag = 1 if candidate else 0
+            stats = FaceStats(distance, margin, flag, facecnt)
             if candidate or name != 'Unknown':
-                classlabel = "{}: {:.2f}% {}".format(name, proba * 100, flag)
+                classlabel = "{}: {:.2f}% {}".format(name, proba * 100, stats.format())
                 result = (classlabel, self.trkRec.objid, x1, y1, x2, y2)
                 self.publish(result, self.refkey, self.cwUpd)
                 self.cnts[j] += 1
@@ -211,12 +220,13 @@ class FaceRecon(Task):
         self.frametime = self.trkRec.timestamp 
         return True
     
-    def finalize(self) -> None:
+    def finalize(self) -> True:
         namelist = [self.labels.classes_[n] for n in range(len(self.labels.classes_))]
         namelist.append('Unknown')
         cnts = ", ".join([f"{namelist[n]} {self.cnts[n]}" for n in range(len(self.cnts)) if self.cnts[n]>0])
         results = ('Recon', self.event_date, self.event_id, self.facecnt, cnts)
         self.publish(results)
+        return True
 
 class FaceSweep(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -232,6 +242,7 @@ class FaceSweep(Task):
         fldlist = ['date','event','timestamp','objid','source','status','name','proba','dist','margin',
                     'x1','y1','x2','y2','rx','ry','lx','ly','dx','dy','angle','focus']
         facerec = namedtuple('facerec', fldlist)
+        facestats = FaceStats(None,None,None,None)
         refkeys = [self.facelist.format_refkey(r) for r in self.facelist.get_fullset()[:].itertuples()]
         new_faces = 0
         prev_hash = 0
@@ -240,51 +251,58 @@ class FaceSweep(Task):
         # Probably OK to permit this if not included in the subset with non-zero status flags. But should first
         # remove any exsiting content already held for that event. 
         for sweepchk in cwIndx.loc[cwIndx['type'] == self.ref_type].itertuples():
-            trkdata = self.feed.get_tracking_data(self.taskDate, sweepchk.event, self.ref_type)
-            trkdata['name'] = trkdata.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
-            trkdata['proba'] = trkdata.apply(lambda x: float(str(x['classname']).split()[1][:-1])/100, axis=1)
-            trkdata['usable'] = trkdata.apply(lambda x: str(x['classname'])[-1:], axis=1)
-            for consider in trkdata.loc[trkdata['usable'] == '*'].itertuples():
-                image = cv2.imdecode(np.frombuffer(
-                    self.feed.get_image_jpg(self.taskDate, sweepchk.event, consider.timestamp), 
-                    dtype='uint8'), -1)                    
-                x1, y1, x2, y2 = consider.rect_x1, consider.rect_y1, consider.rect_x2, consider.rect_y2
-                if x1<0:x1=0
-                if y1<0:y1=0
-                face = image[y1:y2, x1:x2]                    
-                if len(face) > 0:
-                    hash = dhash(face)
-                    if hash != prev_hash:
-                        if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
-                        ((rx,ry), (lx,ly), (dx,dy), angle, focus) = self.fa.landmarks(face)
-                        r = {'date': self.taskDate,
-                             'event': sweepchk.event,
-                             'timestamp': consider.timestamp,
-                             'objid': consider.objid,
-                             'source': 0,
-                             'status': 0,
-                             'name': consider.name,
-                             'proba': round(consider.proba, 4),
-                             'dist': 0,                             # TODO: collect this also, somehow
-                             'margin': 0,                           # TODO: collect this also, somehow
-                             'x1': x1,
-                             'y1': y1,
-                             'x2': x2,
-                             'y2': y2,
-                             'rx': rx,
-                             'ry': ry,
-                             'lx': lx,
-                             'ly': ly,
-                             'dx': dx,
-                             'dy': dy,
-                             'angle': round(angle, 1),
-                             'focus': round(focus, 2)
-                        }
-                        keytest = self.facelist.format_refkey(facerec(**r))
-                        if keytest not in refkeys:
-                            self.facelist.add_rows(pd.DataFrame(r.values(), index=fldlist).T)
-                            new_faces += 1
-                    prev_hash = hash 
+            try:
+                trkdata = facestats.df_apply(self.feed.get_tracking_data(self.taskDate, sweepchk.event, self.ref_type))
+                usable = trkdata.loc[trkdata['usable'] == 1]
+                targets = usable.loc[
+                    (usable['proba'] > 0.99) |
+                    ((usable['proba'] == 0 ) & (usable['name'] == 'Unknown') & (usable['distance'] > 0.99)) |
+                    ((usable['proba'] == 0 ) & (usable['name'] != 'Unknown') & (usable['margin'] < 0.05))
+                ]
+                if len(targets.index) > 0:
+                    for consider in targets[:].itertuples():
+                        image = cv2.imdecode(np.frombuffer(
+                            self.feed.get_image_jpg(self.taskDate, sweepchk.event, consider.timestamp), 
+                            dtype='uint8'), -1)
+                        x1, y1, x2, y2 = consider.rect_x1, consider.rect_y1, consider.rect_x2, consider.rect_y2
+                        if x1<0:x1=0
+                        if y1<0:y1=0
+                        face = image[y1:y2, x1:x2]                    
+                        if len(face) > 0:
+                            hash = dhash(face)
+                            if hash != prev_hash:
+                                if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
+                                ((rx,ry), (lx,ly), (dx,dy), angle, focus) = self.fa.landmarks(face)
+                                r = {'date': self.taskDate,
+                                    'event': sweepchk.event,
+                                    'timestamp': consider.timestamp,
+                                    'objid': consider.objid,
+                                    'source': 0,
+                                    'status': 0,
+                                    'name': consider.name,
+                                    'proba': round(consider.proba, 4),
+                                    'dist': round(consider.distance, 6),
+                                    'margin': round(consider.margin, 6),
+                                    'x1': x1,
+                                    'y1': y1,
+                                    'x2': x2,
+                                    'y2': y2,
+                                    'rx': rx,
+                                    'ry': ry,
+                                    'lx': lx,
+                                    'ly': ly,
+                                    'dx': dx,
+                                    'dy': dy,
+                                    'angle': round(angle, 1),
+                                    'focus': round(focus, 2)
+                                }
+                                keytest = self.facelist.format_refkey(facerec(**r))
+                                if keytest not in refkeys:
+                                    self.facelist.add_rows(pd.DataFrame(r.values(), index=fldlist).T)
+                                    new_faces += 1
+                            prev_hash = hash 
+            except DataFeed.TrackingSetEmpty:
+                pass
         # Should always push any updates back to data sink. SFTP? 
         if new_faces:
             self.facelist.commit()
@@ -343,6 +361,7 @@ class DailyCleanup(Task):
     def pipeline(self, frame) -> bool:
         # This is a one-shot pipeline to process all events within the eventDate 
         cwIndx = self.dataFeed.get_date_index(self.event_date)
+        facestats = FaceStats(None,None,None,None)
         types = cwIndx['type'].value_counts()
         trk_cnt = types.get('trk', 0)  # event count
         faces_cnt = types.get('fd1', 0)
@@ -357,15 +376,12 @@ class DailyCleanup(Task):
                 # Also include any face events with no recon result.
                 delete_evts.extend([e for e in face_evts if not e in recon_evts])
                 for event in recon_evts:
-                    recon = self.dataFeed.get_tracking_data(self.event_date, event, 'fr1')
-                    recon['proba'] = recon.apply(lambda x: float(str(x['classname']).split()[1][:-1])/100, axis=1)
-                    recon['usable'] = recon.apply(lambda x: str(x['classname'])[-1:], axis=1)
-                    bestfaces = recon.loc[recon['usable'] == '*']
-                    if len(bestfaces.index) > 0:
-                        continue
-                    highscores = recon.loc[recon['proba'] > self.face_confidence]
-                    if len(highscores.index) > 0:
-                        continue
+                    try:
+                        recon = facestats.df_apply(self.dataFeed.get_tracking_data(self.event_date, event, 'fr1'))
+                        if len(recon.loc[recon['usable'] == 1].index): continue
+                        if len(recon.loc[recon['proba'] > self.face_confidence].index): continue
+                    except DataFeed.TrackingSetEmpty:
+                        pass
                     # Purge any event where face recon found only poor quality face images and low confidence recognitions.
                     delete_evts.append(event)
                 if self.performing_deletes:
@@ -381,122 +397,6 @@ class DailyCleanup(Task):
             else:
                 stats = f"DailyCleanup, face detection ratio of {round(face_ratio,2)} below cutoff threshold, (trk: {trk_cnt}, fd1: {faces_cnt}), no action taken"
             self.publish(stats)
-        return False
-
-class DiskMonitor(Task):
-    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:    
-        self.startDate = jobreq.eventDate
-        self.feed = feed
-
-    def pipeline(self, frame) -> bool:
-        # Get the complete list of dates available through the DataFeed
-        event_dates = self.feed.get_date_list()
-        target_dates = [d for d in event_dates if d >= self.startDate]  
-        for evtDate in target_dates:  
-            dateTag = ('DiskMonitor', evtDate)
-            try:
-                # Get the camwatcher event index for a given date
-                cwIndx = self.feed.get_date_index(evtDate)
-                trkrs = cwIndx.loc[cwIndx['type'] == 'trk']
-                if len(trkrs.index) > 0:
-                    for evt in trkrs[:].itertuples():
-                        event = evt.event
-                        node = evt.node
-                        view = evt.viewname
-                        imgs = self.feed.get_image_list(evtDate, event)
-                        evt_time, objcnt, persons, tails, tail_time = 0, 0, 0, 0, 0
-                        if len(imgs) > 0:
-                            evtData = cwIndx.loc[cwIndx['event'] == evt]
-                            evtelaps = imgs[-1]-imgs[0]
-                            evt_time = round(evtelaps.seconds + evtelaps.microseconds/100000,2)
-                            trkTypes = [t for t in evtData['type']]
-                            # TODO: Need a full analysis of event data by date. For now,
-                            # just focusing on "person" detections. Looking to trim the 
-                            # tail end of the image captures beyond the last detection.
-                            objs = self.feed.get_tracking_data(evtDate, event, 'obj')
-                            if len(objs.index):
-                                objcnt = len(objs.index)
-                                objs['name'] = objs.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
-                                persons = objs.loc[objs['name'] == 'person']
-                                if len(persons.index) > 0:
-                                    personcnt = len(persons.index)
-                                    lastTrk = persons.iloc[-1].timestamp
-                                    tailend = [t for t in imgs if t > lastTrk]
-                                    tails = len(tailend)
-                                    if tails > 0:
-                                        tailelaps = tailend[-1]-tailend[0]
-                                        tail_time = round(tailelaps.seconds + tailelaps.microseconds/100000,2)
-                                        result = dateTag + (event, node, view, len(imgs), evt_time, len(trkTypes), 
-                                                            objcnt, personcnt, tails, round(tails/len(imgs)*100,2), tail_time) 
-                                        self.publish(result)
-                                        # TODO: Just logging these, so not practical. If trimming the tail of the 
-                                        # image captures from events is to be a thing, need a better solution.
-                                        for img in [t.isoformat() for t in tailend]:
-                                            fpath = "{}/{}_{}_{}.jpg".format(
-                                                evtDate,
-                                                event,
-                                                img[:10], 
-                                                img[11:].replace(':','.')
-                                            )
-                                            self.publish(('DiskMonitor', 'framefile', fpath))
-                else:
-                    result = dateTag + ("ERROR", "camwatcher index is empty")
-                    self.publish(result)
-            except DataFeed.ImageSetEmpty as e:
-                result = dateTag + ("ERROR", f"No image data for {e.date},{e.evt}")
-            except DataFeed.TrackingSetEmpty as e:
-                result = dateTag + ("ERROR", f"No tracking data for {e.date},{e.evt},{e.trk}")
-            except Exception as e:
-                result = dateTag + ("ERROR", f"exception retrieving event data: {str(e)}")
-                self.publish(result)
-        return False
-
-class CollectImageSizes(Task):
-    def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:    
-        self.startDate = jobreq.eventDate
-        self.feed = feed
-
-    def pipeline(self, frame) -> bool:
-        # Get the complete list of available dates available through the DataFeed
-        event_dates = self.feed.get_date_list()
-        # ...and begin with the oldest date.
-        event_dates.reverse()  
-        for evtDate in event_dates:  
-            if evtDate < self.startDate:
-                continue
-            dateTag = ('IMGSZ', evtDate)
-            try:
-                # Get the camwatcher event index for a given date
-                cwIndx = self.feed.get_date_index(evtDate)
-                trkrs = cwIndx.loc[cwIndx['type'] == 'trk']
-                if len(trkrs.index) > 0:
-                    # Process every event for this date
-                    for _evt in trkrs[:].itertuples():
-                        event = _evt.event
-                        node = _evt.node
-                        view = _evt.viewname
-                        imgs = self.feed.get_image_list(evtDate, event)
-                        if len(imgs) > 0:
-                            try:
-                                jpeg = self.feed.get_image_jpg(evtDate, event, imgs[0])
-                                if jpeg is not None:
-                                    #frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
-                                    frame = cv2.imdecode(np.frombuffer(jpeg, dtype='uint8'), -1)
-                                    imgSize = (frame.shape[1], frame.shape[0])
-                                    result = dateTag + (event, imgSize, node, view, len(imgs))
-                                else:
-                                    result = dateTag + (event, (-1,-1), node, view, len(imgs), "unable to retrieve image")
-                            except Exception as e:
-                                result = dateTag + (event, (-1,-1), node, view, len(imgs), str(e))
-                        else:
-                            result = dateTag + (event, (0,0), node, view, 0)
-                        self.publish(result)
-                else:
-                    result = dateTag + ("ERROR", "camwatcher index is empty")
-                    self.publish(result)
-            except Exception as e:
-                result = dateTag + ("ERROR", f"exception retrieving event data: {str(e)}")
-                self.publish(result)
         return False
 
 class MeasureRingLatency(Task):
@@ -546,8 +446,6 @@ def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
         'FaceDataUpdate'         : FaceDataUpdate,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
         'DailyCleanup'           : DailyCleanup,
-        'DiskMonitor'            : DiskMonitor,
-        'CollectImageSizes'      : CollectImageSizes,
         'MeasureRingLatency'     : MeasureRingLatency
     }
     cfg = readConfig(cfgfile)
