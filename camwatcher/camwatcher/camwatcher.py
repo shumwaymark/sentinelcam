@@ -16,15 +16,13 @@ import subprocess
 import threading
 import traceback
 import queue
-import imagezmq
-import msgpack
 import zmq
 import pandas as pd
 from time import sleep
 from datetime import date, datetime
 from zmq.asyncio import Context as AsyncContext
 from sentinelcam.camdata import CamData
-from sentinelcam.utils import readConfig
+from sentinelcam.utils import ImageSubscriber, readConfig
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "camwatcher.yaml"))
 
@@ -32,38 +30,6 @@ outposts = {}                        # outpost image subscribers by (node,view)
 threadLock = threading.Lock()        # coordinate updates to list of outpost subscribers
 dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer 
 dateIndxQ = multiprocessing.Queue()  # for creating new camwatcher index entries 
-
-# Helper class implementing an IO deamon thread as an image subscriber
-class ImageSubscriber:
-
-    def __init__(self, publisher, view):
-        self.publisher = publisher
-        self.view = view
-        self._stop = False
-        self._data_ready = threading.Event()
-        self._thread = threading.Thread(target=self._run, args=())
-        self._thread.daemon = True
-        self._thread.start()
-
-    def receive(self, timeout=15.0):
-        flag = self._data_ready.wait(timeout=timeout)
-        if not flag:
-            raise TimeoutError(f"Timed out reading from publisher {self.publisher}")
-        self._data_ready.clear()
-        return self._data
-
-    def _run(self):
-        receiver = imagezmq.ImageHub(self.publisher, REQ_REP=False)
-        while not self._stop:
-            imagedata = receiver.recv_jpg()
-            msg = imagedata[0].split('|')
-            if msg[0].split(' ')[1] == self.view:
-                self._data = (msg[2], imagedata[1])
-                self._data_ready.set()
-        receiver.close()
-
-    def close(self):
-        self._stop = True
 
 # multiprocessing class implementing a subprocess image writer
 class ImageStreamWriter:
@@ -86,12 +52,13 @@ class ImageStreamWriter:
         return path
 
     def _image_subscriber(self, writeImages, eventQueue, publisher, view, outdir):
+        receiver = ImageSubscriber(publisher, view)
         while True:
             eventID = eventQueue.get()
             processEvent = True
             # start image subscription thread and begin frame capture loop
             try:
-                receiver = ImageSubscriber(publisher, view)
+                receiver.start()
                 # always write at least one frame before closing
                 dt, frame = receiver.receive()
                 date_directory = self._set_datedir(outdir, dt[:10])
@@ -105,13 +72,13 @@ class ImageStreamWriter:
                     if writeImages.value:
                         dt, frame = receiver.receive()
                     else:
-                        receiver.close()    # done, close and wait on another
+                        receiver.stop()    # done, stop and wait on another
                         processEvent = False
             except Exception as ex:
                 print(f"ImageStreamWriter failure {self.node_view}")
                 traceback.print_exc()  # see syslog for traceback
             finally:
-                receiver.close()
+                receiver.stop()
                 self.stop()
 
     def start(self, eventID):
@@ -174,7 +141,7 @@ class CSVindex:
             cmd = delQ.get()
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if result.returncode != 0:
-                logging.error(f"CSVindex data deletion failure {result.returncode} from '{cmd}'")
+                logging.warning(f"CSVindex data deletion failure {result.returncode} from '{cmd}'")
             delQ.task_done()
             sleep(2)
  
@@ -196,7 +163,6 @@ class CSVwriter:
         logging.debug("CSVwriter index setup " + evt)
         date_directory = os.path.join(self._folder, _today)
         if _today != self._today:
-            logging.debug("Date folder selection: " + _today)
             try:
                 # if date value changes, insure folder exists 
                 os.mkdir(date_directory) 
@@ -571,7 +537,7 @@ async def control_loop(control_socket, log_socket):
                         new_agent['datasink'] = request['datasink']
                         _agents[name] = SentinelAgent(new_agent, dateIndxQ, name)
                 elif request['cmd'] == 'DelEvt':
-                    # TODO: This code not currently restricted by FaceList.event_locked() 
+                    # TODO: This code not currently restricted by FaceList.event_locked() control
                     dateIndxQ.put((CSVindex.CSV_delete, (request['date'], request['event'])))
                 else:
                     result = 'Error'
@@ -581,10 +547,10 @@ async def control_loop(control_socket, log_socket):
                 logging.warning("No control command was specified, request ignored")
         except ValueError as e:
             result = 'Error'
-            logging.error(f"JSON exception '{str(e)}' decoding camera handoff message: '{msg[1]}'")
+            logging.error(f"JSON exception '{str(e)}' decoding camera handoff message: '{msg}'")
         except KeyError as keyval:
             result = 'Error'
-            logging.error(f"Invalid camera handoff, missing '{keyval}' in message: '{msg[1]}'")
+            logging.error(f"Invalid control message, missing '{keyval}' in message: '{msg}'")
         except Exception as e:  
             result = 'Error'
             logging.error(f"CamWatcher control message failure, '{msg}': {str(e)}")
