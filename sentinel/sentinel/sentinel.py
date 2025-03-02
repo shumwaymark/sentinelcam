@@ -4,25 +4,25 @@ Copyright (c) 2023 by Mark K Shumway, mark.shumway@swanriver.dev
 License: MIT, see the sentinelcam LICENSE for more details.
 """
 
-import asyncio
+import os
 import json
+import time
 import logging
 import logging.config
+import traceback
+import threading
+import queue
+import asyncio
+import multiprocessing
+from multiprocessing import sharedctypes
+from zmq.asyncio import Context as AsyncContext
+from datetime import datetime
+from ast import literal_eval
 import cv2
 import numpy as np
 import pandas as pd
-from ast import literal_eval
-from datetime import datetime
-import multiprocessing
-from multiprocessing import sharedctypes
-import os
-import time
-import threading
-import traceback
-import queue
 import uuid
 import zmq
-from zmq.asyncio import Context as AsyncContext
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.taskfactory import TaskFactory
 from sentinelcam.utils import readConfig
@@ -367,8 +367,8 @@ class JobTasking:
                             trackingData = None
                         else:
                             # preload desired tracking set and retrieve starting image
-                            self.trktype = taskcfg['trk_type'] if 'trk_type' in taskcfg else 'trk'
-                            self.ringctrl = taskcfg['ringctrl'] if 'ringctrl' in taskcfg else 'full'
+                            self.trktype = taskcfg.get('trk_type', 'trk')
+                            self.ringctrl = taskcfg.get('ringctrl', 'full')
                             trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, self.trktype)
                             if self.ringctrl == 'trk':
                                 startframe = trackingData.iloc[0]['timestamp'] 
@@ -417,11 +417,10 @@ class JobTasking:
                         # ----------------------------------------------------------------------
                         #   Publish final results 
                         # ----------------------------------------------------------------------
-                        task.finalize()
-
-                        if nextTask and eoj_status == TaskEngine.TaskDONE:
-                            msg = (TaskEngine.TaskCHAIN, (self.jobreq.jobID, nextTask))
-                            publisher.send(msgpack.packb(msg))
+                        if task.finalize():
+                            if nextTask and eoj_status == TaskEngine.TaskDONE:
+                                msg = (TaskEngine.TaskCHAIN, (self.jobreq.jobID, nextTask))
+                                publisher.send(msgpack.packb(msg))
 
                     except (KeyboardInterrupt, SystemExit):
                         raise
@@ -442,10 +441,10 @@ class JobTasking:
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                         failCnt += 1
-                    #except TimeoutError as e:
-                    #    msg (TaskEngine.TaskERROR, str(e))
-                    #    publisher.send(msgpack.packb(msg))
-                    #    eoj_status = TaskEngine.TaskFAIL
+                    except TimeoutError as e:
+                        msg = (TaskEngine.TaskERROR, str(e))
+                        publisher.send(msgpack.packb(msg))
+                        eoj_status = TaskEngine.TaskFAIL
                     except Exception as e:
                         traceback.print_exc()  # see syslog for traceback  
                         msg = (TaskEngine.TaskERROR, f"taskHost({self.jobreq.eventDate}, {self.jobreq.eventID}), {str(e)}")
@@ -569,7 +568,7 @@ class TaskEngine:
         return self._engine.process.is_alive()
 
     def cancel(self) -> None:
-        # TODO: kill the child process here 
+        # TODO: cancel a running task
         #self.taskFlag.value = TaskEngine.TaskCANCELED
         pass
 
@@ -726,43 +725,43 @@ class JobManager:
             if not taskFeed.empty():
                 (tag, msg) = taskFeed.get()
                 logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
-                #try:
-                if tag == TaskEngine.TaskSUBMIT:
-                    jobreq = taskList[msg]
-                    jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
-                    if jobreq.jobClass in self.ondeck: 
-                        if self.ondeck[jobreq.jobClass] is None: 
-                            self.ondeck[jobreq.jobClass] = jobreq
-                elif tag == TaskEngine.TaskSTARTED:
-                    jobreq = taskList[msg]
-                    self.ondeck[jobreq.jobClass] = None
-                elif tag == TaskEngine.TaskCHAIN:
-                    (jobid, task) = msg
-                    jobreq = taskList[jobid]
-                    self._chainJob(jobid, task)
-                elif tag in [TaskEngine.TaskDONE,
-                             TaskEngine.TaskFAIL,
-                             TaskEngine.TaskCANCELED]:
-                    jobreq = taskList[msg]
-                    engine = self.engines[jobreq.engine]
-                    if engine.jobreq.jobID == msg:
-                        engine.jobreq = None
-                        task_stats = (engine.get_image_cnt(), engine.get_image_rate())
-                        jobreq.deregisterJOB(tag, task_stats)
-                        logging.debug(f"Engine {engine.getName()} gone idle.")
-                    if self.ondeck[jobreq.jobClass] == jobreq:
+                try:
+                    if tag == TaskEngine.TaskSUBMIT:
+                        jobreq = taskList[msg]
+                        jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
+                        if jobreq.jobClass in self.ondeck: 
+                            if self.ondeck[jobreq.jobClass] is None: 
+                                self.ondeck[jobreq.jobClass] = jobreq
+                    elif tag == TaskEngine.TaskSTARTED:
+                        jobreq = taskList[msg]
                         self.ondeck[jobreq.jobClass] = None
-                elif tag == TaskEngine.TaskBOMB:
-                    # TODO: Need an engine restart here 
-                    logging.critical(f"TaskEngine '{msg}' bombed out.")
-                    if msg in self.engines:
-                        del self.engines[msg]
-                else:
-                    logging.error(f"Undefined status '{tag}' for job {msg}")
-                #except TimeoutError as e:
-                #    logging.error(f"JobManager timeout {e}")
-                #except Exception as e:
-                #    logging.error(f"JobManager unexpected exception: {e}")
+                    elif tag == TaskEngine.TaskCHAIN:
+                        (jobid, task) = msg
+                        jobreq = taskList[jobid]
+                        self._chainJob(jobid, task)
+                    elif tag in [TaskEngine.TaskDONE,
+                                TaskEngine.TaskFAIL,
+                                TaskEngine.TaskCANCELED]:
+                        jobreq = taskList[msg]
+                        engine = self.engines[jobreq.engine]
+                        if engine.jobreq.jobID == msg:
+                            engine.jobreq = None
+                            task_stats = (engine.get_image_cnt(), engine.get_image_rate())
+                            jobreq.deregisterJOB(tag, task_stats)
+                            logging.debug(f"Engine {engine.getName()} gone idle.")
+                        if self.ondeck[jobreq.jobClass] == jobreq:
+                            self.ondeck[jobreq.jobClass] = None
+                    elif tag == TaskEngine.TaskBOMB:
+                        # TODO: Need an engine restart here 
+                        logging.critical(f"TaskEngine '{msg}' bombed out.")
+                        if msg in self.engines:
+                            del self.engines[msg]
+                    else:
+                        logging.error(f"Undefined status '{tag}' for job {msg}")
+                except TimeoutError as e:
+                    logging.error(f"JobManager timeout {e}")
+                except Exception as e:
+                    logging.error(f"JobManager unexpected exception: {e}")
                 taskFeed.task_done()
                 logging.debug(f"Now ondeck {str(self._ondeck_status())}")
             
@@ -844,6 +843,7 @@ async def task_loop(asyncREP, taskCFG):
             if 'task' in request:
                 task = request['task']
                 if task == 'HISTORY':
+                    #  TODO:  put this on a background thread
                     JobRequest.full_history_report()
                 elif task == 'STATUS':  
                     pass

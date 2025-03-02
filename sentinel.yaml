@@ -23,9 +23,9 @@ task_engines:
     Alpha: 
         classes: [1]
         ring_buffers: default
-        accelerator: ncs2      # [cpu, ncs2, coral]
+        accelerator: coral      # [cpu, ncs2, coral]
     Bravo1: 
-        classes: [2,3]
+        classes: [2]
         ring_buffers: default
         accelerator: cpu
     Bravo2: 
@@ -67,9 +67,6 @@ task_list:
     DailyCleanup:
         config: /home/ops/sentinel/tasks/DailyCleanup.yaml
         class: 3
-    CollectImageSizes:
-        config: None
-        class: 2
     MeasureRingLatency:
         config: /home/ops/sentinel/tasks/MeasureRingLatency.yaml
         class: 1
