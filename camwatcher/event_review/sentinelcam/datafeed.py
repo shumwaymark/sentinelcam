@@ -169,7 +169,7 @@ class DataFeed(imagezmq.ImageSender):
         flag = self._haveResult.wait(timeout=self._timeout)
         if not flag: # shutdown thread and attempt recovery
             self._happy = False
-            timedout = f"Timed out reading from datapump {self._pump}"
+            timedout = f"Timed out reading from datapump {self._pump}, {request}"
             logging.error(timedout)
             self.zmq_socket.close()
             self.zmq_socket = self.zmq_context.socket(zmq.REQ)
