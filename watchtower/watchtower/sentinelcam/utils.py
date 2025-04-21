@@ -1,11 +1,14 @@
 import os
+import logging
 import time
 import threading
 import imagezmq
 from collections import deque
 from datetime import datetime
 from time import sleep
+from typing import Tuple, Optional
 import yaml
+import zmq
 
 class FPS:
     def __init__(self, history=160) -> None:
@@ -35,37 +38,93 @@ class FPS:
          return datetime.fromtimestamp(self._deque[-1])
     
 # Helper class implementing an IO deamon thread as an Outpost image subscriber
-class ImageSubscriber:
+class ImageSubscriber(imagezmq.ImageHub):
     def __init__(self, publisher, view):
+        imagezmq.ImageHub.__init__(self, open_port=publisher, REQ_REP=False)
         self.publisher = publisher
         self.view = view
         self._stop = False
         self._data_ready = threading.Event()
         self._continue = threading.Event()
-        self._thread = threading.Thread(daemon=True, target=self._run, args=())
+        self._data: Optional[Tuple[str, bytes]] = None
+        self._connection_attempts = 0
+        self._max_retries = 3
+        self._setupPoller()
+        self._startThread()
+
+    def _setupPoller(self) -> None:
+        self._poller = zmq.Poller()
+        self._poller.register(self.zmq_socket, zmq.POLLIN)
+        
+    def _startThread(self) -> None:
+        self._thread = threading.Thread(daemon=True, target=self._receiver, args=())
         self._thread.start()
 
-    def _run(self):
-        receiver = imagezmq.ImageHub(self.publisher, REQ_REP=False)
-        receiver.zmq_socket.disconnect(self.publisher)
+    def msg_waiting(self) -> bool:
+        events = dict(self._poller.poll(0))
+        if self.zmq_socket in events:
+            return events[self.zmq_socket] == zmq.POLLIN
+        else:
+            return False
+
+    def _receiver(self):
+        """Main receiver loop with connection management."""
+        self._connection_attempts = 0  # Initialize outside both loops
+        self._safe_disconnect()
+        
         while True:
             self._continue.wait()
-            receiver.connect(self.publisher)
-            self._stop = False
-            while not self._stop:
-                imagedata = receiver.recv_jpg()
-                msg = imagedata[0].split('|')
-                if msg[0].split(' ')[1] == self.view:
-                    self._data = (msg[2], imagedata[1])
-                    self._data_ready.set()
-            receiver.zmq_socket.disconnect(self.publisher)
+            while self._connection_attempts < self._max_retries:
+                try:
+                    self.connect(self.publisher)
+                    self._stop = False
+                    logging.info(f"Connected to publisher {self.publisher}")
+                    
+                    while not self._stop:
+                        if self.msg_waiting():
+                            try:
+                                imagedata = self.recv_jpg()
+                                msg = imagedata[0].split('|')
+                                if msg[0].split(' ')[1] == self.view:
+                                    self._data = (msg[2], imagedata[1])
+                                    self._data_ready.set()
+                            except zmq.error.ZMQError as e:
+                                logging.error(f"ZMQ error while receiving: {e}")
+                                break
+                        else:
+                            sleep(0.0005)
+                    
+                    # If we get here without error, reset attempts
+                    self._connection_attempts = 0
+                    break  # Exit retry loop on success
+                    
+                except zmq.error.ZMQError as e:
+                    self._connection_attempts += 1
+                    logging.error(f"Connection attempt {self._connection_attempts} failed: {e}")
+                    if self._connection_attempts < self._max_retries:
+                        sleep(1)  # Wait before retry
+                        continue
+                    logging.error("Max connection retries reached")
+                    
+                finally:
+                    self._safe_disconnect()
+            
+            # Reset state before next iteration
             self._data_ready.clear()
             self._continue.clear()
-            sleep(0.1)
+            self._connection_attempts = 0  # Reset for next connection cycle
+
+    def _safe_disconnect(self):
+        """Safely disconnect from publisher."""
+        try:
+            self.zmq_socket.disconnect(self.publisher)
+        except zmq.error.ZMQError as e:
+            logging.debug(f"Disconnect error (expected if not connected): {e}")
 
     def receive(self, timeout=15.0):
         flag = self._data_ready.wait(timeout=timeout)
         if not flag:
+            self.stop()            
             raise TimeoutError(f"Timed out reading from publisher {self.publisher}")
         self._data_ready.clear()
         return self._data

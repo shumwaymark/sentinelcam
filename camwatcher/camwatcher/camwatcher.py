@@ -61,6 +61,8 @@ class ImageStreamWriter:
                 receiver.start()
                 # always write at least one frame before closing
                 dt, frame = receiver.receive()
+                if (datetime.now() - datetime.fromisoformat(dt)).seconds > 1:
+                    dt, frame = receiver.receive()  # TODO: Fix the need for this?
                 date_directory = self._set_datedir(outdir, dt[:10])
                 while processEvent:
                     if len(dt) == 19: dt += ".000000"
