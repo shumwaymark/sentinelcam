@@ -727,37 +727,54 @@ class JobManager:
                 logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
                 try:
                     if tag == TaskEngine.TaskSUBMIT:
-                        jobreq = taskList[msg]
-                        jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
-                        if jobreq.jobClass in self.ondeck: 
-                            if self.ondeck[jobreq.jobClass] is None: 
-                                self.ondeck[jobreq.jobClass] = jobreq
+                        # New task request received
+                        taskname = msg['task']
+                        if taskname in self.taskmenu:
+                            jreq = JobRequest(msg['sink'], 
+                                           msg['node'], 
+                                           msg['date'], 
+                                           msg['event'], 
+                                           msg['pump'], 
+                                           taskname,
+                                           msg['priority'] if 'priority' in msg else 2)
+                            jreq.jobClass = self.taskmenu[taskname]['class']
+                            
+                            # Stage task request on deck
+                            if jreq.jobClass in self.ondeck:
+                                if self.ondeck[jreq.jobClass] is None:
+                                    self.ondeck[jreq.jobClass] = jreq
+                        else:
+                            logging.error(f"Unsupported task request: {taskname}")
+                            
                     elif tag == TaskEngine.TaskSTARTED:
-                        jobreq = taskList[msg]
-                        self.ondeck[jobreq.jobClass] = None
+                        # Task is now running
+                        if msg in taskList:
+                            jreq = taskList[msg]
+                            self.ondeck[jreq.jobClass] = None
+                            
                     elif tag == TaskEngine.TaskCHAIN:
+                        # Chain to next task
                         (jobid, task) = msg
-                        jobreq = taskList[jobid]
                         self._chainJob(jobid, task)
+                        
                     elif tag in [TaskEngine.TaskDONE,
-                                TaskEngine.TaskFAIL,
-                                TaskEngine.TaskCANCELED]:
-                        jobreq = taskList[msg]
-                        engine = self.engines[jobreq.engine]
-                        if engine.jobreq.jobID == msg:
-                            engine.jobreq = None
-                            task_stats = (engine.get_image_cnt(), engine.get_image_rate())
-                            jobreq.deregisterJOB(tag, task_stats)
-                            logging.debug(f"Engine {engine.getName()} gone idle.")
-                        if self.ondeck[jobreq.jobClass] == jobreq:
-                            self.ondeck[jobreq.jobClass] = None
+                               TaskEngine.TaskFAIL,
+                               TaskEngine.TaskCANCELED]:
+                        # Task completed, failed or was canceled
+                        (jobid, task_stats) = msg
+                        if jobid in taskList:
+                            jreq = taskList[jobid]
+                            jreq.deregisterJOB(tag, task_stats)
+                        
                     elif tag == TaskEngine.TaskBOMB:
-                        # TODO: Need an engine restart here 
-                        logging.critical(f"TaskEngine '{msg}' bombed out.")
+                        # Task engine failed catastrophically
+                        logging.critical(f"TaskEngine {msg} failure.")
                         if msg in self.engines:
                             del self.engines[msg]
+                        
                     else:
-                        logging.error(f"Undefined status '{tag}' for job {msg}")
+                        logging.error(f"JobManager ignored unsupported task message: {tag}")
+                        
                 except TimeoutError as e:
                     logging.error(f"JobManager timeout {e}")
                 except Exception as e:
@@ -772,18 +789,18 @@ class JobManager:
                 if engine.is_alive():
                     if engine.getJobID() is not None:
                         runningTasks += 1
+                        # Feed images to task engine ring buffer
                         if engine.have_request():
                             (cmd, key) = engine.get_request()
                             if cmd == JobManager.ReadSTART:
                                 self._feedStart(engine, key)
-                                engine.send_response(engine.ringBuffer.get())
+                                bucket = engine.ringBuffer.get()
                             elif cmd == JobManager.ReadNEXT:
-                                engine.ringBuffer.frame_complete()
-                                engine.send_response(engine.ringBuffer.get())
-                        elif engine.cursor:
-                            self._feedNext(engine)
-                        # TODO: Need a mechanism to cleanly shutdown a 
-                        # running task in the event of DataFeed timeouts.
+                                self._feedNext(engine)
+                                bucket = engine.ringBuffer.get()
+                            else:
+                                bucket = -1
+                            engine.send_response(bucket)
                 else:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{engineName}' found dead.")
@@ -791,38 +808,17 @@ class JobManager:
 
             if runningTasks < len(self.engines):
                 # Have available capacity, what's on-deck by jobclass?
-                for engine in self.engines.items():
-                    if engine[1].getJobID() is None:
-                        for jobclass in engine[1].getClasses():
-                            if self.ondeck[jobclass] is not None:
+                for engine in self.engines.values():
+                    if engine.getJobID() is None:
+                        # Engine is available, check ondeck tasks that match its classes
+                        engine_classes = engine.getClasses()
+                        for jobclass in self.ondeck:
+                            if jobclass in engine_classes:
                                 jreq = self.ondeck[jobclass]
-                                # confirm that another engine has not already been assigned this request
-                                if jreq.jobID not in [taskengine.getJobID() for taskengine in self.engines.values()]:
-                                    logging.debug(f"Found on deck for class {jobclass}: {jreq.jobID}")
-                                    self._releaseJob(jreq.jobID, engine[0])
+                                if jreq is not None:
+                                    # Found a matching task, release it to the engine
+                                    self._releaseJob(jreq.jobID, engine.getName())
                                     break
-                # Assign next pending job request to any open on-deck matching class. Ventilation goes here. 
-                # TODO: When running in real-time, need to implement a priority based on the event start time 
-                # and/or task type for waiting requests. Is it best to gather results in the order events happened, 
-                # or better to give priority to the most recent event, even though the prior event has not yet been 
-                # fully analyzed? i.e. Perhaps tasks for an "event in progress" should always receive the highest 
-                # priority. Might not be the best approach for a fast-moving environment where multiple views could 
-                # each be triggering events around the same time. Where should attention be focused? The risk is to
-                # mostly be playing a game of catch-up, always behind what's happening in real time, with limited
-                # understanding of what just occured. Each view could be producing requests for the same event as 
-                # action progresses from one view to another. Alternatively, they could be completely unrelated, 
-                # where distinct events are being simultaneously captured from one or more non-adjacent views.
-                for jobclass in self.ondeck:
-                    if self.ondeck[jobclass] is None:
-                        with jobLock:
-                            pending = [r.jobID for r in taskList.values() 
-                                if r.jobStatus == JobRequest.Status_QUEUED and r.jobClass == jobclass and r.priority == 1]
-                            if len(pending) == 0:
-                                pending = [r.jobID for r in taskList.values() 
-                                    if r.jobStatus == JobRequest.Status_QUEUED and r.jobClass == jobclass]
-                        if len(pending) > 0:
-                            logging.debug(f"Queue up for ondeck, class {jobclass}: {pending[0]}")
-                            taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
 
             if taskFeed.empty() and runningTasks == 0:
                 # nothing currently running or waiting to run
