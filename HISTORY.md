@@ -56,8 +56,8 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - Refactored the `ImageSubscriber` class as a proper subclass of `imagezmq.ImageHub`, along with 
   hardening for error handling and retries on connection failures. Support safe disconnects
   from publishers. 
-- Refinements to **sentinel** task engine to support a more robust job management system including 
-  corrections to the `JobManager` class for managing the task list. 
+- Refinements to **sentinel** task engine for more robust jobgit  scheduling including corrections to 
+  the `JobManager` class for better ventilation and task list management. 
 
 ## 0.1.1-alpha - 2025-03-02
 
