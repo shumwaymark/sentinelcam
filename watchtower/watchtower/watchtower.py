@@ -132,9 +132,10 @@ class PlayerDaemon:
         self.ringbuffers = ringbuffers
         self.datafeeds = {}
         self.commandQueue = multiprocessing.Queue()
+        self.stateQueue = multiprocessing.Queue()  # Queue for state change acknowledgments
         self.runswitch = multiprocessing.Value('i', 0)
         self.process = multiprocessing.Process(target=self._data_monster, args=(
-            self.commandQueue, self.runswitch, self.wirename, self.ringbuffers))
+            self.commandQueue, self.stateQueue, self.runswitch, self.wirename, self.ringbuffers))
         self.process.start()
 
     def _setPump(self, pump) -> DataFeed:
@@ -142,7 +143,7 @@ class PlayerDaemon:
             self.datafeeds[pump] = DataFeed(pump)
         return self.datafeeds[pump]
         
-    def _data_monster(self, commandQueue, keepgoing, wirename, ringbuffers):
+    def _data_monster(self, commandQueue, stateQueue, keepgoing, wirename, ringbuffers):
         ringwire = RingWire(wirename)
         # Wait here for handshake from player thread in parent process
         handshake = ringwire.recv()  
@@ -161,7 +162,7 @@ class PlayerDaemon:
                 (datapump, publisher, view) = cmd[1:]
                 # This taps into a live image publication stream. There is
                 # no end to this; it always represents current data capture.
-                # Just keep going here forever until explicity stopped. 
+                # Just keep going here forever until explicitly stopped. 
                 if not receiver:
                     receiver = ImageSubscriber(publisher, view)
                 try:
@@ -175,6 +176,7 @@ class PlayerDaemon:
                         ringbuffer = ringbuffers[ring]  # TODO: handle exception for unexpected sizes
                     ringbuffer.reset()
                     ringbuffer.put(frame)
+                    stateQueue.put(True)  # Acknowledge started
                     while keepgoing.value:
                         if ringwire.ready():
                             msg = ringwire.recv()
@@ -187,15 +189,16 @@ class PlayerDaemon:
                             sleep(0.005)
                         else:
                             ringbuffer.put(simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR'))
+                    stateQueue.put(False)  # Acknowledge stopped
                 except Exception as ex:
                     # TODO: need recovery / reattempt management here?
                     print(f"ImageSubscriber failure reading from {publisher}, {str(ex)}")
                 finally:
                     receiver.stop()
-            else:                                                             # cmd[0] == EVENT
+            else:  # cmd[0] == EVENT
                 (datapump, viewname, eventdate, eventid, imgsize) = cmd[1:]   
                 # Unlike a live outpost viewer, datapump events have a definite end. Maintain state and keep
-                # the ring buffer populated. An exhausted ring buffer is considered EOF wWhen reading in either 
+                # the ring buffer populated. An exhausted ring buffer is considered EOF when reading in either 
                 # direction. Send an EOF response to the Player and reset to the beginning in either event.
                 feed = self._setPump(datapump)
                 try:
@@ -211,6 +214,7 @@ class PlayerDaemon:
                         forward = True
                         frameidx = 1
                     started = False
+                    stateQueue.put(True)  # Acknowledge started
                     while keepgoing.value:
                         if ringwire.ready():
                             msg = ringwire.recv() # response here reserved for player commands, reverse/forward/other
@@ -231,11 +235,11 @@ class PlayerDaemon:
                                 jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[frameidx])
                                 ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
                                 frameidx = frameidx + 1 if forward else frameidx - 1
+                    stateQueue.put(False)  # Acknowledge stopped
 
                 # TODO: Need to flood the ring bufffer with REDX images, and then allow for image retrieval
                 # before exiting? Refactor this try/catch block appropriately if feasible, or seek alternative.
                 # Perhaps implement recovery / reattempt management. 
-                # Need clear communication to Player thread regarding state.
                 except KeyError as keyval:
                     print(f"PlayerDaemon internal key error '{keyval}'")
                     ringbuffer.put(redx_image(ring[0],ring[1]))
@@ -249,9 +253,11 @@ class PlayerDaemon:
     def start(self, command_block):
         self.runswitch.value = 1
         self.commandQueue.put(command_block)
+        return self.stateQueue.get()  # Wait for acknowledgment
 
     def stop(self):
         self.runswitch.value = 0
+        return self.stateQueue.get()  # Wait for acknowledgment
 
 class TextHelper:
     def __init__(self) -> None:
@@ -382,11 +388,8 @@ class Player:
             dataReady.clear()
             srcQ.task_done()
             while srcQ.empty():
-                # Note that for any new command or pause/play toggle, an 
-                # extended time period (hours, days, weeks) may have elapsed.
                 if toggle.is_set():
                     paused = not paused
-                    toggle.clear()
                     viewfps.reset()
                     if paused:
                         player_daemon.stop()
@@ -395,6 +398,7 @@ class Player:
                         if cmd[0] == EVENT:
                             event_start = frametimes[frameidx] if len(frametimes) > 0 else datetime.now()
                             playback_begin = datetime.now()
+                    toggle.clear()
                 if paused:
                     sleep(0.005)
                 else:
@@ -446,14 +450,7 @@ class Player:
                             print('Unhandled exception caught:', str(ex))
                             traceback.print_exc()                            
 
-# NOTE: Regarding nomenclature. For SentinelCam, "event" is an outpost video event which has
-# been stored on a data sink. Just a word to the wise: do not confuse with a tkinkter "event".
-
 class SentinelSubscriber:
-    # TODO: This will need some housekeeping logic. Events can accumulate throughout the 
-    # day. Watch for daily cleanup event, and purge history. Rebuild from cleaned-up date, 
-    # including refreshing labels and thumbnails associated with OutpostView menu items. Also,
-    # perhaps just keep a fixed-length history to better support views with infrequent events.
     def __init__(self, sentinel) -> None:
         self.eventQueue = multiprocessing.Queue()
         self.process = multiprocessing.Process(target=self._sentinel_reader, args=(
@@ -495,6 +492,7 @@ class SentinelSubscriber:
 class EventListUpdater:
     def __init__(self, eventQ, newEvent, outpost_views):
         self._eventData = None
+        self._image = blank_image(1,1)
         self._thread = threading.Thread(daemon=True, target=self._run, args=(eventQ, newEvent, outpost_views))
         self._thread.start()
 
@@ -521,56 +519,50 @@ class EventListUpdater:
                 evtlist = [(rec.timestamp, day, rec.event, (rec.width, rec.height)) for rec in viewEvts.itertuples()]
                 v.set_event_list(evtlist[:-1])
                 self._eventData = (v.view, evtlist[-1])
-            # with event data properly staged, grab the current image for the menu thumbnail
-            try:
-                if receiver:
-                    receiver.subscribe(v.publisher, v.view)
-                else:
-                    receiver = ImageSubscriber(v.publisher, v.view)
-                receiver.start()
-                image = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
-                receiver.stop()
-                v.update_thumbnail(image)
-            except Exception as ex:
-                print(f"EventListUpdater gather thumbnails for [{v.view}]: {str(ex)}")
-            print(f"EventListUpdater event setup {self._eventData}")
-            newEvent.set()
-            while newEvent.is_set():
-                sleep(0.005)
+                # with event data properly staged, select a sample image for the menu thumbnail
+                try:
+                    day = evtlist[-1][1]
+                    event = evtlist[-1][2]
+                    trkdata = feed.get_tracking_data(day, event)
+                    persons = trkdata.loc[trkdata['classname'].str.startswith('person')]
+                    sample_frame = len(persons.index) // 2
+                    self._image = simplejpeg.decode_jpeg(
+                        feed.get_image_jpg(day, event, persons.iloc[sample_frame]['timestamp']), 
+                        colorspace='BGR')
+                except Exception as ex:
+                    print(f"EventListUpdater gather thumbnail for [{v.view}]: {str(ex)}")
+                newEvent.set()
+                while newEvent.is_set():
+                    sleep(0.01)
         print('EventListUpdater started.')
         while True:
             (viewkey, evtkey) = eventQ.get()
             try:
                 (node, view, sink) = viewkey
                 (evtDate, event, pump) = evtkey
-                # TODO: Need a configurable object detection threshold by view. If no object 
-                # of interest was detected from post processing after a triggered motion event, 
-                # it may be preferable to exclude it from the watchtower event list. 
                 if not pump in datafeeds:
                     datafeeds[pump] = DataFeed(pump)
                 feed = datafeeds[pump]
                 cwIndx = feed.get_date_index(evtDate)
-                trkevts = cwIndx.loc[(cwIndx['event'] == event) & (cwIndx['type'] == 'trk')]
-                if len(trkevts.index) > 0:
-                    evtRec = trkevts.iloc[0] 
+                trkevt = cwIndx.loc[(cwIndx['event'] == event) & (cwIndx['type'] == 'trk')]
+                if len(trkevt.index) > 0:
+                    evtRec = trkevt.iloc[0] 
+                    trkdata = feed.get_tracking_data(evtDate, event)
+                    persons = trkdata.loc[trkdata['classname'].str.startswith('person')]
+                    sample_frame = len(persons.index) // 2
                     evtRef = (evtRec.timestamp, evtDate, event, (evtRec.width, evtRec.height))
                     self._eventData = (view, evtRef)
-                    print(f"EventListUpdater new event {self._eventData}")
+                    self._image = simplejpeg.decode_jpeg(
+                        feed.get_image_jpg(evtDate, event, persons.iloc[sample_frame]['timestamp']), 
+                        colorspace='BGR')
                     newEvent.set()
                     while newEvent.is_set():
-                        sleep(0.005)
-                else:
-                    print(f"Unexpected: EventListUpdater has no 'trk' data found for event {evtkey[0]}, {evtkey[1]} on '{viewkey[2]}'")
-                sleep(1)
-                # TODO: Need to select the best representative thumbnail for each event.
-                # New thumbnail should be a selected image from the actual event, 
-                # assuming something of interest was captured. Effectively: for updating 
-                # the thumbnail / menu refdata, ignore any uninteresting motion events.
+                        sleep(0.1)
             except Exception as e:
                 print(f"EventListUpdater trapped exception: {str(e)}")
 
     def getEventData(self):
-        return self._eventData
+        return (self._eventData, self._image)
 
 class OutpostView:
     def __init__(self, view, node, publisher, sinktag, datapump, imgsize, description) -> None:
@@ -585,6 +577,7 @@ class OutpostView:
         self.menulabel = description
         self.menuref = None
         self.eventlist = []
+        self.max_events = CFG.get('max_events_per_view', 100)  # Default to 100 if not specified
 
     def store_menuref(self, menuitem) -> None:
         self.menuref = menuitem
@@ -599,13 +592,14 @@ class OutpostView:
 
     def add_event(self, event) -> None:
         with dataLock:
+            if len(self.eventlist) >= self.max_events:
+                # Remove oldest event when buffer is full
+                self.eventlist.pop(0)
             self.eventlist.append(event)
+            self.update_label()
 
     def update_label(self) -> None:
-        evt_time = ''
-        if len(self.eventlist) > 0:
-            evt_ts = self.eventlist[-1][0]
-            evt_time = evt_ts.to_pydatetime().strftime('%A %b %d, %I:%M %p')
+        evt_time = self.eventlist[-1][0].to_pydatetime().strftime('%A %b %d, %I:%M %p')
         self.menulabel = f"{self.description}\n{evt_time}"
 
     def update_thumbnail(self, image):
@@ -682,33 +676,35 @@ class MenuPanel(ttk.Frame):
         self.canvas.yview_moveto(self.scrollposition / self.canvasheight)
 
 class OutpostMenuitem(ttk.Frame):
-    def __init__(self, parent, view):
+    def __init__(self, parent, view, outpost_views):
         ttk.Frame.__init__(self, parent, borderwidth=0)
-        self.image = convert_tkImage(view.thumbnail)
-        self.label = tk.StringVar(value=view.menulabel)
+        v = outpost_views[view]
+        self.image = convert_tkImage(v.thumbnail)
+        self.label = tk.StringVar(value=v.menulabel)
         self.v = tk.Label(self, image=self.image, borderwidth=0, highlightthickness=0)
         self.t = ttk.Label(self, textvariable=self.label, font=('TkCaptionFont', 12), 
                            background="black", foreground="chartreuse", justify="center")
         self.v.grid(column=0, row=0)
         self.t.grid(column=0, row=1)
         self.t.bind('<Button-1>', self.select_me, '+')
-        self.outpost_view = view
-        self.outpost_view.store_menuref(self)
+        self.outpost_views = outpost_views
+        self.viewname = view
     def select_me(self, event=None):
-        app.select_outpost_view(self.outpost_view.view)
+        app.select_outpost_view(self.viewname)
         app.player_panel.play()
     def update(self) -> None:
-        self.label.set(self.outpost_view.menulabel)
-        self.image = convert_tkImage(self.outpost_view.thumbnail)
+        v = self.outpost_views[self.viewname]
+        self.label.set(v.menulabel)
+        self.image = convert_tkImage(v.thumbnail)
         self.v['image'] = self.image
-        print(f"OutpostMenuitem.update() [{self.outpost_view.view}]")
 
 class OutpostList(MenuPanel):
     def __init__(self, parent, width, height, outpost_views):
         MenuPanel.__init__(self, parent, width, height)
         col, row = 0, 0
-        for v in outpost_views.values():
-            item = OutpostMenuitem(self.interior, v)
+        for v in outpost_views:
+            item = OutpostMenuitem(self.interior, v, outpost_views)
+            outpost_views[v].store_menuref(item)
             item.grid(column=col, row=row, padx=10, pady=10)
             if col + 1 > 2:
                 col = -1
@@ -780,6 +776,7 @@ class PlayerPage(tk.Canvas):
         id = self.create_image(480, 330, anchor="nw", image=self.share_img)
         self.tag_bind(id, "<Button-1>", self.share)
         self.addtag_withtag('player_buttons', id)
+        self.toggle_pending = False
         self.paused = True
         self.show_buttons()
 
@@ -789,8 +786,9 @@ class PlayerPage(tk.Canvas):
         self.itemconfig(self.image, image=self.current_image)
 
     def show_buttons(self, event=None):
-        self.itemconfig('player_buttons', state='normal')
-        self.auto_hide = self.after(2500, self.hide_buttons)
+        if not self.toggle_pending:
+            self.itemconfig('player_buttons', state='normal')
+            self.auto_hide = self.after(2500, self.hide_buttons)
 
     def hide_buttons(self):
         self.itemconfig('player_buttons', state='hidden')
@@ -798,6 +796,14 @@ class PlayerPage(tk.Canvas):
     def hide_buttons_now(self, event=None):
         self.after_cancel(self.auto_hide)
         self.hide_buttons()
+
+    def update_state(self):
+        self.paused = not self.paused
+        if self.paused:
+            self.itemconfig(self.playpause, image=self.play_img)
+        else:
+            self.itemconfig(self.playpause, image=self.pause_img)
+        self.toggle_pending = False
 
     def toggle(self, event=None):
         self.hide_buttons_now()
@@ -812,18 +818,13 @@ class PlayerPage(tk.Canvas):
             self.play_pause()
 
     def play_pause(self):
-        self.paused = not self.paused
-        if self.paused:
-            self.itemconfig(self.playpause, image=self.play_img)
-        else:
-            self.itemconfig(self.playpause, image=self.pause_img)
         app.toggle.set()
-        sleep(0.005)
+        self.toggle_pending = True
+        sleep(0.01)
 
     def forced_pause(self):
         app.show_page(PLAYER_PAGE)
-        if not self.paused:
-            self.play_pause()
+        self.pause()
         self.itemconfig('player_buttons', state='normal')
         app.select_outpost_view()
 
@@ -955,24 +956,27 @@ class Application(ttk.Frame):
             self.dataReady.clear()
             _delay += 1
         if self.newEvent.is_set():
-            (view, evtref) = self.eventList_updater.getEventData()
+            ((view, evtref), image) = self.eventList_updater.getEventData()
             v = self.outpost_views[view]
+            v.update_thumbnail(image)
             v.add_event(evtref)
             v.menuref.update()
             if view == self.current_view: self.eventIdx = self.view.event_count()
             self.newEvent.clear()
+        if self.player_panel.toggle_pending:
+            if not self.toggle.is_set():
+                self.player_panel.update_state()
         if self.daemonEOF.is_set():
             self.player_panel.pause()
             self.daemonEOF.clear()
         self.master.after(_delay, self.update)
 
 def quit(event=None):
-     root.destroy()
+    root.destroy()
 
 root = tk.Tk()
 root.overrideredirect(True)
 root.attributes("-fullscreen", True)
 app = Application(master=root)
-app.after(1000, app.player_panel.play_pause())
 app.reset_inactivity()
 app.mainloop()
