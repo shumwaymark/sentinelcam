@@ -45,6 +45,20 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.1.2-alpha - 2025-04-21
+
+### Fixed
+
+- Resolved play/pause synchronization issues in **watchtower** with full state acknowledgment 
+  between player daemon, player thread and UI components. Cleaned up event list management and 
+  event selection logic. Added a configurable option to limit the event history to a specific
+  number of events per view.
+- Refactored the `ImageSubscriber` class as a proper subclass of `imagezmq.ImageHub`, along with 
+  hardening for error handling and retries on connection failures. Support safe disconnects
+  from publishers. 
+- Refinements to **sentinel** task engine to support a more robust job management system including 
+  corrections to the `JobManager` class for managing the task list. 
+
 ## 0.1.1-alpha - 2025-03-02
 
 ### Deprecated
