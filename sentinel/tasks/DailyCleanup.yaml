@@ -16,4 +16,4 @@ face_ratio: 0.25
 # Events with high-quality faces are always kept by default. All events with only low-quality 
 # images are purged. However, if any face had a high-level of recognition, keep it anyway.
 # Events which include a facial recognition confidence above this cutoff, are kept.
-confidence: 0.97
+confidence: 0.99
