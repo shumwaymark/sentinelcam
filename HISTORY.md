@@ -45,6 +45,16 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.1.3-alpha - 2025-04-24
+
+### Fixed
+
+- Hardening within the **sentinel** job manager. Previous changes to task engine job
+  management were not properly tracking all state changes, leaving jobs in the queue
+  unprocessed and task engines apparently hung. 
+- Further work on the **watchtower** state machine. The player thread now also caches 
+  event result data for efficiency.
+
 ## 0.1.2-alpha - 2025-04-21
 
 ### Fixed
@@ -56,8 +66,8 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - Refactored the `ImageSubscriber` class as a proper subclass of `imagezmq.ImageHub`, along with 
   hardening for error handling and retries on connection failures. Support safe disconnects
   from publishers. 
-- Refinements to **sentinel** task engine for more robust jobgit  scheduling including corrections to 
-  the `JobManager` class for better ventilation and task list management. 
+- Refinements to **sentinel** task engine for more efficient and robust job scheduling, including 
+  corrections to the `JobManager` class for better ventilation and task list management. 
 
 ## 0.1.1-alpha - 2025-03-02
 
