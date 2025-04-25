@@ -283,13 +283,14 @@ class TextHelper:
         cv2.putText(frame, text, (x1 + 5, y1 - 10), self._textType, self._textSize, self._textColors[objid], self._thickness, self._lineType)
 
 class Player:
-    def __init__(self, toggle, dataReady, srcQ, daemon_eof, player_daemon, wirename, rawbuffers) -> None:
+    def __init__(self, toggle, dataReady, srcQ, daemon_eof, player_daemon, wirename, rawbuffers, views) -> None:
         self.setup_ringbuffers(rawbuffers)
         self.ringWire_connection(wirename)
         self.texthelper = TextHelper()
         self.datafeeds = {}
         self.datafeed = None
         self.current_pump = None
+        self.outpost_views = views
         self._thread = threading.Thread(daemon=True, target=self._playerThread, args=(toggle, dataReady, srcQ, daemon_eof, player_daemon))
         self._thread.start()
 
@@ -326,7 +327,7 @@ class Player:
         if datapump != self.current_pump:
             self.datafeed = self._setPump(datapump)
             self.current_pump = datapump
-        cwIndx  = self.datafeed.get_date_index(date)  
+        cwIndx = self.datafeed.get_date_index(date)  
         evtSets = cwIndx.loc[cwIndx['event'] == event]
         evtData = pd.DataFrame(columns=TRKCOLS)
         refsort = {'trk': 0, 'obj': 1, 'fd1': 2, 'fr1': 3}  # z-ordering for tracking result labels
@@ -358,6 +359,14 @@ class Player:
             for frametime in frametimes
         )
         return (frametimes, refresults)
+        
+    def _set_cache(self, view, evtkey, frametimes, refresults) -> None:
+        with dataLock:
+            self.outpost_views[view].eventCache[evtkey] = (frametimes, refresults)
+    
+    def _get_cache(self, view, evtkey) -> tuple:
+        with dataLock:
+            return self.outpost_views[view].eventCache.get(evtkey, ([], ()))
 
     def _playerThread(self, toggle, dataReady, srcQ, daemon_eof, player_daemon) -> None:
         paused = True
@@ -379,7 +388,13 @@ class Player:
                 # apply a blur effect to the player display as visible feedback to the button press.
                 self.set_imgdata(cv2.blur(image, (15, 15))) 
                 dataReady.set()
-                (frametimes, refresults) = self._gatherEventResults(date, event, cmd[1])
+                evtkey = (date, event)
+                if evtkey in self.outpost_views[view].eventCache:
+                    # If the event is already cached, use it. Otherwise, gather the event results and cache them.
+                    (frametimes, refresults) = self._get_cache(view, evtkey)
+                else:
+                    (frametimes, refresults) = self._gatherEventResults(date, event, cmd[1])
+                    self._set_cache(view, evtkey, frametimes, refresults)
                 when = frametimes[0].strftime('%I:%M %p - %A %B %d, %Y') if len(frametimes) > 0 else ''
             else:
                 view = cmd[3]
@@ -496,6 +511,10 @@ class EventListUpdater:
         self._thread = threading.Thread(daemon=True, target=self._run, args=(eventQ, newEvent, outpost_views))
         self._thread.start()
 
+    def getEventData(self) -> tuple:
+        """Get the current event data and image"""
+        return (self._eventData, self._image)
+
     def _run(self, eventQ, newEvent, outpost_views):
         day = str(date.today())
         receiver = None
@@ -561,9 +580,6 @@ class EventListUpdater:
             except Exception as e:
                 print(f"EventListUpdater trapped exception: {str(e)}")
 
-    def getEventData(self):
-        return (self._eventData, self._image)
-
 class OutpostView:
     def __init__(self, view, node, publisher, sinktag, datapump, imgsize, description) -> None:
         self.view = view
@@ -577,6 +593,7 @@ class OutpostView:
         self.menulabel = description
         self.menuref = None
         self.eventlist = []
+        self.eventCache = {}  # Map of event -> (frametimes, refresults)
         self.max_events = CFG.get('max_events_per_view', 100)  # Default to 100 if not specified
 
     def store_menuref(self, menuitem) -> None:
@@ -593,6 +610,11 @@ class OutpostView:
     def add_event(self, event) -> None:
         with dataLock:
             if len(self.eventlist) >= self.max_events:
+                # Remove cached data for the oldest event before removing it
+                old_event = self.eventlist[0]
+                event_key = (old_event[1], old_event[2])  # date_event key
+                if event_key in self.eventCache:
+                    del self.eventCache[event_key]
                 # Remove oldest event when buffer is full
                 self.eventlist.pop(0)
             self.eventlist.append(event)
@@ -690,8 +712,7 @@ class OutpostMenuitem(ttk.Frame):
         self.outpost_views = outpost_views
         self.viewname = view
     def select_me(self, event=None):
-        app.select_outpost_view(self.viewname)
-        app.player_panel.play()
+        app.select_outpost_view(self.viewname, True)
     def update(self) -> None:
         v = self.outpost_views[self.viewname]
         self.label.set(v.menulabel)
@@ -812,6 +833,7 @@ class PlayerPage(tk.Canvas):
     def pause(self):
         if not self.paused:
             self.play_pause()
+            self.after(100)  # Wait briefly to allow synchronization to propagate
    
     def play(self):
         if self.paused:
@@ -823,12 +845,12 @@ class PlayerPage(tk.Canvas):
         sleep(0.01)
 
     def forced_pause(self):
-        app.show_page(PLAYER_PAGE)
         self.pause()
-        self.itemconfig('player_buttons', state='normal')
         app.select_outpost_view()
+        self.itemconfig('player_buttons', state='normal')
 
     def menu(self, event=None):
+        self.pause()
         app.show_page(OUTPOST_PAGE)
 
     def prev(self, event=None):
@@ -841,7 +863,6 @@ class PlayerPage(tk.Canvas):
 
     def share(self, event=None):
         self.hide_buttons_now()
-        #print('share button pressed')
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
@@ -849,11 +870,11 @@ class Application(ttk.Frame):
         self.master = master
         self.grid(column=0, row=0)
         self.eventIdx = 0
-        self.current_view = None
         self.set_styling()
         self.winfo_toplevel().title("Sentinelcam Watchtower")
         self.alloc_ring_buffers()
         self.gather_view_definitions()
+        self._current_view = None
         self.daemonEOF = threading.Event()
         self.dataReady = threading.Event()
         self.newEvent = threading.Event()
@@ -870,8 +891,10 @@ class Application(ttk.Frame):
         self.player_panel = self.pages[PLAYER_PAGE]
         self.player_panel.grid(row=0, column=0)
         self.current_page = PLAYER_PAGE
-        self.viewer = Player(self.toggle, self.dataReady, self.sourceCmds, self.daemonEOF, self.player_daemon, self.wirename, self._rawBuffers)
+        self.viewer = Player(self.toggle, self.dataReady, self.sourceCmds, self.daemonEOF, 
+                             self.player_daemon, self.wirename, self._rawBuffers, self.outpost_views)
         self.master.bind_all('<Any-ButtonPress>', self.reset_inactivity)
+        self._should_resume = False  # Add new state variable
         self.select_outpost_view(CFG['default_view'])
         self.update()
 
@@ -901,17 +924,6 @@ class Application(ttk.Frame):
             )
             self.outpost_views[viewname] = viewdef
 
-    def select_outpost_view(self, viewname=None):
-        if not viewname: 
-            viewname = self.current_view
-        if viewname != self.current_view:
-            self.current_view = viewname
-        view = self.outpost_views[viewname]
-        self.sourceCmds.put(((VIEWER, view.datapump, view.publisher, viewname), view.imgsize))
-        self.eventIdx = view.event_count() 
-        self.show_page(PLAYER_PAGE)
-        self.view = view
-
     def set_styling(self):
         style = ttk.Style()
         style.configure("TFrame", background="black")
@@ -922,46 +934,86 @@ class Application(ttk.Frame):
             self.pages[page].grid(row=0, column=0)
             self.current_page = page
 
-    def select_event(self, idx):
-        (dt, date, event, size) = self.view.eventlist[idx]
+    def select_outpost_view(self, viewname=None, auto_play=False):
+        """Select a live outpost view"""
+        if not viewname: 
+            viewname = self._current_view
+        if viewname != self._current_view:
+            self._current_view = viewname
+        view = self.outpost_views[viewname]
+        
+        # First mark that we want to pause and wait for it to take effect
+        self._should_resume = False
         self.player_panel.pause()
-        self.sourceCmds.put(((EVENT, self.view.datapump, self.current_view, date, event, size), size))
-        self.player_panel.play()
+        # Wait for a short time to ensure pause takes effect
+        self.master.after(100)
+        
+        # Now queue the new source command
+        self.sourceCmds.put(((VIEWER, view.datapump, view.publisher, viewname), view.imgsize))
+        self.eventIdx = view.event_count()
+        self.show_page(PLAYER_PAGE)
+        self.view = view
+        
+        # Set auto-play flag only after source command is queued
+        self._should_resume = auto_play
+
+    def select_event(self, idx):
+        """
+        Select an event to display and play it
+        idx: The event index to select
+        """
+        (dt, date, event, size) = self.view.eventlist[idx]
+        
+        # First mark that we want to pause and wait for it to take effect
+        self._should_resume = False
+        self.player_panel.pause()
+        # Wait for a short time to ensure pause takes effect
+        self.master.after(100)
+        
+        # Now queue the new source command
+        self.sourceCmds.put(((EVENT, self.view.datapump, self._current_view, date, event, size), size))
+        
+        # Set auto-play flag only after source command is queued
+        self._should_resume = True
 
     def previous_event(self):
         if self.eventIdx > 0:
             self.eventIdx -= 1
             self.select_event(self.eventIdx)
         else:
-            pass
-            # TODO: No previous event. Replay last if present, transition into auto-advance.
+            # When at start of events, stay on current event
+            self.select_event(self.eventIdx) 
 
     def next_event(self):
         if self.eventIdx < self.view.event_count() - 1:
             self.eventIdx += 1
             self.select_event(self.eventIdx)
         else:
-            self.select_outpost_view()
-            self.player_panel.play()
+            # After current event found while stepping fowrard, switch to live view
+            self.select_outpost_view(self._current_view, auto_play=True)
 
     def reset_inactivity(self, event=None):
         if self.auto_pause is not None:
-            self.after_cancel(self.auto_pause)
-        self.auto_pause = self.after(30000, self.player_panel.forced_pause)
+            self.master.after_cancel(self.auto_pause)
+        self.auto_pause = self.master.after(30000, self.player_panel.forced_pause)
 
     def update(self):
         _delay = 1
         if self.dataReady.is_set():
             self.player_panel.update_image(self.viewer.get_imgdata())
             self.dataReady.clear()
+            # Check if we should resume playback after loading new event or view
+            if self._should_resume:
+                self.player_panel.play()
+                self._should_resume = False
             _delay += 1
         if self.newEvent.is_set():
-            ((view, evtref), image) = self.eventList_updater.getEventData()
-            v = self.outpost_views[view]
+            ((viewname, evtref), image) = self.eventList_updater.getEventData()
+            v = self.outpost_views[viewname]
             v.update_thumbnail(image)
             v.add_event(evtref)
             v.menuref.update()
-            if view == self.current_view: self.eventIdx = self.view.event_count()
+            if viewname == self._current_view: self.eventIdx = self.view.event_count()
             self.newEvent.clear()
         if self.player_panel.toggle_pending:
             if not self.toggle.is_set():
