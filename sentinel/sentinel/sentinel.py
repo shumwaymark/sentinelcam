@@ -27,7 +27,7 @@ from sentinelcam.datafeed import DataFeed
 from sentinelcam.taskfactory import TaskFactory
 from sentinelcam.utils import readConfig
 import msgpack
-#import simplejpeg
+import simplejpeg
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "sentinel.yaml"))
 SOCKDIR = CFG["socket_dir"]
@@ -703,8 +703,8 @@ class JobManager:
         jreq = taskEngine.getJobRequest()
         try:
             jpeg = datafeed.get_image_jpg(jreq.eventDate, jreq.eventID, frametime)
-            #taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
-            taskEngine.ringBuffer.put(cv2.imdecode(np.frombuffer(jpeg, dtype='uint8'), -1))
+            taskEngine.ringBuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+            #taskEngine.ringBuffer.put(cv2.imdecode(np.frombuffer(jpeg, dtype='uint8'), -1))
         except Exception as e:
             logging.error(f"_get_frame(), abandon cursor, ({jreq.eventDate},{jreq.eventID},{frametime}): {str(e)}")
             taskEngine.cursor = None
@@ -719,66 +719,56 @@ class JobManager:
         return now_ondeck
 
     def _jobThread(self) -> None:
-        logging.debug(f"Job Manager thread started")
+        logging.info("Job Manager thread ready")
         while not self._stop:
-            # Have a task start request or job status update?
             if not taskFeed.empty():
-                (tag, msg) = taskFeed.get()
-                logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
                 try:
+                    (tag, msg) = taskFeed.get()
+                    # Have a task start request or job status update
+                    logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
+
                     if tag == TaskEngine.TaskSUBMIT:
                         # New task request received
-                        taskname = msg['task']
-                        if taskname in self.taskmenu:
-                            jreq = JobRequest(msg['sink'], 
-                                           msg['node'], 
-                                           msg['date'], 
-                                           msg['event'], 
-                                           msg['pump'], 
-                                           taskname,
-                                           msg['priority'] if 'priority' in msg else 2)
-                            jreq.jobClass = self.taskmenu[taskname]['class']
-                            
-                            # Stage task request on deck
-                            if jreq.jobClass in self.ondeck:
-                                if self.ondeck[jreq.jobClass] is None:
-                                    self.ondeck[jreq.jobClass] = jreq
-                        else:
-                            logging.error(f"Unsupported task request: {taskname}")
-                            
+                        jobreq = taskList[msg]
+                        jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
+                        if jobreq.jobClass in self.ondeck: 
+                            if self.ondeck[jobreq.jobClass] is None: 
+                                self.ondeck[jobreq.jobClass] = jobreq
+
                     elif tag == TaskEngine.TaskSTARTED:
-                        # Task is now running
-                        if msg in taskList:
-                            jreq = taskList[msg]
-                            self.ondeck[jreq.jobClass] = None
-                            
+                        # Task start confirmed
+                        jobreq = taskList[msg]
+                        self.ondeck[jobreq.jobClass] = None
+
                     elif tag == TaskEngine.TaskCHAIN:
-                        # Chain to next task
+                        # Handle task chaining request
                         (jobid, task) = msg
                         self._chainJob(jobid, task)
-                        
-                    elif tag in [TaskEngine.TaskDONE,
-                               TaskEngine.TaskFAIL,
-                               TaskEngine.TaskCANCELED]:
+
+                    elif tag in [TaskEngine.TaskDONE, TaskEngine.TaskFAIL, TaskEngine.TaskCANCELED]:
                         # Task completed, failed or was canceled
-                        (jobid, task_stats) = msg
-                        if jobid in taskList:
-                            jreq = taskList[jobid]
-                            jreq.deregisterJOB(tag, task_stats)
-                        
+                        jobreq = taskList[msg]
+                        engine = self.engines[jobreq.engine]
+                        if engine.jobreq.jobID == msg:
+                            engine.jobreq = None
+                            task_stats = (engine.get_image_cnt(), engine.get_image_rate())
+                            jobreq.deregisterJOB(tag, task_stats)
+                            logging.debug(f"Engine {engine.getName()} gone idle.")
+                        if self.ondeck[jobreq.jobClass] == jobreq:
+                            self.ondeck[jobreq.jobClass] = None
+
                     elif tag == TaskEngine.TaskBOMB:
-                        # Task engine failed catastrophically
-                        logging.critical(f"TaskEngine {msg} failure.")
+                        # Handle engine failure
+                        logging.critical(f"TaskEngine '{msg}' failed catastrophically.") 
                         if msg in self.engines:
                             del self.engines[msg]
-                        
+
                     else:
-                        logging.error(f"JobManager ignored unsupported task message: {tag}")
-                        
+                        logging.error(f"Undefined status '{tag}' for job {msg}")
                 except TimeoutError as e:
-                    logging.error(f"JobManager timeout {e}")
-                except Exception as e:
-                    logging.error(f"JobManager unexpected exception: {e}")
+                    logging.error(f"JobManager timeout {str(e)}")
+                except Exception:
+                    logging.exception("JobManager unexpected exception")
                 taskFeed.task_done()
                 logging.debug(f"Now ondeck {str(self._ondeck_status())}")
             
@@ -789,39 +779,54 @@ class JobManager:
                 if engine.is_alive():
                     if engine.getJobID() is not None:
                         runningTasks += 1
-                        # Feed images to task engine ring buffer
                         if engine.have_request():
                             (cmd, key) = engine.get_request()
                             if cmd == JobManager.ReadSTART:
                                 self._feedStart(engine, key)
-                                bucket = engine.ringBuffer.get()
+                                engine.send_response(engine.ringBuffer.get())
                             elif cmd == JobManager.ReadNEXT:
-                                self._feedNext(engine)
-                                bucket = engine.ringBuffer.get()
-                            else:
-                                bucket = -1
-                            engine.send_response(bucket)
+                                engine.ringBuffer.frame_complete()
+                                engine.send_response(engine.ringBuffer.get())
+                        elif engine.cursor:
+                            self._feedNext(engine)
+                        # TODO: Need a mechanism to cleanly shutdown a 
+                        # running task in the event of DataFeed timeouts.
                 else:
                     # TODO: Need an engine restart here 
                     logging.error(f"TaskEngine '{engineName}' found dead.")
                     del self.engines[engineName]
 
+            # Assign jobs ondeck to available engines by class
             if runningTasks < len(self.engines):
-                # Have available capacity, what's on-deck by jobclass?
                 for engine in self.engines.values():
                     if engine.getJobID() is None:
-                        # Engine is available, check ondeck tasks that match its classes
-                        engine_classes = engine.getClasses()
-                        for jobclass in self.ondeck:
-                            if jobclass in engine_classes:
-                                jreq = self.ondeck[jobclass]
-                                if jreq is not None:
-                                    # Found a matching task, release it to the engine
+                        for jobclass in engine.getClasses():
+                            jreq = self.ondeck.get(jobclass, None)
+                            if jreq is not None:
+                                # confirm that another engine has not already been assigned this request
+                                if jreq.jobID not in [e.getJobID() for e in self.engines.values()]:
+                                    logging.debug(f"Found on deck for class {jobclass}: {jreq.jobID}")
                                     self._releaseJob(jreq.jobID, engine.getName())
                                     break
 
+                # Ventilate queued jobs to empty ondeck slots by priority
+                for jobclass in self.ondeck:
+                    if self.ondeck[jobclass] is None:
+                        with jobLock:
+                            pending = []
+                            # Try each priority level in order
+                            for priority in [1, 2, 3]:
+                                pending = [r.jobID for r in taskList.values() 
+                                    if r.jobStatus == JobRequest.Status_QUEUED 
+                                    and r.jobClass == jobclass 
+                                    and r.priority == priority]
+                                if pending:
+                                    break
+                        if pending:
+                            taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
+                            logging.debug(f"Ventilating job {pending[0]} to ondeck slot for class {jobclass}")
+
             if taskFeed.empty() and runningTasks == 0:
-                # nothing currently running or waiting to run
                 time.sleep(0.05)
 
     def close(self):
@@ -829,7 +834,7 @@ class JobManager:
         self._thread.join()
 
 async def task_loop(asyncREP, taskCFG):
-    logging.info("Sentinel control loop started")
+    logging.info("Sentinel control loop running")
     while True:
         reply = 'OK'
         msg = await asyncREP.recv()
@@ -873,7 +878,7 @@ async def task_loop(asyncREP, taskCFG):
             logging.error(f"Incomplete request, '{keyval}' missing: {request}")
             reply = 'Error'
         except Exception:
-            logging.exception(f"Unexpected exception processing task request")
+            logging.exception("Unexpected exception processing task request")
             reply = 'Error'
         finally:
             await asyncREP.send(reply.encode("ascii"))
