@@ -45,6 +45,14 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.1.4-alpha - 2025-05-12
+
+### Fixed
+
+- Added debug logging to the **watchtower**. Tightened the screws on the state machine by
+  implemented message passing between application control and the player subsystem through a 
+  centralized state manager. No further leaks detected.
+
 ## 0.1.3-alpha - 2025-04-24
 
 ### Fixed
