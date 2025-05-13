@@ -561,18 +561,20 @@ class PlayerStateManager:
             while not self.message_queue.empty():
                 reason, component, details = self.message_queue.get_nowait()
                 logger.debug(f"Processing state transition: {reason}, {component}")
-
                 old_state = self.current_state
+
                 if reason == StateChange.LOAD:
                     self.app.sourceCmds.put(details)
                     self.player_command = details[0]
                     new_state = PlayerState.LOADING
+                
                 elif reason == StateChange.READY:
                     new_state = PlayerState.READY
                     if self.app.auto_play:
                         self.app.player_daemon.start(self.player_command)
                         self.app.viewer.start()
                         new_state = PlayerState.PLAYING
+                
                 elif reason == StateChange.TOGGLE:
                     if self.current_state == PlayerState.PLAYING:
                         self.app.viewer.stop()
@@ -582,6 +584,7 @@ class PlayerStateManager:
                         self.app.player_daemon.start(self.player_command)
                         self.app.viewer.start()
                         new_state = PlayerState.PLAYING
+                
                 elif reason == StateChange.EOF:
                     self.app.player_daemon.stop()
                     new_state = PlayerState.IDLE
