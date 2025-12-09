@@ -3,10 +3,10 @@
 # FaceSweep.yaml - Identify candidate images for facial recognition modeling
 
 ref_type: fr1
-facefile: /home/pi/sentinel/models/face_recon/facebeta3.csv
+facefile: /home/ops/sentinel/models/face_recon/facebeta3.csv
 
 face_aligner:
-  haarcascade_path: /home/pi/sentinel/models/haarcascades/haarcascade_eye.xml
+  haarcascade_path: /home/ops/sentinel/models/haarcascades/haarcascade_eye.xml
   desiredLeftEye: [0.29, 0.27]  # [0.35, 0.35]
   desiredFaceWidth: 96
   desiredFaceHeight: 96

@@ -1,5 +1,5 @@
 # datpump service unit file
-# Mark K. Shumway, mark.shumway@swanriver,dev
+# Mark K. Shumway, mark.shumway@swanriver.dev
 # Defines datapump.py as a systemd service
 # This file should be copied to /etc/systemd/system as root
 #   e.g. sudo cp datapump.service /etc/systemd/system
@@ -12,11 +12,11 @@ After=multi-user.target
 
 [Service]
 Type=idle
-WorkingDirectory=/home/pi/camwatcher/datapump
-User=pi
+WorkingDirectory=/home/ops/camwatcher/datapump
+User=ops
 Restart=always
 RestartSec=5
-ExecStart=/home/pi/.virtualenvs/py3cv4/bin/python -u /home/pi/camwatcher/datapump/datapump.py
+ExecStart=/home/ops/.opencv/bin/python -u /home/ops/camwatcher/datapump/datapump.py
 
 [Install]
 WantedBy=multi-user.target

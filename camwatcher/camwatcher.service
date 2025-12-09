@@ -1,5 +1,5 @@
 # camwatcher service unit file
-# Mark K. Shumway, mark.shumway@swanriver,dev
+# Mark K. Shumway, mark.shumway@swanriver.dev
 # Defines camwatcher.py as a systemd service
 # This file should be copied to /etc/systemd/system as root
 #   e.g. sudo cp camwatcher.service /etc/systemd/system
@@ -12,11 +12,11 @@ After=multi-user.target
 
 [Service]
 Type=idle
-WorkingDirectory=/home/pi/camwatcher/camwatcher
-User=pi
+WorkingDirectory=/home/ops/camwatcher/camwatcher
+User=ops
 Restart=always
 RestartSec=5
-ExecStart=/home/pi/.virtualenvs/py3cv4/bin/python -u /home/pi/camwatcher/camwatcher/camwatcher.py
+ExecStart=/home/ops/.opencv/bin/python -u /home/ops/camwatcher/camwatcher/camwatcher.py
 
 [Install]
 WantedBy=multi-user.target

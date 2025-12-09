@@ -6,13 +6,13 @@ trk_type: fr1
 camwatcher_update: True
 
 face_aligner:
-  haarcascade_path: /home/pi/sentinel/models/haarcascades/haarcascade_eye.xml
+  haarcascade_path: /home/ops/sentinel/models/haarcascades/haarcascade_eye.xml
   desiredLeftEye: [0.29, 0.27]  # [0.35, 0.35]
   desiredFaceWidth: 96
   desiredFaceHeight: 96
 
 face_embeddings:
-  model_path: /home/pi/sentinel/models/openface_torch/openface_nn4.small2.v1.t7
+  model_path: /home/ops/sentinel/models/openface_torch/openface_nn4.small2.v1.t7
 
-facemodel: /home/pi/sentinel/models/face_recon/facemodel_beta1.pickle
-baselines: /home/pi/sentinel/models/face_recon/baselines_beta1.hdf5
+facemodel: /home/ops/sentinel/models/face_recon/facemodel_beta1.pickle
+baselines: /home/ops/sentinel/models/face_recon/baselines_beta1.hdf5

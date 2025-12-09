@@ -13,7 +13,7 @@
 #   frames_second
 
 mobilenetssd: 
-    prototxt_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
-    model_path: /home/pi/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
+    prototxt_path: /home/ops/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.prototxt
+    model_path: /home/ops/sentinel/models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
     target: myriad  # [cpu, myriad]
     confidence: 0.5

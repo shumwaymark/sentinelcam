@@ -5,11 +5,11 @@ control_port: 5556
 camwatcher: tcp://127.0.0.1:5566
 
 # Data storage locations  
-imagefolder: /mnt/usb1/sentinelcam/images
-datafolder:  /mnt/usb1/sentinelcam/camwatcher
+imagefolder: /home/ops/sentinelcam/images
+datafolder:  /home/ops/sentinelcam/camwatcher
 
 # Current FaceList CSV file, defines the population of locked events
-facefile: /mnt/usb1/sentinelcam/faces/facebeta6.csv
+facefile: /home/ops/sentinelcam/faces/facebeta6.csv
 
 # Logging configuration
 logconfig:
@@ -20,7 +20,7 @@ logconfig:
     handlers:
         file:
             class: logging.handlers.RotatingFileHandler
-            filename: /mnt/usb1/sentinelcam/logs/datapump.log
+            filename: /home/ops/sentinelcam/logs/datapump.log
             formatter: default
             maxBytes: 524288
             backupCount: 5

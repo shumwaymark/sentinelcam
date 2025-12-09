@@ -34,8 +34,8 @@ sentinel:
 
        ##   Data storage locations  ##
 data:  
-  images:   /mnt/usb1/sentinelcam/images      # JPG file storage
-  csvfiles: /mnt/usb1/sentinelcam/camwatcher  # CSV file storage
+  images:   /home/ops/sentinelcam/images      # JPG file storage
+  csvfiles: /home/ops/sentinelcam/camwatcher  # CSV file storage
 
 logconfigs: 
     # Internal logging for the camwatcher along with messages from outpost nodes
@@ -47,7 +47,7 @@ logconfigs:
         handlers:
             file:
                 class: logging.handlers.RotatingFileHandler
-                filename: /mnt/usb1/sentinelcam/logs/camwatcher.log
+                filename: /home/ops/sentinelcam/logs/camwatcher.log
                 formatter: default
                 maxBytes: 524288
                 backupCount: 10
@@ -69,7 +69,7 @@ logconfigs:
         handlers:
             file:
                 class: logging.handlers.TimedRotatingFileHandler
-                filename: /mnt/usb1/sentinelcam/logs/sentinel.log
+                filename: /home/ops/sentinelcam/logs/sentinel.log
                 formatter: default
                 when: midnight
                 backupCount: 120
