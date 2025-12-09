@@ -43,6 +43,12 @@ class PlayerCommand(enum.Enum):
     VIEWER = 0  # datapump,outpost,viewname
     EVENT = 1   # datapump,viewname,date,event,imagesize
 
+class DaemonState(enum.Enum):
+    """State machine for the PlayerDaemon subprocess"""
+    STOPPED = 0
+    STARTED = 1
+    ERROR = 2
+
 class PlayerState(enum.Enum):
     """State machine for the Player subsystem"""
     STARTING = -1
@@ -185,18 +191,20 @@ class PlayerDaemon:
 
     def _setPump(self, pump) -> DataFeed:
         if not pump in self.datafeeds:
-            self.datafeeds[pump] = DataFeed(pump)
+            self.datafeeds[pump] = DataFeed(pump, timeout=7.0)
         return self.datafeeds[pump]
         
     def _data_monster(self, commandQueue, stateQueue, keepgoing, wirename, ringbuffers):
+        daemon_logger = logging.getLogger("watchtower.daemon")
+        daemon_logger.info("PlayerDaemon subprocess started")
         ringwire = RingWire(wirename)
         # Wait here for handshake from player thread in parent process
         handshake = ringwire.recv()  
         ringwire.send(handshake)  # acknowledge and get started
+        daemon_logger.debug("Ring wire handshake completed")
         frametimes = []
         frameidx = 0
         date, event, ring, receiver = None, None, None, None
-        print(f"PlayerDaemon subprocess started.")
         while True:
             cmd = commandQueue.get()
             # Connect to image source: outpost/view or datapump. 
@@ -210,18 +218,28 @@ class PlayerDaemon:
                 # Just keep going here forever until explicitly stopped. 
                 if not receiver:
                     receiver = ImageSubscriber(publisher, view)
+                receiver.subscribe(publisher, view)
+                receiver.start()
                 try:
-                    receiver.subscribe(publisher, view)
-                    receiver.start()
-                    frame = simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR')
+                    frame = simplejpeg.decode_jpeg(receiver.receive(timeout=7.0)[1], colorspace='BGR')
                     wh = (frame.shape[1], frame.shape[0])
-                    started = False
                     if ring != wh:  
                         ring = wh
-                        ringbuffer = ringbuffers[ring]  # TODO: handle exception for unexpected sizes
+                        ringbuffer = ringbuffers[ring]
+                except TimeoutError as e:
+                    daemon_logger.error(f"VIEWER mode: Initial connection timeout to {publisher}: {str(e)}")
+                    stateQueue.put(DaemonState.ERROR)
+                except KeyError as keyval:
+                    daemon_logger.error(f"PlayerDaemon internal key error '{keyval}'")
+                    stateQueue.put(DaemonState.ERROR)
+                except Exception as e:
+                    daemon_logger.exception(f"VIEWER mode: trapped exception reading from {publisher}: {str(e)}")
+                    stateQueue.put(DaemonState.ERROR)
+                else:
                     ringbuffer.reset()
                     ringbuffer.put(frame)
-                    stateQueue.put(True)  # Acknowledge started
+                    stateQueue.put(DaemonState.STARTED)  # Acknowledge started
+                    started, error_occurred = False, False
                     while keepgoing.value:
                         if ringwire.ready():
                             msg = ringwire.recv()
@@ -229,22 +247,29 @@ class PlayerDaemon:
                                 started = True
                             else:
                                 ringbuffer.frame_complete()
-                            ringwire.send(ringbuffer.get())
-                        elif ringbuffer.isFull():
+                            if error_occurred:
+                                ringwire.send(-1)
+                            else:
+                                ringwire.send(ringbuffer.get())
+                        elif ringbuffer.isFull() or error_occurred:
                             sleep(0.005)
                         else:
-                            ringbuffer.put(simplejpeg.decode_jpeg(receiver.receive()[1], colorspace='BGR'))
-                    stateQueue.put(False)  # Acknowledge stopped
-                except Exception as ex:
-                    # TODO: need recovery / reattempt management here?
-                    print(f"ImageSubscriber failure reading from {publisher}, {str(ex)}")
-                finally:
+                            try:
+                                jpeg_data = receiver.receive(timeout=7.0)[1]
+                                ringbuffer.put(simplejpeg.decode_jpeg(jpeg_data, colorspace='BGR'))
+                            except TimeoutError as e:
+                                daemon_logger.error(f"VIEWER mode: Timeout reading from {publisher}")
+                                error_occurred = True
+                            except Exception as e:
+                                daemon_logger.exception(f"VIEWER mode: trapped exception reading from {publisher}: {str(e)}")
+                                error_occurred = True
+                    stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped 
                     receiver.stop()
             else:  
                 (datapump, viewname, eventdate, eventid, imgsize) = cmd[1:]   
                 # Unlike a live outpost viewer, datapump events have a definite end. Maintain state and keep
                 # the ring buffer populated. An exhausted ring buffer is considered EOF when reading in either 
-                # direction. Send an EOF response to the Player and reset to the beginning in either event.
+                # direction. Send an EOF response to the Player and reset to the beginning in either case.
                 feed = self._setPump(datapump)
                 try:
                     if ring != imgsize:
@@ -258,8 +283,15 @@ class PlayerDaemon:
                         ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
                         forward = True
                         frameidx = 1
-                    started = False
-                    stateQueue.put(True)  # Acknowledge started
+                except KeyError as keyval:
+                    daemon_logger.error(f"PlayerDaemon internal key error '{keyval}'")
+                    stateQueue.put(DaemonState.ERROR)
+                except Exception as e:
+                    daemon_logger.exception(f"EVENT mode: trapped exception {str(e)} error reading from datapump ({datapump},{eventdate},{eventid})")
+                    stateQueue.put(DaemonState.ERROR)
+                else:
+                    started, error_occurred = False, False
+                    stateQueue.put(DaemonState.STARTED)  # Acknowledge started
                     while keepgoing.value:
                         if ringwire.ready():
                             msg = ringwire.recv() # response here reserved for player commands, reverse/forward/other
@@ -267,33 +299,24 @@ class PlayerDaemon:
                                 started = True
                             else:
                                 ringbuffer.frame_complete() 
-                            if ringbuffer.isEmpty():
+                            if ringbuffer.isEmpty() or error_occurred:
                                 ringwire.send(-1)
                                 forward = True
                                 frameidx = 0
                             else:
                                 ringwire.send(ringbuffer.get())
-                        elif ringbuffer.isFull():
+                        elif ringbuffer.isFull() or error_occurred:
                             sleep(0.005)
                         else:
-                            if (forward and frameidx < len(frametimes)) or (not forward and frameidx > -1): 
-                                jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[frameidx])
-                                ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
-                                frameidx = frameidx + 1 if forward else frameidx - 1
-                    stateQueue.put(False)  # Acknowledge stopped
-
-                # TODO: Need to flood the ring bufffer with REDX images, and then allow for image retrieval
-                # before exiting? Refactor this try/catch block appropriately if feasible, or seek alternative.
-                # Perhaps implement recovery / reattempt management. 
-                except KeyError as keyval:
-                    print(f"PlayerDaemon internal key error '{keyval}'")
-                    ringbuffer.put(redx_image(ring[0],ring[1]))
-                except DataFeed.ImageSetEmpty as e:
-                    ringbuffer.put(redx_image(ring[0],ring[1]))
-                except TimeoutError:
-                    ringbuffer.put(redx_image(ring[0],ring[1]))
-                except Exception as e:
-                    print(f"Failure reading images from datapump, ({datapump},{eventdate},{eventid}): {str(e)}")
+                            if (forward and frameidx < len(frametimes)) or (not forward and frameidx > -1):
+                                try:
+                                    jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[frameidx])
+                                    ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+                                    frameidx = frameidx + 1 if forward else frameidx - 1
+                                except Exception as e:
+                                    daemon_logger.exception(f"EVENT mode: trapped exception {str(e)} reading from datapump ({datapump},{eventdate},{eventid})")
+                                    error_occurred = True
+                    stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped 
 
     def start(self, command_block):
         self.runswitch.value = 1
@@ -377,7 +400,7 @@ class Player:
 
     def _setPump(self, pump) -> DataFeed:
         if not pump in self.datafeeds:
-            self.datafeeds[pump] = DataFeed(pump)
+            self.datafeeds[pump] = DataFeed(pump, timeout=7.0)
         return self.datafeeds[pump]
     
     def _gatherEventResults(self, date, event, datapump) -> tuple:
@@ -473,7 +496,7 @@ class Player:
                 when = 'current view'
 
             dataReady.clear()
-            status_message = view + ' ' + when            
+            status_message = view + ' ' + when
             self.state_manager.request_transition(StateChange.READY, "PlayerThread")
             source_queue.task_done()
 
@@ -500,7 +523,6 @@ class Player:
                                     for (name, classname, x1, y1, x2, y2) in refresults[frameidx]:
                                         self.texthelper.putText(image, name, classname, x1, y1, x2, y2)
 
-                                    self.last_frame = datetime.now()
                                     if frameidx < len(frametimes) - 1:
                                         frameidx += 1
 
@@ -519,7 +541,8 @@ class Player:
                                     cv2.putText(image, status_message, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 1)
 
                                 self.set_imgdata(image)
-                                dataReady.set() 
+                                dataReady.set()
+                                self.last_frame = datetime.now()
 
                             else:
                                 self.state_manager.request_transition(StateChange.EOF, "PlayerThread")
@@ -529,7 +552,7 @@ class Player:
                         except IndexError as ex:
                             logger.error(f"IndexError cmd={cmd[0]} frameidx={frameidx} of {len(frametimes)}")
                         except Exception as ex:
-                            logger.exception('Unhandled exception caught in Player thread')
+                            logger.exception(f'Unhandled exception caught in Player thread: {str(ex)}')
     
     def stop(self) -> None:
         logger.debug("Player thread paused.")
@@ -538,6 +561,7 @@ class Player:
 
     def start(self) -> None:
         logger.debug("Player thread resumed.")
+        self.last_frame = datetime.now()
         self.paused.clear()
         self.idle.clear()
         self.fps.reset()
@@ -571,19 +595,27 @@ class PlayerStateManager:
                 elif reason == StateChange.READY:
                     new_state = PlayerState.READY
                     if self.app.auto_play:
-                        self.app.player_daemon.start(self.player_command)
-                        self.app.viewer.start()
-                        new_state = PlayerState.PLAYING
+                        result = self.app.player_daemon.start(self.player_command)
+                        if result == DaemonState.ERROR:
+                            new_state = PlayerState.ERROR
+                        else:
+                            self.app.viewer.start()
+                            new_state = PlayerState.PLAYING
                 
                 elif reason == StateChange.TOGGLE:
-                    if self.current_state == PlayerState.PLAYING:
+                    if self.current_state == PlayerState.ERROR:
+                        new_state = PlayerState.ERROR
+                    elif self.current_state == PlayerState.PLAYING:
                         self.app.viewer.stop()
                         self.app.player_daemon.stop()
                         new_state = PlayerState.PAUSED
                     else:
-                        self.app.player_daemon.start(self.player_command)
-                        self.app.viewer.start()
-                        new_state = PlayerState.PLAYING
+                        result = self.app.player_daemon.start(self.player_command)
+                        if result == DaemonState.ERROR:
+                            new_state = PlayerState.ERROR
+                        else:
+                            self.app.viewer.start()
+                            new_state = PlayerState.PLAYING
                 
                 elif reason == StateChange.EOF:
                     self.app.player_daemon.stop()
@@ -593,6 +625,10 @@ class PlayerStateManager:
                     self.app.player_panel.update_state(is_paused=(new_state != PlayerState.PLAYING))
                     if new_state == PlayerState.IDLE:
                         self.app.player_panel.show_buttons()
+                elif new_state == PlayerState.ERROR:
+                    self.app.player_panel.update_image(redx_image(800,480))
+                    self.app.player_panel.update_state(is_paused=True)
+                    self.app.player_panel.show_buttons()
 
                 log_state_transition(old_state, new_state, component, details)
                 self.current_state = new_state
