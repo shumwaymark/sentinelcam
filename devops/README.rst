@@ -142,10 +142,10 @@ into the repository, preserving previous packages for rollback safety. Upon succ
 .. code-block:: 
 
   /home/ops/
-  ├── camwatcher/                      # Currently running **camwatcher** and **datapump** services
+  ├── camwatcher/                      # Currently running camwatcher and datapump services
   │   ├── camwatcher/
   │   └── datapump/
-  ├── imagehub/                        # Currently running **imagehub** service
+  ├── imagehub/                        # Currently running imagehub service
   │   └── imagehub/
   ├── sentinelcam/                     # SSD mount point
   │   ├── backups/                     # Backup snapshots of previous source and devops repositories
@@ -155,16 +155,16 @@ into the repository, preserving previous packages for rollback safety. Upon succ
   │   │   ├── camwatcher/
   │   │   ├── sentinel/
   │   │   └── watchtower/
+  │   ├── model_registry/              # Model repository for sentinel and imagenode
   │   ├── devops/                      # Complete DevOps toolchain
   │   │   ├── ansible/                 # Deployment and operational automation
   │   │   └── scripts/                 # Support scripts
   │   ├── staging/                     # Package drop area
   │   │   └── incoming/
   │   ├── logs/                        # System and deployment logging
-  │   ├── camwatcher/                  # Collected CSV data from **camwatcher** and **sentinel**
-  │   ├── images/                      # Collected JPEG data from **camwatcher**
-  │   ├── models/                      # Model repository for **sentinel** and **imagenode**
-  │   └── imagehub/                    # Data store for **imagehub** and **librarian** 
+  │   ├── camwatcher/                  # Collected CSV data from camwatcher and sentinel
+  │   ├── images/                      # Collected JPEG data from camwatcher
+  │   └── imagehub/                    # Data store for imagehub and librarian 
   │       ├── images/
   │       └── logs/
   └── scripts/
