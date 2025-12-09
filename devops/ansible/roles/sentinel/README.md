@@ -101,17 +101,16 @@ Models are deployed from the model registry on `primary_datasink` to sentinel no
 │   └── 2020-12-06/
 ├── face_detection/
 │   └── 2020-03-25/          # OpenVINO IR format
-│       ├── opencv_dnn_face/
 │       ├── manifest.yaml
-│       └── ...
+│       ├── deploy.prototxt
+│       └── res10_300x300_ssd_iter_140000.caffemodel
 ├── face_recognition/
 │   └── 2025-02-25/          # gamma3 trained model
-│       ├── face_pics/
-│       ├── faces.db
-│       ├── labels.pickle
+│       ├── facelist.csv
+│       ├── facedata.hdf5
+│       ├── baselines.hdf5
+│       ├── facemodel.pickle
 │       └── manifest.yaml
-├── haarcascades/
-│   └── 2020-03-25/
 └── openface_torch/
     └── 2020-03-25/
 ```
