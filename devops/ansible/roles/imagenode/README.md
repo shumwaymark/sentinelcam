@@ -140,7 +140,9 @@ ansible-playbook playbooks/deploy-outpost.yaml --tags config --limit <hostname>
     │   ├── imagenode.py   # Main application
     │   ├── tools/         # imagenode libraries
     │   └── sentinelcam/   # outpost, spyglass, and sentinelcam common libraries
-    └── outpost/           # deployed model files
+    └── models/            # deployed model files (versioned)
+        └── mobilenet_ssd/
+            └── 2020-12-06/
 
 Config file: /home/<sentinelcam_user>/imagenode.yaml
 Service: /etc/systemd/system/imagenode.service
@@ -148,41 +150,60 @@ Service: /etc/systemd/system/imagenode.service
 
 ## Model Deployment
 
-### MobileNetSSD (Current)
+### Automated Model Registry
 
-**Status**: Manual deployment required - model files not yet automated
+**Status**: Fully automated via centralized model registry
 
-**Current process**:
-1. Manually copy to `outpost/mobilenet_ssd/` on target node
-2. Configure in host_vars/<hostname>.yaml:
-   ```yaml
-   detection_objects: mobilenetssd
-   accelerator: none  # or ncs2 for Intel Neural Compute Stick
-   ```
+Models are deployed from the model registry on `primary_datasink` to outpost nodes:
 
-### Future Model Support
-
-**TODO**: Automate model deployment via Ansible
-- Store models in `devops/ansible/files/models/`
-- Deploy via copy/synchronize tasks
-- Support multiple model types (YOLOv3, custom models)
-- Version management and model updates
-
-**Planned structure**:
+**Registry Structure**:
 ```
-devops/ansible/
-├── files/
-│   └── models/
-│       ├── mobilenet_ssd/
-│       │   ├── MobileNetSSD_deploy.prototxt
-│       │   └── MobileNetSSD_deploy.caffemodel
-│       └── yolov3/
-│           ├── yolov3.weights
-│           ├── yolov3.cfg
-│           └── coco.names
-└── roles/imagenode/tasks/
-    └── deploy_models.yaml  # Future task file
+/home/ops/sentinelcam/model_registry/
+├── mobilenet_ssd/
+│   └── 2020-12-06/          # Version timestamp
+│       ├── MobileNetSSD_deploy.prototxt
+│       ├── MobileNetSSD_deploy.caffemodel
+│       └── manifest.yaml
+├── face_detection/
+│   └── 2020-03-25/
+└── vehicle_detection/
+    └── 2024-11-15/
 ```
+
+**Deployment**:
+```bash
+# Deploy all models to all outposts
+ansible-playbook playbooks/deploy-models.yaml
+
+# Deploy specific model
+ansible-playbook playbooks/deploy-models.yaml --tags=mobilenet_ssd
+
+# Deploy to specific host
+ansible-playbook playbooks/deploy-models.yaml --limit=east
+```
+
+**Filtering Models per Node**:
+
+By default, only `mobilenet_ssd` is deployed to outposts. Override in `host_vars/<hostname>.yaml`:
+
+```yaml
+# Deploy additional models to specific node
+outpost_models:
+  - mobilenet_ssd
+  - face_detection
+```
+
+**Version Management**:
+
+Model versions are defined in `inventory/group_vars/all/model_registry.yaml`:
+```yaml
+sentinelcam_models:
+  mobilenet_ssd:
+    current_version: "2020-12-06"
+    previous_version: "2020-03-25"
+```
+
+See `devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md` for complete documentation.
 
 ## Hardware Acceleration
 
@@ -231,10 +252,13 @@ ssh <outpost> 'sudo journalctl -u imagenode -n 50'
 
 ```bash
 # Check if models exist
-ssh <outpost> 'ls -la ~/imagenode/outpost/mobilenet_ssd/'
+ssh <outpost> 'ls -la ~/imagenode/models/mobilenet_ssd/'
 
-# Manual deployment (temporary until automated):
-scp models/* <outpost>:~/imagenode/outpost/mobilenet_ssd/
+# Verify model version deployed
+ssh <outpost> 'ls -la ~/imagenode/models/mobilenet_ssd/2020-12-06/'
+
+# Redeploy models if missing
+ansible-playbook playbooks/deploy-models.yaml --limit=<outpost>
 ```
 
 ### Images Not Reaching Hub

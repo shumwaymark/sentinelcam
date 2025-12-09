@@ -103,7 +103,7 @@ camwatcher: tcp://127.0.0.1:5566
 imagefolder: /home/ops/sentinelcam/images
 datafolder:  /home/ops/sentinelcam/camwatcher
 
-# Current FaceList CSV file, defines the population of locked events
+# Current FaceList CSV file (deployed from model registry)
 facefile: /home/ops/sentinelcam/faces/facebeta6.csv
 
 # Logging configuration
@@ -133,8 +133,33 @@ logconfig:
   /home/<sentinelcam_user>/
   └── sentinelcam/             # SSD mount point
       ├── camwatcher/          # Collected CSV data from **camwatcher** and **sentinel**
-      └── images/              # Collected JPEG data from **camwatcher**
+      ├── images/              # Collected JPEG data from **camwatcher**
+      ├── faces/               # FaceList CSV (deployed from model registry)
+      └── model_registry/      # Centralized model storage (datasinks only)
+          ├── mobilenet_ssd/
+          ├── face_detection/
+          └── face_recognition/
 ```
+
+### Model Registry Cleanup
+
+Datapump role includes automated model cleanup via systemd timer:
+
+**Cleanup Schedule**: Weekly (Sunday 3:00 AM)
+**Retention Policy**: Current + Previous + 5 most recent versions
+
+```bash
+# Check cleanup timer status
+ssh data1 'sudo systemctl status model-cleanup.timer'
+
+# View cleanup logs
+ssh data1 'sudo journalctl -u model-cleanup.service'
+
+# Manual cleanup
+ssh data1 'sudo /home/ops/sentinelcam/devops/scripts/cleanup_model_registry.sh'
+```
+
+See `devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md` for details.
 
 ## Integration
 

@@ -88,52 +88,69 @@ Launcher: /home/<sentinelcam_user>/sentinel/sentinel_ncs2.sh
 
 ## Model Deployment
 
-### Current Process (Manual)
+### Automated Model Registry
 
-**Status**: Model deployment not yet automated
+**Status**: Fully automated via centralized model registry
 
-**Intel NCS2 Models**:
-1. Download pre-trained models from OpenVINO Model Zoo
-2. Convert to IR format using OpenVINO Model Optimizer
-3. Manually copy to `sentinel/models/` on target node
+Models are deployed from the model registry on `primary_datasink` to sentinel nodes:
 
-**Required models for face recognition**:
-- Face detection: `face-detection-retail-0004`
-- Face recognition: `face-recognition-mobilefacenet-arcface`
-- Landmarks: `landmarks-regression-retail-0009`
+**Registry Structure**:
+```
+/home/ops/sentinelcam/model_registry/
+├── mobilenet_ssd/
+│   └── 2020-12-06/
+├── face_detection/
+│   └── 2020-03-25/          # OpenVINO IR format
+│       ├── opencv_dnn_face/
+│       ├── manifest.yaml
+│       └── ...
+├── face_recognition/
+│   └── 2025-02-25/          # gamma3 trained model
+│       ├── face_pics/
+│       ├── faces.db
+│       ├── labels.pickle
+│       └── manifest.yaml
+├── haarcascades/
+│   └── 2020-03-25/
+└── openface_torch/
+    └── 2020-03-25/
+```
 
-**Manual deployment**:
+**Deployment**:
 ```bash
-# Copy models to sentinel node
-scp -r models/* sentinel:~/sentinel/models/
+# Deploy all models to all sentinels
+ansible-playbook playbooks/deploy-models.yaml
+
+# Deploy specific model
+ansible-playbook playbooks/deploy-models.yaml --tags=face_recognition
+
+# Deploy to specific sentinel
+ansible-playbook playbooks/deploy-models.yaml --limit=sentinel
 ```
 
-### Future Model Management
+**Version Management**:
 
-**TODO**: Automate model deployment via Ansible
-
-**Planned approach**:
-```
-devops/ansible/
-├── files/
-│   └── models/
-│       ├── openvino/           # Intel NCS2 models (IR format)
-│       │   ├── face-detection-retail-0004/
-│       │   │   ├── face-detection-retail-0004.xml
-│       │   │   └── face-detection-retail-0004.bin
-│       │   └── face-recognition-mobilefacenet-arcface/
-│       └── edgetpu/            # Google Coral models (TFLite)
-│           └── mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite
-└── roles/sentinel/tasks/
-    └── deploy_models.yaml      # Future automation
+Model versions are defined in `inventory/group_vars/all/model_registry.yaml`:
+```yaml
+sentinelcam_models:
+  face_detection:
+    current_version: "2020-03-25"
+    previous_version: "2020-03-25"
+  face_recognition:
+    current_version: "2025-02-25"
+    previous_version: "2020-03-25"
 ```
 
-**Model management features to implement**:
-- Version control for model files
-- Checksum validation
-- Automatic model updates
-- Model performance benchmarking
-- Support for custom trained models
+**Rollback**:
+```bash
+# Interactive rollback utility
+./devops/scripts/rollback_model.sh
+
+# Quick rollback to previous version
+./devops/scripts/rollback_model.sh --model face_recognition --previous
+```
+
+See `devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md` for complete documentation.
 
 ## Hardware Acceleration
 
@@ -174,6 +191,8 @@ Sentinel runs multiple task engines processing different priority classes:
 
 ### Task Configuration Files
 
+Task configurations are deployed as Jinja2 templates with versioned model paths:
+
 Located in `sentinel/tasks/`:
 - `MobileNetSSD_allFrames.yaml` - Object detection on all frames
 - `GetFaces.yaml` - Face detection and extraction
@@ -181,6 +200,14 @@ Located in `sentinel/tasks/`:
 - `FaceSweep.yaml` - Background face processing
 - `FaceDataUpdate.yaml` - Face database management
 - `DailyCleanup.yaml` - Maintenance tasks
+
+**Template Deployment**:
+```bash
+# Deploy task configs with updated model versions
+ansible-playbook playbooks/deploy-sentinel.yaml --tags=config
+```
+
+Model paths are automatically injected from `model_registry.yaml` during deployment.
 
 ### Task Engines
 
@@ -325,8 +352,15 @@ ssh sentinel '~/openvino/deployment_tools/inference_engine/samples/hello_query_d
 # Verify model files exist
 ssh sentinel 'ls -la ~/sentinel/models/'
 
+# Check versioned model directories
+ssh sentinel 'ls -la ~/sentinel/models/face_detection/2020-03-25/'
+ssh sentinel 'ls -la ~/sentinel/models/face_recognition/2025-02-25/'
+
 # Check model format (IR for NCS2)
-ssh sentinel 'file ~/sentinel/models/*.xml'
+ssh sentinel 'file ~/sentinel/models/face_detection/*/opencv_dnn_face/*.xml'
+
+# Redeploy models if missing or corrupted
+ansible-playbook playbooks/deploy-models.yaml --limit=sentinel
 
 # Test model loading
 ssh sentinel 'python3 -c "from openvino.inference_engine import IECore; ie = IECore(); print(ie.available_devices)"'
