@@ -16,6 +16,10 @@ from sentinelcam.camdata import CamData
 from sentinelcam.facedata import FaceList
 from sentinelcam.utils import readConfig
 
+# NOTE: Using pickle protocol 4 for compatibility with legacy nodes running
+# Python 3.7 (Debian Buster). Can be upgraded to protocol 5 once all nodes
+# are running Python 3.8+ (Debian Bullseye or later).
+
 class DataPump(imagezmq.ImageHub):
     """ Service access requests to camwatcher data store and Sentinel DataFeed 
 
@@ -57,7 +61,8 @@ class DataPump(imagezmq.ImageHub):
                        track=False):
         """Sends a pandas.DataFrame 
 
-        Sends a pickled pandas.DataFrame as the response.
+        Sends a pickled pandas.DataFrame as the response using pickle protocol 4
+        for compatibility with legacy nodes running Python 3.7 and older pandas versions.
         Preceded by a response code or other text msg,
 
         Parameters:
@@ -76,14 +81,16 @@ class DataPump(imagezmq.ImageHub):
 
         md = dict(msg=msg, )
         buffer = io.BytesIO()
-        df.to_pickle(buffer)
+        # Use pickle directly with protocol 4 for compatibility with Python 3.7 (Debian Buster)
+        # and older pandas versions that don't support protocol parameter in to_pickle()
+        pickle.dump(df, buffer, protocol=4)
         self.zmq_socket.send_json(md, flags | zmq.SNDMORE)
         return self.zmq_socket.send(buffer.getvalue(), flags, copy=copy, track=track)
 
     def pickle_and_send(self, 
                         msg='OK',
                         obj=None,
-                        protocol=-1,
+                        protocol=4,  # Use protocol 4 for Python 3.7+ compatibility
                         flags=0,
                         copy=False,
                         track=False):
@@ -91,6 +98,9 @@ class DataPump(imagezmq.ImageHub):
 
         Pickle and compress an object to send as the response.
         Preceded by a response code or other text msg,
+        
+        Uses pickle protocol 4 for compatibility with legacy nodes running
+        Python 3.7 (Debian Buster) until all nodes are upgraded.
 
         Parameters:
         -----------
@@ -99,7 +109,7 @@ class DataPump(imagezmq.ImageHub):
         obj : data
             object to be sent 
         protocol : int, optional
-            pickling protocol
+            pickling protocol (default 4 for Python 3.7+ compatibility)
         flags : int, optional 
             zmq flags
         copy : bool, optional

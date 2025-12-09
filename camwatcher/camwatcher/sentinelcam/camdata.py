@@ -48,6 +48,8 @@ class CamData:
         Returns node name associated with current event
     get_event_view() -> str
         Returns view name associated with current event
+    get_event_camsize() -> tuple
+        Returns (width, height) of camera image for current event
     get_event_types() -> list
         Returns lsit of event types available for this event
     get_event_pathname(event, type) -> str
@@ -178,11 +180,13 @@ class CamData:
         if len(self._event_subset.index) > 0:
             self._event_node = self._event_subset.iloc[0].node
             self._event_view = self._event_subset.iloc[0].viewname
+            self._event_camsize = (self._event_subset.iloc[0].width, self._event_subset.iloc[0].height)
             self._event_start = self._event_subset["timestamp"].min()
             self._event_types = self._event_subset["type"].to_list()
         else:
             self._event_node = None
             self._event_view = None
+            self._event_camsize = (None, None)
             self._event_start = None
             self._event_types = []
 
@@ -211,6 +215,19 @@ class CamData:
         """
 
         return self._event_view
+    
+    def get_event_camsize(self) -> tuple:
+        """ Return camera image size (width, height) from the event
+            
+        Must have first invoked `set_event()` to load camera detail for the event.
+        
+        Returns
+        -------
+        tuple
+            (width, height) of camera image for current event
+        """
+
+        return self._event_camsize
 
     def get_event_start(self) -> datetime.timestamp:
         """ Return view name from the event
@@ -263,12 +280,12 @@ class CamData:
         """ Return reference to selected event tracking data as a pandas DataFrame 
         
         Must have first invoked `set_event()` to load camera detail for the event.
-                
+
         Parameters
         ----------
         type : str, optional
             Event type 
-        
+
         Returns
         -------
         pandas.DataFrame
@@ -278,9 +295,46 @@ class CamData:
         csvFile = self.get_event_pathname(self._event_id, type)
         if csvFile is not None:
             try:
-                self._event_data = pandas.read_csv(csvFile, parse_dates=['timestamp']).sort_values(by="timestamp")
-                self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
+                # For pandas 1.2.2 compatibility - use error_bad_lines=False instead of on_bad_lines='skip'
+                self._event_data = pandas.read_csv(
+                    csvFile, 
+                    parse_dates=['timestamp'],
+                    error_bad_lines=False,  # Skip bad lines (pandas 1.2.2 compatible)
+                    warn_bad_lines=False,   # Suppress warnings about bad lines
+                    dtype={
+                        'objid': str,
+                        'classname': str,
+                        'rect_x1': 'Int64',  # Use nullable integer type for better error handling
+                        'rect_x2': 'Int64',
+                        'rect_y1': 'Int64',
+                        'rect_y2': 'Int64'
+                    }
+                )
+                
+                # Ensure timestamp column is properly parsed
+                self._event_data['timestamp'] = pandas.to_datetime(
+                    self._event_data['timestamp'], 
+                    errors='coerce'  # Convert invalid timestamps to NaT
+                )
+                
+                # Drop rows with invalid timestamps
+                self._event_data = self._event_data.dropna(subset=['timestamp'])
+                
+                # Sort by timestamp and add elapsed time
+                if len(self._event_data) > 0:
+                    self._event_data = self._event_data.sort_values(by="timestamp")
+                    self._event_data["elapsed"] = self._event_data["timestamp"] - self._event_start
+
             except pandas.errors.EmptyDataError:
+                # Handle empty CSV files
+                self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
+            except (pandas.errors.ParserError, ValueError) as e:
+                # Handle parsing errors
+                print(f"Error parsing CSV file {csvFile}: {str(e)}")
+                self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
+            except Exception as e:
+                # Handle any other unexpected errors
+                print(f"Unexpected error reading {csvFile}: {str(e)}")
                 self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
         else:
             self._event_data = pandas.DataFrame(columns=CamData.TRKCOLS)
