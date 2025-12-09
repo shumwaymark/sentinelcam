@@ -68,7 +68,7 @@ which are then combined into a single package for transfer.
 
 **Filesystem structure:**
   
-  .. code-block:: 
+.. code-block:: 
 
   sentinelcam/
   ├── imagenode/
@@ -114,7 +114,7 @@ production systems from external development environments.
 
 **Filesystem structure:**
   
-  .. code-block:: 
+.. code-block:: 
 
   /home/rocky/
   ├── transfer_cache/
@@ -139,7 +139,7 @@ into the repository, preserving previous packages for rollback safety. Upon succ
 
 **Filesystem structure:**
   
-  .. code-block:: 
+.. code-block:: 
 
   /home/ops/
   ├── camwatcher/                      # Currently running **camwatcher** and **datapump** services
@@ -190,7 +190,7 @@ It pulls fresh copies of this during each deployment cycle to ensure consistency
 
 **Filesystem structure:**
   
-  .. code-block:: 
+.. code-block:: 
 
   /home/pi/
   └── sentinelcam/
