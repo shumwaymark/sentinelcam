@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone target="ACCEPT">
+  <short>Trusted</short>
+  <description>All network connections are accepted. Used for WireGuard VPN interface with MSS clamping for MTU optimization.</description>
+  <masquerade/>
+  <forward/>
+  <!-- MSS clamping rule to handle MTU/packet size issues -->
+  <rule>
+    <tcp-mss-clamp value="{{ bastion_firewall.mss_clamp_value }}"/>
+  </rule>
+</zone>

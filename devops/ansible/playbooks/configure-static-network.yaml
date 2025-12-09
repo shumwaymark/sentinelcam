@@ -1,0 +1,133 @@
+---
+# Configure static IP addresses for SentinelCam nodes
+# Uses systemd-networkd (Debian 12 Bookworm / Raspberry Pi OS standard)
+#
+# Usage:
+#   ansible-playbook -i inventory/bootstrap.yaml \
+#     playbooks/configure-static-network.yaml \
+#     --extra-vars "target_hostname=north target_ip=192.168.10.23"
+
+- name: Configure static IP address on SentinelCam node
+  hosts: new_nodes
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Network configuration (from inventory or extra-vars)
+    target_hostname: "{{ target_hostname | default(inventory_hostname) }}"
+    target_ip: "{{ target_ip }}"
+    interface: "{{ interface | default('eth0') }}"
+    
+    # Network parameters from inventory vars
+    subnet: "{{ subnet | default('192.168.10.0/24') }}"
+    gateway: "{{ gateway | default('192.168.10.254') }}"
+    dns_servers: "{{ dns_servers | default(['192.168.10.254', '8.8.8.8']) }}"
+    
+    # Backup directory
+    backup_dir: "/root/network_backup_{{ ansible_date_time.epoch }}"
+    
+  tasks:
+    - name: Display configuration summary
+      debug:
+        msg:
+          - "Configuring static IP for: {{ target_hostname }}"
+          - "Target IP: {{ target_ip }}"
+          - "Interface: {{ interface }}"
+          - "Gateway: {{ gateway }}"
+          - "Network manager: systemd-networkd"
+          
+    - name: Validate target_ip is provided
+      fail:
+        msg: "target_ip must be provided via extra-vars or inventory"
+      when: target_ip is not defined or target_ip == ""
+      
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0700'
+        
+    - name: Backup existing network configuration
+      shell: |
+        if [ -f /etc/systemd/network/10-{{ interface }}.network ]; then
+          cp /etc/systemd/network/10-{{ interface }}.network {{ backup_dir }}/
+        fi
+      args:
+        executable: /bin/bash
+        
+    - name: Create systemd-networkd configuration directory
+      file:
+        path: /etc/systemd/network
+        state: directory
+        mode: '0755'
+        
+    - name: Deploy systemd-networkd static IP configuration
+      copy:
+        dest: "/etc/systemd/network/10-{{ interface }}.network"
+        content: |
+          [Match]
+          Name={{ interface }}
+          
+          [Network]
+          Address={{ target_ip }}/24
+          Gateway={{ gateway }}
+          DNS={{ dns_servers[0] }}
+          DNS={{ dns_servers[1] }}
+          
+          [Link]
+          RequiredForOnline=yes
+        mode: '0644'
+      notify: restart systemd-networkd
+      
+    - name: Ensure systemd-networkd is enabled
+      systemd:
+        name: systemd-networkd
+        enabled: yes
+        
+    - name: Ensure systemd-resolved is enabled
+      systemd:
+        name: systemd-resolved
+        enabled: yes
+    - name: Update /etc/hosts with static IP
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^{{ target_ip }}'
+        line: "{{ target_ip }}       {{ target_hostname }} {{ target_hostname }}.local"
+        
+    - name: Display completion message
+      debug:
+        msg:
+          - "Static IP configuration completed for {{ target_hostname }}"
+          - "Backup created at: {{ backup_dir }}"
+          - "Network service will restart shortly"
+          - "After restart, the node will be accessible at: {{ target_ip }}"
+          - ""
+          - "IMPORTANT: SSH connection will drop during network restart"
+          - "Wait 30-60 seconds, then connect to: ssh {{ ansible_user }}@{{ target_ip }}"
+          
+  handlers:
+    - name: restart systemd-networkd
+      systemd:
+        name: systemd-networkd
+        state: restarted
+        
+  post_tasks:
+    - name: Wait for network to stabilize
+      wait_for:
+        timeout: 10
+      delegate_to: localhost
+      
+    - name: Display next steps
+      debug:
+        msg:
+          - "=== Network Configuration Complete ==="
+          - ""
+          - "Next steps:"
+          - "1. Wait 30-60 seconds for network to fully restart"
+          - "2. Test connectivity: ping {{ target_ip }}"
+          - "3. Test SSH: ssh {{ ansible_user }}@{{ target_ip }}"
+          - "4. Add node to production inventory with static IP"
+          - "5. Deploy services using role-specific playbooks"
+          - ""
+          - "Backup location: {{ backup_dir }}"
+      run_once: true

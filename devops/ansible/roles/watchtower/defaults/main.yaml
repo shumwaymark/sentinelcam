@@ -1,0 +1,39 @@
+---
+# Default variables for SentinelCam Watchtower Role
+# See group_vars/all/sentinelcam_ports.yaml for port definitions
+# See group_vars/all/sentinelcam_standards.yaml for path standards
+# See group_vars/all/site.yaml for outpost registry (sentinelcam_outposts)
+
+# Watchtower service configuration
+watchtower_service: watchtower
+watchtower_config_file: watchtower.yaml
+watchtower_install_path: "/home/{{ sentinelcam_user }}/watchtower"
+watchtower_config_path: "/home/{{ sentinelcam_user }}/watchtower.yaml"
+
+# Sentinel logging publisher endpoint
+watchtower_sentinel: "tcp://{{ sentinelcam_sentinel }}:{{ sentinelcam_ports.sentinel_logging }}"
+
+# IPC socket directory 
+watchtower_socket_dir: "{{ watchtower_install_path }}/sockets"
+
+# Watchtower runs in graphical environment
+watchtower_display: ":0"
+
+# Debug mode flag
+debug_mode: false
+
+# Default view settings
+# NOTE: This should match a view name from sentinelcam_outposts registry
+watchtower_default_view: "PiCamera"
+watchtower_viewfps: true
+
+# NOTE: The following configurations are now auto-generated from group_vars/all/site.yaml:
+#   - watchtower_ring_buffers  (derived from unique resolutions in sentinelcam_outposts)
+#   - watchtower_datapumps     (derived from unique datasinks in sentinelcam_outposts)
+#   - watchtower_outposts      (derived from sentinelcam_outposts registry)
+#   - watchtower_views         (derived from cameras in sentinelcam_outposts)
+#
+# To limit which outposts a watchtower monitors, override in host_vars:
+#   watchtower_monitored_outposts:
+#     - east
+#     - lab1

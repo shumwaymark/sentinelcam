@@ -1,0 +1,109 @@
+---
+# SentinelCam Dependency Update Playbook
+# Updates Python libraries to latest versions across all nodes for maintenance
+# WARNING: This upgrades beyond pinned versions - test on staging first!
+
+- name: "Update Python Dependencies - Data Sinks (Local SSD Access)"
+  hosts: datasinks
+  become: yes
+  vars:
+    sentinelcam_user: ops
+    sentinelcam_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/opencv"
+    
+  tasks:
+    - name: "Backup current pip freeze before update"
+      ansible.builtin.shell:
+        cmd: "{{ sentinelcam_venv_path }}/bin/pip freeze > /home/ops/sentinelcam/archive/pip_freeze_backup_$(date +%Y%m%d_%H%M%S).txt"
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "Update Python dependencies to latest versions"
+      ansible.builtin.pip:
+        requirements: "{{ sentinelcam_requirements_file }}"
+        virtualenv: "{{ sentinelcam_venv_path }}"
+        virtualenv_command: "python3 -m venv"
+        state: latest  # Forces upgrade to latest available versions
+        extra_args: "--upgrade"
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "Verify critical imports still work on datasink"
+      ansible.builtin.shell:
+        cmd: |
+          {{ sentinelcam_venv_path }}/bin/python -c "
+          import cv2
+          import imagezmq
+          import imutils
+          import pandas
+          import sklearn
+          print('All critical imports successful on datasink')
+          "
+      become_user: "{{ sentinelcam_user }}"
+      register: import_test_datasink
+      failed_when: import_test_datasink.rc != 0
+
+    - name: "Display updated package versions on datasink"
+      ansible.builtin.shell:
+        cmd: "{{ sentinelcam_venv_path }}/bin/pip list | grep -E '(opencv|imagezmq|imutils|depthai|pandas|scikit-learn|numpy)'"
+      become_user: "{{ sentinelcam_user }}"
+      register: updated_versions_datasink
+
+    - name: "Show updated versions on datasink"
+      ansible.builtin.debug:
+        msg: "Updated packages on {{ inventory_hostname }}:\n{{ updated_versions_datasink.stdout }}"
+
+- name: "Update Python Dependencies - Remote Nodes (Rsync from Data Sink)"
+  hosts: outposts:sentinels:watchtowers
+  become: yes
+  vars:
+    sentinelcam_user: ops
+    sentinelcam_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/opencv"
+    
+  tasks:
+    - name: "Backup current pip freeze before update"
+      ansible.builtin.shell:
+        cmd: "{{ sentinelcam_venv_path }}/bin/pip freeze > /tmp/pip_freeze_backup_$(date +%Y%m%d_%H%M%S).txt"
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "Sync requirements.txt from primary data sink"
+      ansible.builtin.synchronize:
+        src: "{{ sentinelcam_requirements_file }}"
+        dest: "/tmp/sentinelcam_requirements.txt"
+        rsync_opts:
+          - "--chmod=644"
+      delegate_to: "{{ hostvars[groups['datasinks'][0]].primary_datasink | default(groups['datasinks'][0]) }}"
+
+    - name: "Update Python dependencies to latest versions"
+      ansible.builtin.pip:
+        requirements: "/tmp/sentinelcam_requirements.txt"
+        virtualenv: "{{ sentinelcam_venv_path }}"
+        virtualenv_command: "python3 -m venv"
+        state: latest  # Forces upgrade to latest available versions
+        extra_args: "--upgrade"
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "Verify critical imports still work"
+      ansible.builtin.shell:
+        cmd: |
+          {{ sentinelcam_venv_path }}/bin/python -c "
+          import cv2
+          import imagezmq
+          import imutils
+          print('All critical imports successful')
+          "
+      become_user: "{{ sentinelcam_user }}"
+      register: import_test
+      failed_when: import_test.rc != 0
+
+    - name: "Display updated package versions"
+      ansible.builtin.shell:
+        cmd: "{{ sentinelcam_venv_path }}/bin/pip list | grep -E '(opencv|imagezmq|imutils|depthai|pandas|scikit-learn|numpy)'"
+      become_user: "{{ sentinelcam_user }}"
+      register: updated_versions
+
+    - name: "Show updated versions"
+      ansible.builtin.debug:
+        msg: "Updated packages on {{ inventory_hostname }}:\n{{ updated_versions.stdout }}"
+
+    - name: "Clean up synced requirements file"
+      ansible.builtin.file:
+        path: "/tmp/sentinelcam_requirements.txt"
+        state: absent

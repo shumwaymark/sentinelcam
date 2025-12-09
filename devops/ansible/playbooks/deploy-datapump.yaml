@@ -1,0 +1,10 @@
+---
+# SentinelCam DataPump-only Deployment Playbook
+# Use this when you only want to deploy datapump
+
+- name: Deploy DataPump to data sinks
+  hosts: datasinks
+  become: yes
+  roles:
+    - sentinelcam_base    # Common base configuration
+    - datapump

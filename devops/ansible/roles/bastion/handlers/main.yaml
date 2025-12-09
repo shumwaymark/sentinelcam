@@ -1,0 +1,44 @@
+---
+# Service restart handlers
+
+- name: restart networkmanager
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: restarted
+  listen: "restart networkmanager"
+
+- name: reload networkmanager connections
+  ansible.builtin.shell: nmcli connection reload
+  listen: "reload networkmanager connections"
+
+- name: restart dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted
+  listen: "restart dnsmasq"
+
+- name: reload firewalld
+  ansible.builtin.shell: firewall-cmd --reload
+  listen: "reload firewalld"
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  listen: "reload systemd"
+
+- name: restart wireguard delayed start
+  ansible.builtin.systemd:
+    name: wireguard-delayed-start.service
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+  async: 10
+  poll: 0
+  listen: "restart wireguard delayed start"
+
+- name: restart wireguard delayed start timer
+  ansible.builtin.systemd:
+    name: wireguard-delayed-start.timer
+    state: restarted
+    enabled: yes
+  listen: "restart wireguard delayed start timer"

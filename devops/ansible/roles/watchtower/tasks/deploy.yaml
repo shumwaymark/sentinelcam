@@ -1,0 +1,28 @@
+---
+# SentinelCam Watchtower Role - Deployment Tasks
+# NOTE: Code deployment is handled by sentinelcam_base role 
+# This file contains watchtower-specific deployment tasks
+
+- name: "Set ownership of Watchtower installation directory"
+  ansible.builtin.file:
+    path: "{{ watchtower_install_path }}"
+    owner: "{{ watchtower_user }}"
+    group: "{{ watchtower_group }}"
+    recurse: yes
+  tags: 
+    - deploy
+
+- name: "Check Watchtower service status"
+  ansible.builtin.systemd:
+    name: "{{ watchtower_service }}"
+  register: watchtower_service_status
+  tags: 
+    - status
+    - health
+
+- name: "Display Watchtower service status"
+  ansible.builtin.debug:
+    msg: "Watchtower service is {{ watchtower_service_status.status.ActiveState }}"
+  tags: 
+    - status
+    - health

@@ -1,0 +1,59 @@
+# ImageNode role default variables
+---
+# IMPORTANT: New deployments should use imagenode_config structure in host_vars
+# See README.md for examples. The flat variables below are retained for
+# compatibility but may be removed in future versions.
+
+# Service configuration
+imagenode_service: imagenode
+imagenode_config_file: imagenode.yaml
+imagenode_install_path: /home/{{ sentinelcam_user }}/imagenode
+imagenode_config_path: /home/{{ sentinelcam_user }}/imagenode.yaml
+imagenode_venv_path: "{{ sentinelcam_venv_opencv }}"
+
+# Service management
+imagenode_service_enabled: true
+imagenode_service_state: started
+
+# Model paths (versioned from registry)
+imagenode_models_path: "{{ imagenode_install_path }}/models"
+
+# Model deployment configuration
+# Defines which models are deployed to imagenode (outpost) nodes by default.
+# Individual hosts can override this list in their host_vars to run
+# specialized models not needed system-wide.
+#
+# Example host override (host_vars/indoor_cam.yaml):
+#   outpost_models:
+#     - face_detection  # Indoor camera needs face detection, not vehicles
+#
+# Models are deployed from the registry on primary_datasink to:
+#   /home/ops/imagenode/models/<model_name>/<version>/
+#
+# Available models defined in model_registry.yaml:
+#   - mobilenet_ssd (default for all outposts)
+#   - face_detection
+#   - vehicle_detection (future)
+#
+# Documentation:
+#   - devops/README.rst - DevOps pipeline and infrastructure overview
+#   - devops/ansible/README.md - Ansible deployment guide
+#   - devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md - Model registry details
+outpost_models:
+  - mobilenet_ssd
+
+# Model version overrides (optional per-host customization)
+# Override specific model versions in host_vars if testing new models
+# Example: model_version_overrides: { mobilenet_ssd: "2025-12-01" }
+model_version_overrides: {}
+
+# MobileNetSSD configuration (versioned paths from registry)
+# These variables construct paths referencing the current model version
+# and are injected into imagenode.yaml.j2 template
+mobilenet_base_path: "{{ imagenode_models_path }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}"
+mobilenet_prototxt: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.prototxt"
+mobilenet_model: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.caffemodel"
+mobilenet_confidence: 0.5
+
+# Debug mode flag
+debug_mode: false

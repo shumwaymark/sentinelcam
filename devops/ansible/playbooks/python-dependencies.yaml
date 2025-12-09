@@ -1,0 +1,55 @@
+---
+# SentinelCam Python Dependencies Playbook
+# Manages Python dependencies separately from code deployment
+# Handles both local (datasink) and remote (rsync) deployment patterns
+
+- name: "Install/Update Python Dependencies - Data Sinks (Local SSD Access)"
+  hosts: datasinks
+  become: yes
+  
+  tasks:
+    - name: "Install Python dependencies from local SSD repository"
+      ansible.builtin.pip:
+        requirements: "{{ sentinelcam_requirements_file }}"
+        virtualenv: "{{ sentinelcam_venv_path }}"
+        virtualenv_command: "python3 -m venv"
+        state: present  # Use 'latest' for upgrades, 'present' for exact versions
+      become_user: "{{ sentinelcam_user }}"
+      tags: 
+        - python_deps
+        - dependencies
+        - datasink
+
+- name: "Install/Update Python Dependencies - Remote Nodes (Rsync from Data Sink)"
+  hosts: outposts:sentinels:watchtowers
+  become: yes
+  tasks:
+    - name: "Sync requirements.txt from primary data sink"
+      ansible.builtin.synchronize:
+        src: "{{ sentinelcam_requirements_file }}"
+        dest: "/home/ops/requirements.txt"
+        rsync_opts:
+          - "--chmod=644"
+      delegate_to: "{{ hostvars[groups['datasinks'][0]].primary_datasink | default(groups['datasinks'][0]) }}"
+      tags: 
+        - python_deps
+        - dependencies
+        - sync
+
+    - name: "Install Python dependencies from synced requirements"
+      ansible.builtin.pip:
+        requirements: "/home/ops/requirements.txt"
+        virtualenv: "{{ sentinelcam_venv_path }}"
+        virtualenv_command: "python3 -m venv"
+        state: present
+      become_user: "{{ sentinelcam_user }}"
+      tags: 
+        - python_deps
+        - dependencies
+
+    - name: "Clean up synced requirements file"
+      ansible.builtin.file:
+        path: "/home/ops/requirements.txt"
+        state: absent
+      tags: 
+        - cleanup

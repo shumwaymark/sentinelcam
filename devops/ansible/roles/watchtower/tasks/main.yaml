@@ -1,0 +1,79 @@
+---
+# SentinelCam Watchtower Role - Main Tasks
+
+- name: "Include deployment tasks"
+  ansible.builtin.include_tasks: deploy.yaml
+  tags:
+    - deploy
+    - deployment
+    - status
+    - health
+
+- name: "Create Watchtower user if it doesn't exist"
+  ansible.builtin.user:
+    name: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    home: "/home/{{ sentinelcam_user }}"
+    shell: /bin/bash
+    create_home: yes
+  tags: users
+
+- name: "Create Watchtower installation directory"
+  ansible.builtin.file:
+    path: "{{ watchtower_install_path }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: directories
+
+- name: "Create Watchtower socket directory"
+  ansible.builtin.file:
+    path: "{{ watchtower_socket_dir }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: directories
+
+- name: "Ensure Watchtower parent directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  loop:
+    - "/home/{{ sentinelcam_user }}/watchtower"
+    - "{{ sentinelcam_venv_path }}"
+  tags: directories
+
+- name: "Deploy Watchtower systemd service file"
+  ansible.builtin.template:
+    src: watchtower.service.j2
+    dest: /etc/systemd/system/{{ watchtower_service }}.service
+    mode: '0644'
+    backup: yes
+  notify:
+    - reload systemd
+  tags: service
+
+- name: "Deploy Watchtower configuration file"
+  ansible.builtin.template:
+    src: watchtower.yaml.j2
+    dest: "{{ watchtower_config_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  notify:
+    - restart watchtower
+  tags: config
+
+- name: "Enable and start Watchtower service"
+  ansible.builtin.systemd:
+    name: "{{ watchtower_service }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags: service

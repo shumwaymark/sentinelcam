@@ -1,0 +1,15 @@
+---
+# Default variables for SentinelCam DataPump Role
+# See group_vars/all/sentinelcam_ports.yaml for port definitions
+# See group_vars/all/sentinelcam_standards.yaml for path and logging standards
+
+# Debug mode
+debug_mode: false
+
+# Logging Configuration
+sentinelcam_logging:
+  level: "WARN"
+
+# Current FaceList CSV file, defines the population of locked events
+# References the current face_recognition model version from model_registry.yaml
+faces_data_file: "{{ sentinelcam_data_path }}/face_recognition/facelist_{{ sentinelcam_models.face_recognition.current_version }}.csv"

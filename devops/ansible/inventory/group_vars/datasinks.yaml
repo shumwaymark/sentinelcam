@@ -1,0 +1,44 @@
+---
+# Datasinks group variables
+# 
+# Note: Common variables (users, paths, network buffers) are defined in:
+#   - group_vars/all/sentinelcam_standards.yaml
+# This file contains datasink-specific overrides and service configurations.
+
+# Datapump configuration
+datapump_service: datapump
+datapump_config_file: datapump.yaml
+datapump_install_path: /home/{{ sentinelcam_user }}/camwatcher/datapump
+datapump_config_path: /home/{{ sentinelcam_user }}/datapump.yaml
+
+# Camwatcher configuration
+camwatcher_service: camwatcher
+camwatcher_config_file: camwatcher.yaml
+camwatcher_install_path: /home/{{ sentinelcam_user }}/camwatcher/camwatcher
+camwatcher_config_path: /home/{{ sentinelcam_user }}/camwatcher.yaml
+
+# Imagehub configuration
+imagehub_service: imagehub
+imagehub_config_file: imagehub.yaml
+imagehub_install_path: /home/{{ sentinelcam_user }}/imagehub
+imagehub_config_path: /home/{{ sentinelcam_user }}/imagehub.yaml
+
+# Face detection data (references sentinelcam_directories from standards)
+faces_data_file: "{{ sentinelcam_directories.faces }}/facebeta6.csv"
+
+# Hardware-specific settings for Pi 5 + NVMe SSD
+data_device: /dev/nvme0n1
+optimize_io: true
+
+# Performance tuning settings
+cpu_governor: performance
+io_scheduler: none
+gpu_memory_split: 16
+max_open_files: 65536
+
+# Services to disable on data nodes
+disabled_services:
+  - bluetooth
+  - cups
+  - avahi-daemon
+  - triggerhappy

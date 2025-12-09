@@ -1,0 +1,19 @@
+---
+# ImageNode deployment tasks
+# NOTE: Code deployment is handled by sentinelcam_base role
+# This file contains imagenode-specific deployment tasks
+
+- name: "Check ImageNode service status"
+  ansible.builtin.systemd:
+    name: "{{ imagenode_service }}"
+  register: imagenode_service_status
+  tags:
+    - status
+    - health
+
+- name: "Display ImageNode service status"
+  ansible.builtin.debug:
+    msg: "ImageNode service is {{ imagenode_service_status.status.ActiveState | default('unknown') }}"
+  tags:
+    - status
+    - health

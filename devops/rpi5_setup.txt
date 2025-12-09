@@ -1,0 +1,18 @@
+# starting with image: 2024-11-19-raspios-bookworm-arm64-lite.img.xz
+# initial boot, then as the new "os" user
+sudo apt update && sudo apt upgrade
+sudo apt install python3-picamera2
+sudo /sbin/shutdown -r now 
+# after that restart, then the below
+python -m venv --system-site-packages .opencv
+source .opencv/bin/activate
+pip install opencv-contrib-python-headless
+pip install imagezmq
+pip install imutils
+pip install depthai
+pip install pandas
+pip install h5py
+pip install scikit-learn
+pip install psutil
+pip install pyyaml
+pip install msgpack

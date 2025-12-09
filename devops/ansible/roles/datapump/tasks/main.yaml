@@ -1,0 +1,117 @@
+---
+# SentinelCam DataPump Role - Main Tasks
+#
+# Responsibilities:
+# - Directory structure setup
+# - Systemd service file deployment (template)
+# - Configuration file deployment (template)
+# - Optional: I/O performance optimizations
+# - Optional: Face data management
+#
+# Code deployment is handled by deploy.yaml (included below)
+# Uses watchtower pattern: no duplication between main.yaml and deploy.yaml
+#
+# Note: DataPump is deployed as sibling to CamWatcher under /home/ops/camwatcher/
+# See ansible_refactoring_info.md for rationale
+
+- name: "Include deployment tasks"
+  ansible.builtin.include_tasks: deploy.yaml
+  tags:
+    - deploy
+    - deployment
+    - status
+    - health
+
+- name: "Include I/O performance optimizations"
+  ansible.builtin.include_tasks: io_optimization.yaml
+  when: optimize_io | default(true) == true
+  tags: 
+    - io
+    - performance
+    - never  # Optional: Run with --tags io,performance
+
+- name: "Ensure DataPump-specific data directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  loop:
+    - "{{ sentinelcam_directories.csvfiles }}"
+    - "{{ sentinelcam_directories.images }}"
+  tags: 
+    - directories
+    - setup
+
+- name: "Create DataPump installation directory"
+  ansible.builtin.file:
+    path: "{{ datapump_install_path }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: 
+    - directories
+    - setup
+
+- name: "Deploy DataPump systemd service file"
+  ansible.builtin.template:
+    src: datapump.service.j2
+    dest: /etc/systemd/system/{{ datapump_service }}.service
+    mode: '0644'
+    backup: yes
+  notify:
+    - reload systemd
+  tags: 
+    - service
+    - systemd
+    - setup
+
+- name: "Include face data management tasks"
+  ansible.builtin.include_tasks: face_data.yaml
+  tags: 
+    - faces
+    - face_data
+    - never  # Optional: Run with --tags faces
+
+- name: "Deploy DataPump configuration file"
+  ansible.builtin.template:
+    src: datapump.yaml.j2
+    dest: "{{ datapump_config_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  notify:
+    - restart datapump
+  tags: 
+    - config
+    - setup
+
+- name: "Deploy model registry cleanup service (primary_datasink only)"
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: '0644'
+    backup: yes
+  loop:
+    - model_cleanup.service
+    - model_cleanup.timer
+  notify:
+    - reload systemd
+  when: inventory_hostname == groups['primary_datasink'][0]
+  tags:
+    - model_registry
+    - cleanup
+
+- name: "Enable and start model cleanup timer (primary_datasink only)"
+  ansible.builtin.systemd:
+    name: model_cleanup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: inventory_hostname == groups['primary_datasink'][0]
+  tags:
+    - model_registry
+    - cleanup

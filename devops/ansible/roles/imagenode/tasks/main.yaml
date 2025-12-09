@@ -1,0 +1,51 @@
+---
+# ImageNode main tasks
+- name: Include deployment tasks
+  include_tasks: deploy.yaml
+  tags:
+    - deploy
+    - code
+
+- name: Deploy imagenode configuration
+  template:
+    src: imagenode.yaml.j2
+    dest: "{{ imagenode_config_file }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  become: yes
+  notify: restart imagenode service
+  tags:
+    - config
+    - configuration
+
+- name: Deploy imagenode systemd service file
+  template:
+    src: imagenode.service.j2
+    dest: "/etc/systemd/system/{{ imagenode_service }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  become: yes
+  notify:
+    - reload systemd daemon
+    - restart imagenode service
+  tags:
+    - systemd
+    - service
+
+# TODO: Model deployment for MobileNetSSD/YOLOv3 - not yet implemented
+# Models should be deployed to {{ mobilenet_base_path }} when detection_objects == 'mobilenetssd'
+
+- name: Ensure imagenode service is enabled and started
+  systemd:
+    name: "{{ imagenode_service }}"
+    enabled: "{{ imagenode_service_enabled }}"
+    state: "{{ imagenode_service_state }}"
+    daemon_reload: yes
+  become: yes
+  tags:
+    - service
+    - start

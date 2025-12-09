@@ -1,0 +1,12 @@
+---
+# SentinelCam Sentinel Role - Event Handlers
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: restart sentinel
+  ansible.builtin.systemd:
+    name: sentinel
+    state: restarted
+    daemon_reload: yes

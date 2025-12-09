@@ -1,0 +1,24 @@
+---
+# ImageNode service handlers
+# Note: Service restart handler provided by sentinelcam_base role
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+  become: yes
+  listen: "reload systemd daemon"
+
+- name: start imagenode
+  systemd:
+    name: "{{ imagenode_service }}"
+    state: started
+    enabled: "{{ imagenode_service_enabled }}"
+  become: yes
+  listen: "start imagenode service"
+
+- name: stop imagenode
+  systemd:
+    name: "{{ imagenode_service }}"
+    state: stopped
+  become: yes
+  listen: "stop imagenode service"

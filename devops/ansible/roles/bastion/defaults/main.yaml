@@ -1,0 +1,176 @@
+---
+# Bastion Host Default Configuration
+# Variables defined here can be overridden in site-specific inventory files
+
+# WireGuard Configuration
+# VPN addresses are SITE-SPECIFIC and must be defined in inventory
+# Each site's bastion needs a unique IP on the VPN network (10.0.0.0/24)
+# See: devops/NETWORK_ADDRESSING_STANDARD.md
+bastion_wireguard:
+  interface: wg0
+  private_key: "{{ vault_wireguard_private_key }}"
+  address_ipv4: "{{ bastion_vpn_ipv4 | default('10.0.0.3/24') }}"
+  address_ipv6: "{{ bastion_vpn_ipv6 | default('fc00:23:5::3/64') }}"
+  mtu: 1420
+  fwmark: 51992
+  route_table: 51992
+  peer:
+    public_key: "{{ vault_wireguard_peer_public_key }}"
+    endpoint: "{{ vault_wireguard_endpoint }}"
+    port: "{{ vault_wireguard_port | default('54321') }}"
+    allowed_ips: "0.0.0.0/0,::/0"
+    persistent_keepalive: 25
+  # Delay WireGuard startup to handle timing issues
+  startup_delay: 30
+  autoconnect: false  # Manual control for timing
+
+# Network Interface Configuration
+# Interface names can be overridden via:
+#   1. Site variables (bastion_interface_external/internal)
+#   2. Inventory host vars (interface field)
+#   3. These defaults
+#
+# External network config MUST be provided via site inventory variable:
+#   bastion_external_network:
+#     ip: "192.168.0.254/24"
+#     gateway: "192.168.0.1"
+#     dns: ["1.1.1.1", "8.8.8.8"]
+#     zone: "home"
+#
+# See: devops/NETWORK_ADDRESSING_STANDARD.md
+bastion_interfaces:
+  external:
+    name: "{{ bastion_interface_external | default('eth0') }}"
+    uuid: c9944e38-4732-3745-8da7-9585c6ef3204
+    ip: "{{ bastion_external_network.ip | default('192.168.0.254/24') }}"
+    gateway: "{{ bastion_external_network.gateway | default('192.168.0.1') }}"
+    zone: "{{ bastion_external_network.zone | default('home') }}"
+    dns: "{{ bastion_external_network.dns | default(['1.1.1.1', '8.8.8.8']) }}"
+    # Policy routing for WireGuard endpoint
+    routing_rules:
+      - "priority 777 to {{ vault_wireguard_endpoint_ip | default('208.217.112.65') }} dport {{ vault_wireguard_port | default('54321') }} table 254"
+  internal:
+    # Internal network is STANDARDIZED at 192.168.10.0/24 across all sites
+    name: "{{ bastion_interface_internal | default(interface | default('enp1s0u1u4')) }}"
+    uuid: 4e19bb03-6a27-3fd7-adfc-f1236e309550
+    ip: "{{ gateway | default('192.168.10.254') }}/24"
+    zone: internal
+
+  # DNS and DHCP Configuration
+bastion_dnsmasq:
+  enabled: true
+  domain: local
+  interfaces: ["{{ bastion_interface_internal | default(interface | default('enp1s0u1u4')) }}", "lo"]
+  # DHCP range - configurable per site based on network size
+  # Override in inventory with site-specific values (e.g., dhcp_start: 200, dhcp_end: 220)
+  dhcp_start: "{{ dhcp_start | default('200') }}"
+  dhcp_end: "{{ dhcp_end | default('220') }}"
+  dhcp_range: "{{ gateway | default('192.168.10.254') | regex_replace('\\.\\d+$', '.' + (dhcp_start | default('200'))) }},{{ gateway | default('192.168.10.254') | regex_replace('\\.\\d+$', '.' + (dhcp_end | default('220'))) }},24h"
+  upstream_dns: "{{ bastion_external_network.dns | default(['1.1.1.1', '8.8.8.8']) }}"
+  # Disable NetworkManager dnsmasq to prevent conflicts
+  disable_nm_dnsmasq: true
+  # SentinelCam node DNS entries
+  # These are dynamically populated from inventory - see tasks/configure_dns.yaml
+  # You can add additional static hosts here if needed (e.g., external devices)
+  static_hosts: []
+  # Dynamic host generation from inventory
+  generate_from_inventory: true
+  inventory_groups:
+    - sentinelcam_nodes
+  # Additional static entries not in inventory (optional)
+  extra_static_hosts:
+    - { name: "gateway", ip: "{{ gateway | default('192.168.10.254') }}" }
+    # Add any non-Ansible-managed devices here
+    # - { name: "printer", ip: "192.168.10.100" }
+
+# Firewall Configuration
+bastion_firewall:
+  enabled: true
+  # MSS clamping to handle MTU/packet size issues
+  mss_clamp_value: 1340
+  zones:
+    external:
+      name: home
+      interface: "{{ bastion_interface_external | default('eth0') }}"
+      services: ["ssh", "cockpit", "dhcpv6-client", "mdns"]
+    internal:
+      name: internal
+      interface: "{{ bastion_interface_internal | default(interface | default('enp1s0u1u4')) }}"
+      services: ["ssh", "dns", "dhcp", "cockpit", "dhcpv6-client", "mdns"]
+    vpn:
+      name: trusted
+      interface: wg0
+      target: ACCEPT
+      masquerade: true
+      # Custom rules for MSS clamping - value will be templated dynamically
+      mss_clamp_enabled: true
+
+# System Service Configuration
+bastion_services:
+  networkmanager:
+    enabled: true
+    # Disable internal dnsmasq to prevent conflicts
+    config:
+      main:
+        dns: "none"  # Don't manage DNS - use standalone dnsmasq
+        rc_manager: "file"
+  dnsmasq:
+    enabled: true
+    restart_on_change: true
+  firewalld:
+    enabled: true
+  # Custom service for delayed WireGuard startup
+  wireguard_delayed_start:
+    enabled: true
+    delay: "{{ bastion_wireguard.startup_delay }}"
+
+# Sudo configuration for Rocky Linux
+bastion_sudo_config:
+  # Extend timeout for long Ansible runs (optional)
+  extend_timeout: false
+  timeout_minutes: 60
+
+# Network Optimization
+bastion_network_optimization:
+  # Enable IP forwarding for gateway functionality
+  ip_forward: true
+  # Optimize for video streaming and VPN traffic
+  sysctl_settings:
+    - { name: "net.ipv4.ip_forward", value: "1" }
+    - { name: "net.ipv6.conf.all.forwarding", value: "1" }
+    - { name: "net.core.rmem_default", value: "262144" }
+    - { name: "net.core.rmem_max", value: "16777216" }
+    - { name: "net.core.wmem_default", value: "262144" }
+    - { name: "net.core.wmem_max", value: "16777216" }
+    # TCP optimization for WireGuard tunneled traffic
+    - { name: "net.ipv4.tcp_congestion_control", value: "bbr" }
+    - { name: "net.ipv4.tcp_window_scaling", value: "1" }
+
+# Health Check Configuration
+bastion_health_checks:
+  enabled: true
+  tests:
+    - name: "internal_network"
+      target: "{{ groups['datasinks'][0] | default('192.168.10.50') }}"
+      type: "ping"
+    - name: "dns_resolution"
+      target: "google.com"
+      type: "nslookup"
+    - name: "wireguard_tunnel"
+      target: "{{ sentinelcam_vpn_gateway | default('10.0.0.1') }}"
+      type: "ping"
+    - name: "internet_via_vpn"
+      target: "8.8.8.8"
+      type: "ping"
+
+# Backup and Recovery
+bastion_backup:
+  enabled: true
+  backup_dir: "/root/bastion-backups"
+  retain_days: 30
+  files_to_backup:
+    - "/etc/NetworkManager/system-connections/"
+    - "/etc/dnsmasq.conf"
+    - "/etc/dnsmasq.d/"
+    - "/etc/firewalld/zones/"
+    - "/etc/wireguard/"

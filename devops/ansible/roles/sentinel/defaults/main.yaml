@@ -1,0 +1,92 @@
+---
+# Default variables for SentinelCam Sentinel Role
+# See group_vars/all/sentinelcam_ports.yaml for port definitions
+# See group_vars/all/sentinelcam_standards.yaml for path standards
+
+# Sentinel configuration
+sentinel_service: sentinel
+sentinel_config_file: sentinel.yaml
+sentinel_install_path: "/home/{{ sentinelcam_user }}/sentinel"
+sentinel_config_path: "/home/{{ sentinelcam_user }}/sentinel.yaml"
+
+# OpenVINO environment
+openvino_setup_script: "/home/{{ sentinelcam_user }}/openvino/bin/setupvars.sh"
+# Note: openvino_setup_script and sentinel_venv_path defined in group_vars based on sentinelcam_user
+sentinel_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/openvino"
+
+# IPC socket directory (absolute path)
+sentinel_socket_dir: "{{ sentinel_install_path }}/sockets"
+
+# Model paths configuration (absolute path)
+sentinel_models_path: "{{ sentinel_install_path }}/models"
+
+# Model version overrides (optional per-host customization)
+# Override specific model versions in host_vars if testing new models
+# Example: model_version_overrides: { face_recognition: "2025-12-01" }
+model_version_overrides: {}
+
+# Environment setup for accelerators
+sentinel_accelerator_type: ncs2  # [cpu, ncs2, coral]
+
+# Debug mode flag
+debug_mode: false
+
+# Ring buffer models - image sizes and buffer lengths
+sentinel_ring_buffer_models:
+  default:
+    vga:
+      size: [640, 480]
+      buffer_length: 5
+    sd:
+      size: [640, 360]
+      buffer_length: 5
+
+# Task engines configuration
+sentinel_task_engines:
+  Alpha:
+    classes: [1]
+    ring_buffers: default
+    accelerator: "{{ sentinel_accelerator_type }}"
+  Bravo1:
+    classes: [2]
+    ring_buffers: default
+    accelerator: cpu
+  Bravo2:
+    classes: [2, 3]
+    ring_buffers: default
+    accelerator: cpu
+
+# Available tasks configuration
+sentinel_tasks:
+  MobileNetSSD_allFrames:
+    config_file: MobileNetSSD_allFrames.yaml
+    chain: GetFaces
+    class: 1
+  GetFaces:
+    config_file: GetFaces.yaml
+    chain: FaceRecon
+    class: 1
+    trk_type: obj
+    ringctrl: full
+  FaceRecon:
+    config_file: FaceRecon.yaml
+    class: 2
+    trk_type: fd1
+    ringctrl: trk
+  FaceSweep:
+    config_file: FaceSweep.yaml
+    class: 2
+  FaceDataUpdate:
+    config_file: FaceDataUpdate.yaml
+    class: 2
+  GetFaces2:
+    alias: GetFaces
+    config_file: GetFaces.yaml
+    chain: FaceRecon
+    class: 1
+  DailyCleanup:
+    config_file: DailyCleanup.yaml
+    class: 3
+  MeasureRingLatency:
+    config_file: MeasureRingLatency.yaml
+    class: 1

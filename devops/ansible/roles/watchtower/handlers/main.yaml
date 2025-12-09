@@ -1,0 +1,7 @@
+---
+# SentinelCam Watchtower Role - Handlers
+# Note: Service restart handler provided by sentinelcam_base role
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes

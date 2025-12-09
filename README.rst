@@ -656,6 +656,8 @@ Additional documentation
 ========================
 - `Version History and Changelog <HISTORY.md>`_
 - `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
+- `ML Training Pipeline <devops/docs/operations/ML_TRAINING_PIPELINE.md>`_
+- `Ansible Deployment Guide <devops/ansible/README.md>`_ 
 - `Development blog <https://blog.swanriver.dev>`_
 
 Technology foundation

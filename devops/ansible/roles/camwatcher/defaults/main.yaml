@@ -1,0 +1,12 @@
+---
+# Default variables for SentinelCam CamWatcher Role
+# See group_vars/all/sentinelcam_ports.yaml for port definitions
+# See group_vars/all/sentinelcam_standards.yaml for path standards
+# See group_vars/all/site.yaml for outpost registry (sentinelcam_outposts)
+
+# Debug mode flag
+debug_mode: false
+
+# NOTE: Outpost configuration moved to group_vars/all/site.yaml
+# The sentinelcam_outposts registry is the single source of truth
+# for all outpost->datasink mappings and camera configurations

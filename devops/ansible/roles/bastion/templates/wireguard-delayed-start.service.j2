@@ -1,0 +1,17 @@
+[Unit]
+Description=WireGuard Delayed Start Service
+After=NetworkManager.service dnsmasq.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep {{ bastion_services.wireguard_delayed_start.delay }}
+ExecStart=/usr/bin/nmcli connection up {{ bastion_wireguard.interface }}
+ExecStop=/usr/bin/nmcli connection down {{ bastion_wireguard.interface }}
+RemainAfterExit=yes
+TimeoutStartSec=120
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

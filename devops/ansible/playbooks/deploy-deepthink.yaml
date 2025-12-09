@@ -1,0 +1,63 @@
+---
+# Playbook to deploy DeepThink ML training node
+# This configures the Jetson Nano for model training
+
+- name: Deploy DeepThink ML Training Node
+  hosts: ml_trainers
+  become: true
+  
+  pre_tasks:
+    - name: Validate this is a supported platform
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] in ['Ubuntu', 'Debian']
+          - platform is defined
+        fail_msg: "DeepThink role requires Ubuntu/Debian-based system with platform defined"
+        success_msg: "Platform {{ platform | default('unknown') }} is supported"
+    
+    - name: Check for CUDA availability (Jetson Nano)
+      ansible.builtin.stat:
+        path: /usr/local/cuda
+      register: cuda_check
+      when: jetson_cuda_enabled | default(false)
+    
+    - name: Display CUDA status
+      ansible.builtin.debug:
+        msg: "CUDA available: {{ cuda_check.stat.exists | default(false) }}"
+      when: jetson_cuda_enabled | default(false)
+  
+  roles:
+    - role: deepthink
+      tags: [deepthink]
+  
+  post_tasks:
+    - name: Verify virtual environment
+      ansible.builtin.command:
+        cmd: "{{ deepthink_venv_path }}/bin/python --version"
+      register: python_version
+      changed_when: false
+    
+    - name: Display Python version
+      ansible.builtin.debug:
+        msg: "Python version in ML venv: {{ python_version.stdout }}"
+    
+    - name: Check scikit-learn installation
+      ansible.builtin.command:
+        cmd: "{{ deepthink_venv_path }}/bin/python -c 'import sklearn; print(sklearn.__version__)'"
+      register: sklearn_version
+      changed_when: false
+      failed_when: false
+    
+    - name: Display scikit-learn version
+      ansible.builtin.debug:
+        msg: "scikit-learn version: {{ sklearn_version.stdout if sklearn_version.rc == 0 else 'Not installed' }}"
+    
+    - name: List training notebooks
+      ansible.builtin.find:
+        paths: "{{ deepthink_notebooks_path }}"
+        patterns: "*.ipynb"
+      register: notebooks_found
+    
+    - name: Display available notebooks
+      ansible.builtin.debug:
+        msg: "Found {{ notebooks_found.matched }} training notebooks in {{ deepthink_notebooks_path }}"

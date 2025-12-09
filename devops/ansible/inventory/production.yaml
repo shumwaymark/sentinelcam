@@ -1,0 +1,129 @@
+# Ansible inventory for SentinelCam production environment, Site 1
+all:
+  children:
+    sentinelcam_nodes:
+      children:
+        modern_nodes:
+          hosts:
+            east:
+              ansible_host: 192.168.10.21
+              node_name: east
+              node_role: outpost
+              interface: eth0
+            alpha5:
+              ansible_host: 192.168.10.22
+              node_name: alpha5
+              node_role: outpost
+              interface: eth0
+            data1:
+              ansible_host: 192.168.10.50
+              node_name: data1
+              node_role: datasink
+              interface: eth0
+          vars:
+            ansible_user: ops
+            network_manager: systemd-networkd
+            ansible_python_interpreter: /usr/bin/python3
+            
+        legacy_nodes:
+          hosts:
+            lab1:
+              ansible_host: 192.168.10.20
+              node_name: lab1
+              node_role: outpost
+              interface: eth0
+            sentinel:
+              ansible_host: 192.168.10.60
+              node_name: sentinel
+              node_role: sentinel
+              interface: eth0
+            wall1:
+              ansible_host: 192.168.10.70
+              node_name: wall1
+              node_role: watchtower
+              interface: eth0
+          vars:
+            ansible_user: pi
+            network_manager: dhcpcd
+            
+    infrastructure:
+      hosts:
+        chandler-gate:
+          ansible_host: 192.168.10.254
+          ansible_user: rocky
+          node_name: chandler-gate
+          node_role: bastion
+          interface: enp1s0u1u4  # Internal SentinelCam network interface
+      vars:
+        network_manager: NetworkManager
+        # Rocky Linux specific settings
+        ansible_become_method: sudo
+        ansible_become_timeout: 30
+        
+    # Functional groupings
+    outposts:
+      hosts:
+        lab1:
+        east:
+        alpha5:
+          
+    datasinks:
+      hosts:
+        data1:
+
+    sentinels:
+      hosts:
+        sentinel:
+          
+    watchtowers:
+      hosts:
+        wall1:
+    
+    ml_trainers:
+      hosts:
+        deepend:
+          ansible_host: 192.168.10.100
+          node_name: deepend
+          node_role: ml_trainer
+          interface: eth0
+          ansible_user: pyimagesearch
+          sentinelcam_user: pyimagesearch
+          sentinelcam_group: pyimagesearch
+          # Jetson Nano specific
+          platform: jetson_nano
+          cuda_arch: sm_53
+          jetpack_version: "4.6"
+          os_version: "18.04"
+          jetson_headless: true  # Run without GUI to save GPU memory
+          network_manager: NetworkManager
+          ansible_python_interpreter: /usr/bin/python3
+
+  vars:
+    # Internal Network Configuration (STANDARDIZED - see devops/NETWORK_ADDRESSING_STANDARD.md)
+    subnet: 192.168.10.0/24
+    netmask: 255.255.255.0
+    broadcast: 192.168.10.255
+    gateway: 192.168.10.254
+    dns_servers:
+      - 192.168.10.254  
+      - 8.8.8.8
+    
+    # External Network Configuration (SITE-SPECIFIC)
+    # This is the network between bastion and ISP/upstream router
+    bastion_external_network:
+      ip: "192.168.0.254/24"        # Bastion's external IP
+      gateway: "192.168.0.1"        # ISP router/gateway
+      dns: ["1.1.1.1", "8.8.8.8"]   # Upstream DNS
+      zone: "home"                  # Firewall zone
+    
+    # VPN Configuration (SITE-SPECIFIC)
+    # Each site's bastion needs unique VPN IP for multi-site interconnection
+    bastion_vpn_ipv4: "10.0.0.3/24"      # Site 1 bastion VPN address
+    bastion_vpn_ipv6: "fc00:23:5::3/64"  # Site 1 bastion IPv6 VPN address
+      
+    # SSH configuration optimized for local network
+    ansible_ssh_pipelining: true
+    ansible_ssh_timeout: 30
+    
+    # Note: Site-specific variables (site name, bastion hostname, health check hosts)
+    # are defined in group_vars/all/site.yaml to keep inventory focused on hosts/network

@@ -1,0 +1,124 @@
+---
+# SentinelCam Deployment Standards
+# SINGLE SOURCE OF TRUTH for paths, users, deployment patterns
+#
+# This file defines the standard directory structure and naming conventions
+# used across all SentinelCam deployments. Individual roles should reference
+# these standards rather than defining their own.
+
+# User/Group Standards
+# Standard default SentinelCam user - override in host_vars or inventory as needed
+sentinelcam_user: ops
+sentinelcam_group: ops
+
+# Base Data Directory (SSD mount point on data sinks)
+sentinelcam_data_path: "/home/{{ sentinelcam_user }}/sentinelcam"
+
+# Deployment Source Location (on the primary data sink)
+# This is where the sentinelcam_base role stages code for distribution
+sentinelcam_deployment_source: "{{ sentinelcam_data_path }}/current_deployment"
+sentinelcam_requirements_file: "{{ sentinelcam_deployment_source }}/requirements.txt"
+
+# Model Registry Location (on the primary data sink)
+# Centralized storage for versioned ML models
+sentinelcam_model_registry: "{{ sentinelcam_data_path }}/model_registry"
+
+# Model Retention Policy
+# Number of historical model versions to retain (excludes current_version + previous_version)
+sentinelcam_model_retention: 5
+
+# Code Deployment Configuration
+# Data-driven deployment: Maps components to source/dest paths
+# 
+# Structure:
+#   - name: Service name (for handlers/notifications)
+#   - source: Path relative to sentinelcam_deployment_source
+#   - dest: Absolute destination path (can use {{ sentinelcam_user }})
+#   - additional_dirs: (optional) Extra directories to sync for this component
+#
+# To add a new service:
+#   1. Add entry under appropriate group
+#   2. Code deployment automatically handles it
+#   3. No changes needed to sentinelcam_base role
+code_deployment:
+  components:
+    datasinks:
+      - name: camwatcher
+        source: "camwatcher/camwatcher"
+        dest: "/home/{{ sentinelcam_user }}/camwatcher/camwatcher"
+      
+      - name: datapump  
+        source: "camwatcher/datapump"  # datapump is sibling to camwatcher
+        dest: "/home/{{ sentinelcam_user }}/camwatcher/datapump"
+      
+      - name: imagehub
+        source: "imagehub"
+        dest: "/home/{{ sentinelcam_user }}/imagehub"
+    
+    outposts:
+      - name: imagenode
+        source: "imagenode"
+        dest: "/home/{{ sentinelcam_user }}/imagenode"
+        # Note: Models deployed separately via deploy-models.yaml playbook
+    
+    sentinels:
+      - name: sentinel
+        source: "sentinel"
+        dest: "/home/{{ sentinelcam_user }}/sentinel"
+        # Note: Models deployed separately via deploy-models.yaml playbook
+    
+    watchtowers:
+      - name: watchtower
+        source: "watchtower"
+        dest: "/home/{{ sentinelcam_user }}/watchtower"
+    
+    ml_trainers:
+      - name: deepthink
+        source: "twister"  # Notebook directory containing training notebooks
+        dest: "/home/{{ sentinelcam_user }}/deepthink/notebooks"
+        # Models and data directories created separately by role
+
+# Core Subdirectories (on data sinks)
+sentinelcam_directories:
+  csvfiles: "{{ sentinelcam_data_path }}/camwatcher"
+  images: "{{ sentinelcam_data_path }}/images"
+  logs: "{{ sentinelcam_data_path }}/logs"
+  faces: "{{ sentinelcam_data_path }}/faces"
+  imagehub_data: "{{ sentinelcam_data_path }}/imagehub"
+
+# Virtual Environment Paths
+sentinelcam_venv_opencv: "/home/{{ sentinelcam_user }}/.opencv"
+sentinelcam_venv_openvino: "/home/{{ sentinelcam_user }}/.virtualenvs/openvino"
+sentinelcam_venv_py3cv4: "/home/{{ sentinelcam_user }}/.virtualenvs/py3cv4"
+
+# Network Buffer Configuration
+sentinelcam_network:
+  zeromq_buffer_size: 262144       # ZeroMQ socket buffer size (256KB)
+  network_buffer_size: 134217728   # System network buffer size (128MB)
+
+# Service Execution Paths
+sentinelcam_services:
+  python_executable: "{{ sentinelcam_venv_opencv }}/bin/python"
+
+# Logging Configuration Standards
+sentinelcam_logging:
+  level: "INFO"
+  rotation:
+    when: "midnight"
+    backup_count_time: 45
+
+# Standard Directory Structure Pattern
+# =====================================
+# Each service follows this pattern:
+#   /home/{user}/                    # User home directory
+#   ├── {service}.yaml               # Service configuration file
+#   └── {service}/                   # Service directory
+#       ├── {service}/               # Python working directory (code package)
+#       │   ├── {service}.py         # Main application
+#       │   └── sentinelcam/         # Common libraries
+#       └── {optional}/              # Service-specific subdirectories
+#
+# Exception: CamWatcher contains both camwatcher and datapump as siblings
+#   /home/{user}/camwatcher/
+#   ├── camwatcher/                  # CamWatcher code
+#   └── datapump/                    # DataPump code

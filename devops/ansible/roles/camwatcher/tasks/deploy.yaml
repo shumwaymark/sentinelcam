@@ -1,0 +1,73 @@
+---
+# SentinelCam CamWatcher Role - Deployment Tasks
+# NOTE: Code deployment is handled by sentinelcam_base role
+# This file contains camwatcher-specific post-deployment tasks
+
+- name: "Set ownership of CamWatcher installation directory"
+  ansible.builtin.file:
+    path: "{{ camwatcher_install_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    recurse: yes
+  tags: 
+    - deploy
+    - permissions
+
+- name: "Ensure CamWatcher service is started and enabled"
+  ansible.builtin.systemd:
+    name: "{{ camwatcher_service }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  tags:
+    - service
+    - start
+
+- name: "Check CamWatcher service status"
+  ansible.builtin.systemd:
+    name: "{{ camwatcher_service }}"
+  register: camwatcher_status
+  tags:
+    - status
+    - health
+
+- name: "Display CamWatcher deployment status"
+  ansible.builtin.debug:
+    msg:
+      - "Service: {{ camwatcher_service | default('camwatcher') }}"
+      - "Status: {{ camwatcher_status.status.ActiveState | default('not found') }}"
+      - "SubState: {{ camwatcher_status.status.SubState | default('not found') }}"
+      - "Enabled: {{ camwatcher_status.status.UnitFileState | default('unknown') }}"
+  when: camwatcher_status is defined
+  tags:
+    - status
+    - health
+    - always
+
+- name: Wait for camwatcher service to be healthy
+  pause:
+    seconds: 10
+  tags:
+    - health
+
+- name: Check camwatcher service status
+  systemd:
+    name: "{{ camwatcher_service | default('camwatcher') }}"
+  register: camwatcher_status
+  ignore_errors: true
+  tags:
+    - status
+    - health
+
+- name: Display camwatcher service status
+  debug:
+    msg: 
+      - "Service: {{ camwatcher_service | default('camwatcher') }}"
+      - "Status: {{ camwatcher_status.status.ActiveState | default('not found') }}"
+      - "SubState: {{ camwatcher_status.status.SubState | default('not found') }}"
+      - "Enabled: {{ camwatcher_status.status.UnitFileState | default('unknown') }}"
+  when: camwatcher_status is defined
+  tags:
+    - status
+    - health
+    - always

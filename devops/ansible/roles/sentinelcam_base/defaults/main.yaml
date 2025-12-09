@@ -1,0 +1,20 @@
+---
+# Default variables for SentinelCam Base Role
+#
+# NOTE: Most variables come from inventory/group_vars/all/sentinelcam_standards.yaml
+# This file only contains variables specific to the base role that are not
+# defined elsewhere or need safe fallbacks.
+#
+# Key variables inherited from standards:
+#   - sentinelcam_user: User account (ops or pi)
+#   - sentinelcam_group: Group account
+#   - sentinelcam_venv_opencv: Virtual environment path (dynamic based on user)
+#   - sentinelcam_data_path: Base data directory (dynamic based on user)
+#   - sentinelcam_deployment_source: Source directory for code deployment
+#
+# Code deployment source path (alias for sentinelcam_deployment_source)
+code_source_path: "{{ sentinelcam_deployment_source }}"
+
+# For legacy compatibility with other roles that reference sentinelcam_venv_path:
+# Note: This references group_vars - if undefined, tasks using it will use sentinelcam_venv_opencv directly
+# sentinelcam_venv_path: Defined in tasks when needed, not in defaults

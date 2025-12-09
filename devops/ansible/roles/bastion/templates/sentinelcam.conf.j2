@@ -1,0 +1,57 @@
+# SentinelCam Network DNS Entries
+# Managed by Ansible - Do not edit manually
+# Generated for site: {{ sentinelcam_site_name | default('unknown') }}
+
+# Set local domain for DNS entries
+domain={{ bastion_dnsmasq.domain | default('local') }}
+
+{% if bastion_dnsmasq.generate_from_inventory | default(true) %}
+# DNS entries from Ansible inventory
+{% for group in bastion_dnsmasq.inventory_groups | default(['sentinelcam_nodes']) %}
+{% if group in groups %}
+{% for host in groups[group] %}
+# {{ host }} ({{ hostvars[host].node_role | default('node') }})
+address=/{{ host }}/{{ hostvars[host].ansible_host }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+{% endif %}
+# Additional static DNS entries
+{% for host in bastion_dnsmasq.static_hosts %}
+# {{ host.name }}
+address=/{{ host.name }}/{{ host.ip }}
+{% endfor %}
+
+{% for host in bastion_dnsmasq.extra_static_hosts | default([]) %}
+# {{ host.name }} (extra)
+address=/{{ host.name }}/{{ host.ip }}
+{% endfor %}
+
+# PTR records for reverse DNS
+{% if bastion_dnsmasq.generate_from_inventory | default(true) %}
+{% for group in bastion_dnsmasq.inventory_groups | default(['sentinelcam_nodes']) %}
+{% if group in groups %}
+{% for host in groups[group] %}
+ptr-record={{ hostvars[host].ansible_host.split('.') | reverse | join('.') }}.in-addr.arpa,{{ host }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% for host in bastion_dnsmasq.static_hosts %}
+ptr-record={{ host.ip.split('.') | reverse | join('.') }}.in-addr.arpa,{{ host.name }}
+{% endfor %}
+
+{% for host in bastion_dnsmasq.extra_static_hosts | default([]) %}
+ptr-record={{ host.ip.split('.') | reverse | join('.') }}.in-addr.arpa,{{ host.name }}
+{% endfor %}
+
+# Additional SentinelCam configuration
+# Enable DHCP host name resolution
+expand-hosts
+
+# Service discovery (optional)
+# srv-host=_sentinelcam._tcp.{{ bastion_dnsmasq.domain }},data1,5555,1
+# srv-host=_imagenode._tcp.{{ bastion_dnsmasq.domain }},east,5567,1
+# srv-host=_imagenode._tcp.{{ bastion_dnsmasq.domain }},alpha5,5567,1

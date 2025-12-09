@@ -1,0 +1,172 @@
+# SentinelCam Deployment Configuration
+# Defines deployable components and deployment settings
+
+deployment:
+  bastion_user: rocky
+  bastion_host: chandler-gate.local
+  transfer_cache: ~/transfer_cache/incoming
+  processing_script: ~/scripts/process-code-upload.sh
+  
+  # File extensions to include in deployment packages
+  include_extensions:
+    - "*.py"
+    - "*.sh"
+    - "*.yaml"
+    - "*.rst"
+    - "*.md"
+    - "*.png"
+    - "*.txt"
+    - "*.service"
+    - "*.timer"
+    - "*.j2"
+    - "*.cfg"
+    - "*.template"
+  
+  # Global exclusion patterns (applied to all components)
+  exclude_patterns:
+    - ".git"
+    - "__pycache__"
+    - ".venv"
+    - ".vscode"
+    - "test_results"
+    - ".pytest_cache"
+    - "*.pyc"
+    - "*.pyo"
+    - "*.pyd"
+    - "*.bak"
+    - "*.tmp"
+    - "*.log"
+    - "*-OLD.*"
+    - ".backup"
+    - "vault.yaml"
+
+# Component definitions
+components:
+  - name: imagenode
+    description: Outpost nodes, image publishing and event tracking service
+    paths:
+      - imagenode/
+    required_files:
+      - imagenode/imagenode/imagenode.py
+    exclude_patterns:
+      - imagenode/docs
+      - imagenode/tests
+      - imagenode/yaml
+    ansible_playbook: deploy-outpost-code-only.yaml
+
+  - name: sentinel
+    description: Sentinel monitoring and event detection service
+    paths:
+      - sentinel/sentinel/
+      - sentinel/tasks/
+    required_files:
+      - sentinel/sentinel/sentinel.py
+    exclude_patterns:
+      - sentinel/outpost
+    ansible_playbook: deploy-sentinel-code-only.yaml
+
+  - name: watchtower
+    description: Watchtower outpost viewer and wall console
+    paths:
+      - watchtower/watchtower/
+    required_files:
+      - watchtower/watchtower/watchtower.py
+    ansible_playbook: deploy-watchtower-code-only.yaml
+
+  - name: camwatcher
+    description: outpost subscriber and data pump
+    paths:
+      - camwatcher/camwatcher/
+    required_files:
+      - camwatcher/camwatcher/camwatcher.py
+    ansible_playbook: deploy-camwatcher-code-only.yaml
+
+  - name: datapump
+    description: Data pump service for event processing
+    paths:
+      - camwatcher/datapump/
+    required_files:
+      - camwatcher/datapump/datapump.py
+    ansible_playbook: deploy-datapump-code-only.yaml
+
+  - name: imagehub
+    description: Hub node imagenode receiver and storage service
+    paths:
+      - imagehub/
+    required_files:
+      - imagehub/imagehub/imagehub.py
+    exclude_patterns:
+      - imagehub/docs
+    ansible_playbook: deploy-imagehub.yaml
+
+  - name: devops
+    description: DevOps scripts, Ansible playbooks, and infrastructure code
+    paths:
+      - devops/ansible/
+      - devops/scripts/
+
+  - name: requirements
+    description: Python package dependencies
+    paths:
+      - requirements.txt
+
+  - name: docs
+    description: Documentation files
+    paths:
+      - docs/
+      - README.rst
+      - HISTORY.md
+      - LICENSE
+    exclude_patterns:
+      - docs/images/*
+
+
+# Common deployment scenarios
+scenarios:
+  full:
+    description: Complete deployment of all components
+    components:
+      - imagenode
+      - sentinel
+      - watchtower
+      - camwatcher
+      - imagehub
+      - devops
+      - requirements
+      - config
+
+  services:
+    description: All service components
+    components:
+      - imagenode
+      - sentinel
+      - watchtower
+      - camwatcher
+      - imagehub
+
+  infrastructure:
+    description: Infrastructure and operations
+    components:
+      - devops
+      - requirements
+
+  outpost:
+    description: Outpost/imagenode focused deployment
+    components:
+      - imagenode
+      - requirements
+
+  datasink:
+    description: Data sink components (imagehub, camwatcher)
+    components:
+      - imagehub
+      - camwatcher
+      - datapump
+      - requirements
+
+  monitoring:
+    description: Monitoring services (sentinel, watchtower)
+    components:
+      - sentinel
+      - watchtower
+      - requirements

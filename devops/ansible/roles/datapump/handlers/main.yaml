@@ -1,0 +1,27 @@
+---
+# Handlers for SentinelCam DataPump
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: restart datapump
+  ansible.builtin.systemd:
+    name: datapump
+    state: restarted
+    daemon_reload: yes
+
+- name: remount_data_ssd
+  ansible.builtin.command:
+    cmd: "mount -o remount {{ sentinelcam_data_path | default('/home/ops/sentinelcam') }}"
+  listen: remount_data_ssd
+
+- name: apply_sysctl_settings
+  ansible.builtin.command:
+    cmd: sysctl -p
+  listen: apply_sysctl_settings
+
+- name: reboot_required
+  ansible.builtin.debug:
+    msg: "*** REBOOT REQUIRED for GPU memory and boot configuration changes ***"
+  listen: reboot_required

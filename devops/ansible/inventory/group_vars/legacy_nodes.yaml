@@ -1,0 +1,7 @@
+---
+# Legacy Nodes Group Variables
+# These nodes use 'pi' user instead of 'ops'
+
+# Override the standard user for legacy nodes
+sentinelcam_user: pi
+sentinelcam_group: pi

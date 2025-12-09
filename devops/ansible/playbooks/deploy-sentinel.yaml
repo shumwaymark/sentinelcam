@@ -1,0 +1,28 @@
+---
+# SentinelCam Sentinel Deployment Playbook
+# Deploy and configure the Sentinel AI processing node
+
+- name: Deploy SentinelCam Sentinel
+  hosts: sentinels
+  become: yes
+  vars:
+    # Uncomment and modify these variables as needed:
+    # sentinel_accelerator_type: coral  # Override default NCS2
+    # debug_mode: true                  # Enable debug logging
+    
+  roles:
+    - sentinelcam_base    # Common base configuration
+    - sentinel            # Sentinel-specific configuration
+    
+  post_tasks:
+    - name: "Display deployment summary"
+      ansible.builtin.debug:
+        msg: |
+          Sentinel deployment completed:
+          - Service: {{ sentinel_service }}
+          - User: {{ sentinelcam_user }}
+          - Control Port: {{ sentinelcam_ports.sentinel_control }}
+          - Logging Port: {{ sentinelcam_ports.sentinel_logging }}
+          - Accelerator: {{ sentinel_accelerator_type }}
+          - Config: {{ sentinel_config_path }}
+      tags: always

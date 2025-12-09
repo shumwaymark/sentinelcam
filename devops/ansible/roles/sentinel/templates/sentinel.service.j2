@@ -1,0 +1,18 @@
+# sentinel service unit file
+# SentinelCam Ansible Template
+# Defines sentinel.py as a systemd service
+
+[Unit]
+Description=Sentinel Service
+After=multi-user.target
+
+[Service]
+Type=idle
+WorkingDirectory={{ sentinel_install_path }}/sentinel
+User={{ sentinelcam_user }}
+Restart=always
+RestartSec=5
+ExecStart={{ sentinel_install_path }}/sentinel_{{ sentinel_accelerator_type }}.sh
+
+[Install]
+WantedBy=multi-user.target

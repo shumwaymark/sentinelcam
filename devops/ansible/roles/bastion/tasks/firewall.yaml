@@ -1,0 +1,111 @@
+---
+# Firewall Configuration Tasks
+# Implements MSS clamping and zone-based security
+
+- name: "Install firewalld"
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  tags: [firewall, packages]
+
+- name: "Start and enable firewalld"
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: yes
+  tags: [firewall]
+
+- name: "Configure trusted zone with MSS clamping"
+  ansible.builtin.template:
+    src: trusted.xml.j2
+    dest: /etc/firewalld/zones/trusted.xml
+    mode: '0644'
+    backup: yes
+  notify: reload firewalld
+  tags: [firewall, mss]
+
+- name: "Set interface zones (non-VPN)"
+  ansible.builtin.firewalld:
+    interface: "{{ item.interface }}"
+    zone: "{{ item.zone }}"
+    permanent: yes
+    immediate: yes
+    state: enabled
+  loop:
+    - { interface: "{{ bastion_interfaces.external.name }}", zone: "{{ bastion_firewall.zones.external.name }}" }
+    - { interface: "{{ bastion_interfaces.internal.name }}", zone: "{{ bastion_firewall.zones.internal.name }}" }
+  tags: [firewall, zones]
+
+- name: "Set WireGuard interface zone"
+  ansible.builtin.firewalld:
+    interface: "{{ bastion_wireguard.interface }}"
+    zone: "{{ bastion_firewall.zones.vpn.name }}"
+    permanent: yes
+    immediate: yes
+    state: enabled
+  when: vault_wireguard_private_key is defined
+  tags: [firewall, zones, secrets]
+
+- name: "Configure services for internal zone"
+  ansible.builtin.firewalld:
+    service: "{{ item }}"
+    zone: "{{ bastion_firewall.zones.internal.name }}"
+    permanent: yes
+    immediate: yes
+    state: enabled
+  loop: "{{ bastion_firewall.zones.internal.services }}"
+  tags: [firewall, services]
+
+- name: "Configure services for external zone"
+  ansible.builtin.firewalld:
+    service: "{{ item }}"
+    zone: "{{ bastion_firewall.zones.external.name }}"
+    permanent: yes
+    immediate: yes
+    state: enabled
+  loop: "{{ bastion_firewall.zones.external.services }}"
+  tags: [firewall, services]
+
+- name: "Enable masquerading for VPN zone"
+  ansible.builtin.firewalld:
+    zone: "{{ bastion_firewall.zones.vpn.name }}"
+    masquerade: yes
+    permanent: yes
+    immediate: yes
+    state: enabled
+  when: vault_wireguard_private_key is defined
+  tags: [firewall, masquerade, secrets]
+
+- name: "Enable masquerading for internal zone"
+  ansible.builtin.firewalld:
+    zone: "{{ bastion_firewall.zones.internal.name }}"
+    masquerade: yes
+    permanent: yes
+    immediate: yes
+    state: enabled
+  tags: [firewall, masquerade]
+
+- name: "Set internal zone target to ACCEPT for forwarding"
+  ansible.builtin.shell: firewall-cmd --permanent --zone={{ bastion_firewall.zones.internal.name }} --set-target=ACCEPT
+  register: zone_target_result
+  changed_when: "'success' in zone_target_result.stdout"
+  failed_when: zone_target_result.rc != 0 and 'ZONE_ALREADY_SET' not in zone_target_result.stderr
+  notify: reload firewalld
+  tags: [firewall, forwarding]
+
+- name: "Reload firewalld configuration"
+  ansible.builtin.systemd:
+    name: firewalld
+    state: reloaded
+  tags: [firewall]
+
+- name: "Display active firewall zones"
+  ansible.builtin.shell: firewall-cmd --get-active-zones
+  register: active_zones
+  changed_when: false
+  tags: [firewall, info]
+
+- name: "Show active zones"
+  ansible.builtin.debug:
+    var: active_zones.stdout_lines
+  tags: [firewall, info]

@@ -1,0 +1,59 @@
+---
+# Validate bastion configuration and connectivity
+
+- name: "Check NetworkManager is running"
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: started
+  register: nm_status
+
+- name: "Check dnsmasq is running"
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: started
+  register: dnsmasq_status
+
+- name: "Check firewalld is running"
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+  register: firewalld_status
+
+- name: "Verify IP forwarding is enabled"
+  ansible.builtin.shell: sysctl net.ipv4.ip_forward
+  register: ip_forward
+  failed_when: "'net.ipv4.ip_forward = 1' not in ip_forward.stdout"
+  changed_when: false
+
+- name: "Verify internal network interface configuration"
+  ansible.builtin.shell: ip addr show {{ bastion_interfaces.internal.name }} | grep "{{ bastion_interfaces.internal.ip | regex_replace('/.*', '') }}"
+  register: internal_ip
+  failed_when: internal_ip.rc != 0
+  changed_when: false
+
+- name: "Test DNS resolution"
+  ansible.builtin.shell: nslookup data1 127.0.0.1
+  register: dns_test
+  failed_when: false
+  changed_when: false
+
+- name: "Check WireGuard connection status"
+  ansible.builtin.shell: nmcli connection show wg0
+  register: wg_check
+  failed_when: false
+  changed_when: false
+
+- name: "Validation summary"
+  ansible.builtin.debug:
+    msg:
+      - "===================================="
+      - "Bastion Configuration Validation"
+      - "===================================="
+      - "NetworkManager: {{ 'RUNNING' if nm_status.state == 'started' else 'FAILED' }}"
+      - "DNSmasq: {{ 'RUNNING' if dnsmasq_status.state == 'started' else 'FAILED' }}"
+      - "Firewalld: {{ 'RUNNING' if firewalld_status.state == 'started' else 'FAILED' }}"
+      - "IP Forwarding: {{ 'ENABLED' if ip_forward.rc == 0 else 'FAILED' }}"
+      - "Internal IP: {{ 'CONFIGURED' if internal_ip.rc == 0 else 'FAILED' }}"
+      - "DNS Resolution: {{ 'WORKING' if dns_test.rc == 0 else 'CHECK REQUIRED' }}"
+      - "WireGuard: {{ 'CONFIGURED' if wg_check.rc == 0 else 'CHECK REQUIRED' }}"
+      - "===================================="

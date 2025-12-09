@@ -1,0 +1,153 @@
+#!/bin/bash
+# WireGuard Management Script for SentinelCam Bastion
+# Provides commands to start, stop, restart, and check WireGuard VPN status
+
+set -euo pipefail
+
+INTERFACE="wg0"
+LOG_TAG="wireguard-manager"
+
+# Logging function
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/wireguard-manager.log
+    logger -t "$LOG_TAG" "$*"
+}
+
+# Check if NetworkManager connection exists
+check_connection() {
+    if ! nmcli connection show "$INTERFACE" &>/dev/null; then
+        log "ERROR: WireGuard connection '$INTERFACE' not found in NetworkManager"
+        return 1
+    fi
+    return 0
+}
+
+# Start WireGuard via NetworkManager
+start_wireguard() {
+    log "Starting WireGuard interface $INTERFACE..."
+    if nmcli connection up "$INTERFACE"; then
+        log "WireGuard started successfully"
+        return 0
+    else
+        log "ERROR: Failed to start WireGuard"
+        return 1
+    fi
+}
+
+# Stop WireGuard via NetworkManager
+stop_wireguard() {
+    log "Stopping WireGuard interface $INTERFACE..."
+    if nmcli connection down "$INTERFACE" 2>/dev/null; then
+        log "WireGuard stopped successfully"
+        return 0
+    else
+        log "WireGuard was not active or failed to stop"
+        return 0  # Not an error if already stopped
+    fi
+}
+
+# Restart WireGuard
+restart_wireguard() {
+    log "Restarting WireGuard interface $INTERFACE..."
+    stop_wireguard
+    sleep 2
+    start_wireguard
+}
+
+# Check WireGuard status
+status_wireguard() {
+    echo "=== WireGuard Status ==="
+    echo
+    
+    # Check NetworkManager connection status
+    echo "NetworkManager Connection:"
+    if nmcli connection show --active | grep -q "$INTERFACE"; then
+        echo "  Status: ACTIVE"
+        nmcli connection show "$INTERFACE" | grep -E "(connection.id|connection.interface-name|vpn.service-type|connection.autoconnect)"
+    else
+        echo "  Status: INACTIVE"
+    fi
+    echo
+    
+    # Check interface status
+    echo "Interface Status:"
+    if ip link show "$INTERFACE" &>/dev/null; then
+        echo "  Interface exists: YES"
+        ip addr show "$INTERFACE" | grep -E "(inet |state )"
+    else
+        echo "  Interface exists: NO"
+    fi
+    echo
+    
+    # Check WireGuard peer status
+    if command -v wg &>/dev/null && [ -e "/sys/class/net/$INTERFACE" ]; then
+        echo "WireGuard Peer Status:"
+        sudo wg show "$INTERFACE"
+        echo
+        
+        # Show last handshake time
+        echo "Connection Health:"
+        latest_handshake=$(sudo wg show "$INTERFACE" latest-handshakes | awk '{print $2}')
+        if [ -n "$latest_handshake" ] && [ "$latest_handshake" != "0" ]; then
+            seconds_ago=$(($(date +%s) - latest_handshake))
+            echo "  Last handshake: $seconds_ago seconds ago"
+            if [ $seconds_ago -lt 180 ]; then
+                echo "  Status: HEALTHY (recent handshake)"
+            else
+                echo "  Status: WARNING (stale handshake)"
+            fi
+        else
+            echo "  Status: NO HANDSHAKE YET"
+        fi
+    else
+        echo "WireGuard tools not available or interface not up"
+    fi
+    echo
+}
+
+# Show usage
+usage() {
+    cat <<EOF
+Usage: $0 {start|stop|restart|status|check}
+
+Commands:
+  start     - Bring up WireGuard VPN connection
+  stop      - Bring down WireGuard VPN connection
+  restart   - Restart WireGuard VPN connection
+  status    - Show detailed WireGuard status
+  check     - Quick check if WireGuard is active
+
+Examples:
+  $0 start
+  $0 status
+EOF
+    exit 1
+}
+
+# Main command handler
+case "${1:-}" in
+    start)
+        check_connection && start_wireguard
+        ;;
+    stop)
+        check_connection && stop_wireguard
+        ;;
+    restart)
+        check_connection && restart_wireguard
+        ;;
+    status)
+        check_connection && status_wireguard
+        ;;
+    check)
+        if nmcli connection show --active | grep -q "$INTERFACE"; then
+            echo "WireGuard is ACTIVE"
+            exit 0
+        else
+            echo "WireGuard is INACTIVE"
+            exit 1
+        fi
+        ;;
+    *)
+        usage
+        ;;
+esac

@@ -1,0 +1,35 @@
+---
+# SentinelCam Port Configuration
+# SINGLE SOURCE OF TRUTH for all service port assignments
+#
+# This file defines the standard ZeroMQ port assignments used across 
+# all SentinelCam deployments. Individual roles should reference these
+# port definitions rather than hardcoding values.
+
+sentinelcam_ports:
+  # ImageNode - Outpost camera nodes
+  imagenode_publisher: 5567
+  imagenode_logging: 5565
+
+  # ImageHub - camera image and data collection from imagenode via REQ/REP socket
+  imagehub_zmq: 5555
+  
+  # CamWatcher - Data capture via subscription to outpost camera image and log publishing
+  camwatcher_control: 5566
+  
+  # DataPump - SentinelCam data retrieval and management   
+  datapump_control: 5556
+  
+  # Sentinel - Vision processing, model inference, and task management
+  sentinel_control: 5566
+  sentinel_logging: 5565
+
+  # Note: Watchtower does not expose ports, it connects to the following services:
+  # sentinel_logging, datapump_control, and imagenode_publisher
+
+# Port Usage Summary (for reference):
+# 5555 - ImageHub REQ/REP (data sinks only)
+# 5556 - DataPump control (data sinks only)
+# 5565 - Event/log publishers (sentinel, imagenode outposts)
+# 5566 - Control interfaces (camwatcher on data sinks and also sentinels)
+# 5567 - Image publishers (imagenode outposts)

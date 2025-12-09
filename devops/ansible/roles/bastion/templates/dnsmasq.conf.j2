@@ -1,0 +1,48 @@
+# dnsmasq configuration for SentinelCam bastion
+# Optimized to prevent conflicts with NetworkManager
+
+# Basic configuration
+port=53
+user=dnsmasq
+group=dnsmasq
+
+# Domain handling
+domain-needed
+bogus-priv
+domain={{ bastion_dnsmasq.domain }}
+
+# Interface configuration
+{% for interface in bastion_dnsmasq.interfaces %}
+interface={{ interface }}
+{% endfor %}
+
+# Bind to specific interfaces to prevent conflicts
+bind-dynamic
+
+# Upstream DNS servers
+no-resolv
+{% for dns in bastion_dnsmasq.upstream_dns %}
+server={{ dns }}
+{% endfor %}
+
+# Local domain
+local=/{{ bastion_dnsmasq.domain }}/
+
+# DHCP configuration for internal network
+dhcp-range={{ bastion_dnsmasq.dhcp_range }}
+
+# DNS optimizations
+cache-size=1000
+neg-ttl=3600
+local-ttl=60
+
+# Additional configuration directory
+conf-dir=/etc/dnsmasq.d,.rpmnew,.rpmsave,.rpmorig
+
+# Logging (uncomment for debugging)
+# log-queries
+# log-dhcp
+
+# Security
+# Ignore any clients which are not specified in dhcp-host lines
+# dhcp-ignore=tag:!known

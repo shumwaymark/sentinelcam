@@ -1,0 +1,12 @@
+# Infrastructure group variables for bastion host
+
+# Use vault password if passwordless sudo is not configured
+ansible_become_password: "{{ vault_rocky_become_password | default(omit) }}"
+
+# Rocky Linux specific settings
+ansible_become_method: sudo
+ansible_become_timeout: 30
+
+# SSH optimization for Rocky Linux
+ansible_ssh_pipelining: true
+ansible_ssh_timeout: 30

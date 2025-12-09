@@ -1,0 +1,263 @@
+---
+# SentinelCam Configuration Validation Playbook
+# 
+# This playbook validates variable resolution and configuration consistency
+# across all nodes without making any changes to the system.
+#
+# Usage:
+#   ansible-playbook playbooks/validate-configuration.yaml
+#   ansible-playbook playbooks/validate-configuration.yaml --limit datasinks
+#   ansible-playbook playbooks/validate-configuration.yaml --tags user-validation
+
+- name: Validate SentinelCam Configuration
+  hosts: all
+  gather_facts: yes
+  tags: always
+  
+  tasks:
+    - name: "Display node identification"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Node: {{ inventory_hostname }}"
+          - "Groups: {{ group_names | join(', ') }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "=========================================="
+      tags: always
+
+    - name: "Validate user configuration"
+      block:
+        - name: "Check ansible_user resolution"
+          ansible.builtin.debug:
+            msg:
+              - "ansible_user: {{ ansible_user }}"
+              - "sentinelcam_user: {{ sentinelcam_user | default('NOT DEFINED') }}"
+              - "sentinelcam_group: {{ sentinelcam_group | default('NOT DEFINED') }}"
+          
+        - name: "Verify user consistency"
+          ansible.builtin.assert:
+            that:
+              - sentinelcam_user is defined
+              - sentinelcam_group is defined
+              - ansible_user == sentinelcam_user
+            fail_msg: "User configuration mismatch! ansible_user={{ ansible_user }}, sentinelcam_user={{ sentinelcam_user | default('undefined') }}"
+            success_msg: "✓ User configuration consistent: {{ sentinelcam_user }}"
+      tags:
+        - user-validation
+        - validation
+
+    - name: "Validate path configuration"
+      block:
+        - name: "Check base paths"
+          ansible.builtin.debug:
+            msg:
+              - "sentinelcam_data_path: {{ sentinelcam_data_path | default('NOT DEFINED') }}"
+              - "sentinelcam_venv_opencv: {{ sentinelcam_venv_opencv | default('NOT DEFINED') }}"
+              
+        - name: "Verify no hardcoded /home/ops or /home/pi in paths"
+          ansible.builtin.assert:
+            that:
+              - sentinelcam_data_path is search(sentinelcam_user)
+              - sentinelcam_venv_opencv is search(sentinelcam_user)
+            fail_msg: "Path contains hardcoded user instead of {{ sentinelcam_user }}"
+            success_msg: "✓ Paths use dynamic user variable"
+      tags:
+        - path-validation
+        - validation
+
+    - name: "Validate port configuration"
+      block:
+        - name: "Check port definitions"
+          ansible.builtin.debug:
+            var: sentinelcam_ports
+          when: sentinelcam_ports is defined
+          
+        - name: "Verify ports are defined"
+          ansible.builtin.assert:
+            that:
+              - sentinelcam_ports is defined
+              - sentinelcam_ports is mapping
+            fail_msg: "sentinelcam_ports not properly defined"
+            success_msg: "✓ Port configuration loaded"
+      tags:
+        - port-validation
+        - validation
+
+- name: Validate Datasink Configuration
+  hosts: datasinks
+  gather_facts: no
+  tags: datasinks
+  
+  tasks:
+    - name: "Check CamWatcher configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Service: {{ camwatcher_service | default('NOT DEFINED') }}"
+          - "Install Path: {{ camwatcher_install_path | default('NOT DEFINED') }}"
+          - "Config Path: {{ camwatcher_config_path | default('NOT DEFINED') }}"
+          - "Control Port: {{ sentinelcam_ports.camwatcher_control | default('NOT DEFINED') }}"
+      tags: camwatcher
+      
+    - name: "Verify CamWatcher paths"
+      ansible.builtin.assert:
+        that:
+          - camwatcher_install_path is defined
+          - camwatcher_config_path is defined
+          - camwatcher_install_path is search(sentinelcam_user)
+          - camwatcher_config_path is search(sentinelcam_user)
+        fail_msg: "CamWatcher configuration has issues"
+        success_msg: "✓ CamWatcher configuration valid"
+      tags: camwatcher
+      
+    - name: "Check DataPump configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Service: {{ datapump_service | default('NOT DEFINED') }}"
+          - "Install Path: {{ datapump_install_path | default('NOT DEFINED') }}"
+          - "Config Path: {{ datapump_config_path | default('NOT DEFINED') }}"
+          - "Control Port: {{ sentinelcam_ports.datapump_control | default('NOT DEFINED') }}"
+          - "Optimize I/O: {{ optimize_io | default('NOT DEFINED') }}"
+      tags: datapump
+      
+    - name: "Verify DataPump paths"
+      ansible.builtin.assert:
+        that:
+          - datapump_install_path is defined
+          - datapump_config_path is defined
+          - datapump_install_path is search(sentinelcam_user)
+        fail_msg: "DataPump configuration has issues"
+        success_msg: "✓ DataPump configuration valid"
+      tags: datapump
+      
+    - name: "Check ImageHub configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Service: {{ imagehub_service | default('NOT DEFINED') }}"
+          - "Install Path: {{ imagehub_install_path | default('NOT DEFINED') }}"
+          - "Config Path: {{ imagehub_config_path | default('NOT DEFINED') }}"
+          - "ZMQ Port: {{ sentinelcam_ports.imagehub_zmq | default('NOT DEFINED') }}"
+      tags: imagehub
+
+    - name: "Check disabled services configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Disabled Services: {{ disabled_services | default([]) }}"
+      tags: optimization
+
+- name: Validate Outpost Configuration
+  hosts: outposts
+  gather_facts: no
+  tags: outposts
+  
+  tasks:
+    - name: "Check ImageNode configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Service: {{ imagenode_service | default('NOT DEFINED') }}"
+          - "User: {{ imagenode_user | default('NOT DEFINED') }}"
+          - "Install Path: {{ imagenode_install_path | default('NOT DEFINED') }}"
+          - "Config File: {{ imagenode_config_file | default('NOT DEFINED') }}"
+          - "Venv Path: {{ imagenode_venv_path | default('NOT DEFINED') }}"
+          - "Camera Type: {{ camera_type | default('NOT DEFINED') }}"
+          - "Camera View: {{ camera_viewname | default('NOT DEFINED') }}"
+          - "Detection: {{ detection_objects | default('NOT DEFINED') }}"
+          - "Accelerator: {{ accelerator | default('NOT DEFINED') }}"
+          - "Hub Address: {{ hub_address | default('NOT DEFINED') }}"
+          
+    - name: "Verify ImageNode paths use correct user"
+      ansible.builtin.assert:
+        that:
+          - imagenode_install_path is defined
+          - imagenode_config_file is defined
+          - imagenode_install_path is search(ansible_user)
+        fail_msg: "ImageNode paths don't match user {{ ansible_user }}"
+        success_msg: "✓ ImageNode configuration valid for {{ inventory_hostname }}"
+        
+    - name: "Check for camera-specific configuration"
+      ansible.builtin.assert:
+        that:
+          - camera_viewname is defined
+          - camera_type is defined
+        fail_msg: "Camera configuration missing for {{ inventory_hostname }}"
+        success_msg: "✓ Camera configured: {{ camera_viewname }} ({{ camera_type }})"
+
+- name: Validate Sentinel Configuration
+  hosts: sentinels
+  gather_facts: no
+  tags: sentinels
+  
+  tasks:
+    - name: "Check Sentinel configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Service: {{ sentinel_service | default('NOT DEFINED') }}"
+          - "User: {{ sentinel_user | default('NOT DEFINED') }}"
+          - "Install Path: {{ sentinel_install_path | default('NOT DEFINED') }}"
+          - "Config Path: {{ sentinel_config_path | default('NOT DEFINED') }}"
+          - "Control Port: {{ sentinel_control_port | default('NOT DEFINED') }}"
+          - "Logging Port: {{ sentinel_logging_port | default('NOT DEFINED') }}"
+          - "Accelerator: {{ sentinel_accelerator_type | default('NOT DEFINED') }}"
+          - "Venv: {{ sentinel_venv_path | default('NOT DEFINED') }}"
+          
+    - name: "Verify Sentinel paths use correct user"
+      ansible.builtin.assert:
+        that:
+          - sentinel_install_path is defined
+          - sentinel_config_path is defined
+          - sentinel_install_path is search(sentinelcam_user)
+          - sentinel_config_path is search(sentinelcam_user)
+        fail_msg: "Sentinel paths don't match user {{ sentinelcam_user }}"
+        success_msg: "✓ Sentinel configuration valid"
+
+    - name: "Check for hardcoded /home/ops issue"
+      ansible.builtin.debug:
+        msg: "⚠️  WARNING: Check if group_vars/sentinels.yaml has hardcoded /home/ops paths"
+      when: sentinel_install_path is search('/home/ops') and sentinel_user == 'pi'
+
+- name: Validate Watchtower Configuration  
+  hosts: watchtowers
+  gather_facts: no
+  tags: watchtowers
+  
+  tasks:
+    - name: "Check Watchtower configuration"
+      ansible.builtin.debug:
+        msg:
+          - "Service: {{ watchtower_service | default('NOT DEFINED') }}"
+          - "User: {{ watchtower_user | default('NOT DEFINED') }}"
+          - "Install Path: {{ watchtower_install_path | default('NOT DEFINED') }}"
+          - "Config Path: {{ watchtower_config_path | default('NOT DEFINED') }}"
+          - "Display: {{ watchtower_display | default('NOT DEFINED') }}"
+          - "Venv: {{ watchtower_venv_path | default('NOT DEFINED') }}"
+          
+    - name: "Verify Watchtower configuration"
+      ansible.builtin.assert:
+        that:
+          - watchtower_install_path is defined
+          - watchtower_config_path is defined
+          - watchtower_display is defined
+        fail_msg: "Watchtower configuration incomplete"
+        success_msg: "✓ Watchtower configuration valid"
+
+- name: Configuration Summary
+  hosts: localhost
+  gather_facts: no
+  tags: always
+  
+  tasks:
+    - name: "Display validation summary"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Configuration Validation Complete"
+          - "=========================================="
+          - ""
+          - "Review the output above for any failed assertions or warnings."
+          - "See VARIABLE_PRECEDENCE_MAPS.md for detailed variable documentation."
+          - ""
+          - "To fix issues found:"
+          - "  1. Review group_vars and host_vars files"
+          - "  2. Check for hardcoded paths or user names"
+          - "  3. Ensure variable naming consistency"
+          - "  4. Re-run this playbook to verify fixes"
+          - ""

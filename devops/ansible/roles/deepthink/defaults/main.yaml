@@ -1,0 +1,69 @@
+---
+# Default variables for SentinelCam DeepThink (ML Training) Role
+# See group_vars/all/sentinelcam_ports.yaml for port definitions
+# See group_vars/all/sentinelcam_standards.yaml for path standards
+
+# Service configuration
+deepthink_service: deepthink
+deepthink_user: "{{ sentinelcam_user }}"
+deepthink_group: "{{ sentinelcam_group }}"
+deepthink_user_home: "/home/{{ sentinelcam_user }}"
+
+# Installation paths
+deepthink_install_path: "/home/{{ sentinelcam_user }}/deepthink"
+deepthink_notebooks_path: "/home/{{ sentinelcam_user }}/deepthink/notebooks"
+deepthink_models_path: "/home/{{ sentinelcam_user }}/deepthink/models"
+deepthink_data_path: "/home/{{ sentinelcam_user }}/deepthink/data"
+
+# Virtual environment for ML training
+# Prefer existing py3cv4 venv (PyImageSearch standard with OpenCV)
+# Falls back to creating new venv if py3cv4 doesn't exist
+deepthink_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/ml-training"
+
+# Papermill configuration for automated notebook execution
+deepthink_papermill_enabled: true
+deepthink_papermill_output_path: "{{ deepthink_notebooks_path }}/output"
+
+# Model versioning
+deepthink_model_version_pattern: "{{ model_type }}_{{ version }}"
+
+# Training schedule (cron format)
+# Default: Run face model training at 3 AM daily
+deepthink_training_schedule:
+  face_model:
+    enabled: false  # Manual trigger initially
+    hour: "3"
+    minute: "0"
+    day: "*"
+
+# Model deployment targets (auto-generated from inventory)
+deepthink_deployment_targets:
+  face_model:
+    sentinels:
+      - sentinel
+    datasinks:
+      - data1  # For facelist.csv
+  vehicle_model:
+    outposts:
+      - east   # Outdoor cameras only
+      - alpha5
+
+# Jetson Nano specific settings
+jetson_cuda_enabled: true
+jetson_tensorrt_enabled: true
+jetson_max_power_mode: false  # Set true for max performance, false for efficiency
+jetson_headless: true  # Run without GUI to save GPU memory (can be overridden in inventory)
+
+# Python packages required for ML training
+deepthink_python_packages:
+  - scikit-learn
+  - pandas
+  - h5py
+  - papermill
+  - jupyter
+  - ipykernel
+  - matplotlib
+  - seaborn
+
+# Debug mode flag
+debug_mode: false

@@ -1,0 +1,23 @@
+# Node-specific configuration for east outpost
+---
+# ImageNode configuration using unified template
+imagenode_config:
+  node_name: east
+  heartbeat: 10
+  cameras:
+    O1:                          # OAK-1 DepthAI camera
+      viewname: Front
+      resolution: [640, 360]
+      framerate: 30
+      detector:
+        encoder: oak             # oak | cpu (JPEG encoding location)
+        detectobjects: none      # Spyglass not used with DepthAI
+        accelerator: none
+        depthai:                 # DepthAI-specific config
+          pipeline: MobileNetSSD
+          images: frames         # Image queue name
+          jpegs: jpegs          # JPEG queue name
+          neural_nets:
+            Q1: nn              # Neural network output queue
+        sentinel_tasks:
+          person: GetFaces2

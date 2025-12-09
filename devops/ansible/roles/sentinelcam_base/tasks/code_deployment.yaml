@@ -1,0 +1,149 @@
+---
+# SentinelCam Code Deployment Tasks
+# Data-driven deployment using code_deployment.components from sentinelcam_standards.yaml
+# Handles syncing source code with proper delegation strategy
+
+- name: "Determine deployment source strategy"
+  ansible.builtin.set_fact:
+    is_datasink_node: "{{ inventory_hostname in groups['datasinks'] }}"
+    is_primary_datasink: "{{ inventory_hostname == primary_datasink }}"
+    deployment_source_node: "{{ primary_datasink }}"
+  tags: 
+    - code_deployment
+    - deploy
+
+- name: "Identify components to deploy for this node's groups"
+  ansible.builtin.set_fact:
+    components_to_deploy: >-
+      {%- set components = [] -%}
+      {%- for group_name in group_names -%}
+        {%- if group_name in code_deployment.components -%}
+          {%- for component in code_deployment.components[group_name] -%}
+            {%- set _ = components.append(component) -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ components }}
+  tags:
+    - code_deployment
+    - deploy
+
+- name: "Display deployment strategy"
+  ansible.builtin.debug:
+    msg:
+      - "Target node: {{ inventory_hostname }}"
+      - "Groups: {{ group_names | join(', ') }}"
+      - "Is data sink: {{ is_datasink_node }}"
+      - "Is primary data sink: {{ is_primary_datasink }}"
+      - "Source node: {{ deployment_source_node }}"
+      - "Source path: {{ code_source_path }}"
+      - "Components to deploy: {{ components_to_deploy | map(attribute='name') | join(', ') }}"
+  tags:
+    - code_deployment
+    - deploy
+
+# For PRIMARY data sink: deploy from local current_deployment directory
+# Secondary datasinks will use remote deployment from primary
+- name: "Deploy source code locally on primary data sink"
+  ansible.builtin.synchronize:
+    src: "{{ code_source_path }}/{{ item.source }}/"
+    dest: "{{ item.dest }}/"
+    rsync_opts:
+      - "--delete"
+      - "--exclude=*.pyc"
+      - "--exclude=__pycache__"
+      - "--exclude=*.log"
+      - "--exclude=.git"
+      - "--exclude=*.swp"
+      - "--exclude=models/"
+    owner: yes
+    group: yes
+  delegate_to: "{{ inventory_hostname }}"  # Run locally on the data sink
+  loop: "{{ components_to_deploy }}"
+  when:
+    - is_primary_datasink
+    - components_to_deploy | length > 0
+  notify: "restart {{ item.name }}"
+  tags: 
+    - code_deployment
+    - deploy
+    - local_deployment
+
+# For non-primary nodes (including secondary datasinks): deploy FROM primary datasink
+- name: "Deploy source code from primary data sink to other nodes"
+  ansible.builtin.synchronize:
+    src: "/home/{{ hostvars[primary_datasink]['sentinelcam_user'] }}/sentinelcam/current_deployment/{{ item.source }}/"
+    dest: "{{ item.dest }}/"
+    dest_port: "{{ ansible_port | default(22) }}"
+    rsync_opts:
+      - "--delete"
+      - "--exclude=*.pyc"
+      - "--exclude=__pycache__"
+      - "--exclude=*.log"
+      - "--exclude=.git"
+      - "--exclude=*.swp"
+      - "--exclude=models/"
+    owner: yes
+    group: yes
+  delegate_to: "{{ primary_datasink }}"  # Run FROM the primary data sink
+  become: false
+  remote_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"  # Connect to data1 as its user
+  loop: "{{ components_to_deploy }}"
+  when:
+    - not is_primary_datasink
+    - components_to_deploy | length > 0
+  notify: "restart {{ item.name }}"
+  tags: 
+    - code_deployment
+    - deploy
+    - remote_deployment
+
+# Deploy additional directories (models, data, etc.) for primary datasink
+- name: "Deploy additional directories locally on primary data sink"
+  ansible.builtin.synchronize:
+    src: "{{ code_source_path }}/{{ extra_dir.source }}/"
+    dest: "{{ extra_dir.dest }}/"
+    rsync_opts:
+      - "--update"
+      - "--exclude=*.pyc"
+      - "--exclude=__pycache__"
+      - "--exclude=.git"
+    owner: yes
+    group: yes
+  delegate_to: "{{ inventory_hostname }}"
+  loop: "{{ components_to_deploy | selectattr('additional_dirs', 'defined') | map(attribute='additional_dirs') | flatten }}"
+  loop_control:
+    loop_var: extra_dir
+  when:
+    - is_primary_datasink
+    - components_to_deploy | selectattr('additional_dirs', 'defined') | list | length > 0
+  tags:
+    - code_deployment
+    - deploy
+    - additional_dirs
+    - local_deployment
+
+# Deploy additional directories (models, data, etc.) for non-primary nodes
+- name: "Deploy additional directories from primary data sink to other nodes"
+  ansible.builtin.synchronize:
+    src: "{{ code_source_path }}/{{ extra_dir.source }}/"
+    dest: "{{ extra_dir.dest }}/"
+    rsync_opts:
+      - "--update"
+      - "--exclude=*.pyc"
+      - "--exclude=__pycache__"
+      - "--exclude=.git"
+    owner: yes
+    group: yes
+  delegate_to: "{{ deployment_source_node }}"
+  loop: "{{ components_to_deploy | selectattr('additional_dirs', 'defined') | map(attribute='additional_dirs') | flatten }}"
+  loop_control:
+    loop_var: extra_dir
+  when:
+    - not is_primary_datasink
+    - components_to_deploy | selectattr('additional_dirs', 'defined') | list | length > 0
+  tags:
+    - code_deployment
+    - deploy
+    - additional_dirs
+    - remote_deployment

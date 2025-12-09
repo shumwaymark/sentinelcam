@@ -1,0 +1,20 @@
+%YAML 1.0
+---
+# GetFaces.yaml.j2 - Detect faces
+# Template for face detection task configuration
+# 
+# Model paths are injected from model_registry.yaml at deployment time.
+# Model versions can be overridden per-host in host_vars using model_version_overrides dict.
+
+trk_type: fd1
+all_frames: False         # restrict face detection to images with 'person' detections
+camwatcher_update: True
+
+dnn_face: 
+    confidence: 0.5
+    # OpenCV DNN
+    prototxt_path: {{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/deploy.prototxt
+    model_path: {{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/res10_300x300_ssd_iter_140000.caffemodel
+    target: myriad  # [cpu, myriad]
+    # Google Coral USB 
+    edgetpu_model: /usr/share/edgetpu/examples/models/ssd_mobilenet_v2_face_quant_postprocess_edgetpu.tflite

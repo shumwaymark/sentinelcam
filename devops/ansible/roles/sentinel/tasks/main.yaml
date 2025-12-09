@@ -1,0 +1,119 @@
+---
+# SentinelCam Sentinel Role - Main Tasks
+
+# Use import_tasks (static) instead of include_tasks (dynamic) to avoid variable scoping bugs
+- name: "Import deployment tasks"
+  ansible.builtin.import_tasks: deploy.yaml
+
+- name: "Ensure Sentinel runtime directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  loop:
+    - "{{ sentinel_models_path }}"
+    - "{{ sentinel_socket_dir }}"
+  tags: directories
+
+- name: "Deploy Sentinel systemd service file"
+  ansible.builtin.template:
+    src: sentinel.service.j2
+    dest: /etc/systemd/system/{{ sentinel_service }}.service
+    mode: '0644'
+    backup: yes
+  notify:
+    - reload systemd
+  tags: service
+
+- name: "Deploy Sentinel launcher script"
+  ansible.builtin.template:
+    src: sentinel_launcher.sh.j2
+    dest: "{{ sentinel_install_path }}/sentinel_{{ sentinel_accelerator_type }}.sh"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+    backup: yes
+  notify:
+    - restart sentinel
+  tags: 
+    - scripts
+    - config
+
+- name: "Deploy Sentinel configuration file"
+  ansible.builtin.template:
+    src: sentinel.yaml.j2
+    dest: "{{ sentinel_config_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  notify:
+    - restart sentinel
+  tags: config
+
+- name: "Ensure Sentinel tasks directory exists"
+  ansible.builtin.file:
+    path: "{{ sentinel_install_path }}/tasks"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: 
+    - config
+    - tasks
+
+- name: "Deploy Sentinel task configuration templates"
+  ansible.builtin.template:
+    src: "tasks/{{ item }}.j2"
+    dest: "{{ sentinel_install_path }}/tasks/{{ item }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  loop:
+    - GetFaces.yaml
+    - FaceRecon.yaml
+    - FaceDataUpdate.yaml
+    - FaceSweep.yaml
+    - MobileNetSSD_allFrames.yaml
+    - DailyCleanup.yaml
+  notify:
+    - restart sentinel
+  tags:
+    - config
+    - tasks
+
+- name: "Deploy cleanup service and timer"
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: '0644'
+    backup: yes
+  loop:
+    - sentinel_cleanup.service
+    - sentinel_cleanup.timer
+  notify:
+    - reload systemd
+  tags: 
+    - service
+    - cleanup
+
+- name: "Enable and start Sentinel service"
+  ansible.builtin.systemd:
+    name: "{{ sentinel_service }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags: service
+
+- name: "Enable and start Sentinel cleanup timer"
+  ansible.builtin.systemd:
+    name: sentinel_cleanup.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags: 
+    - service
+    - cleanup

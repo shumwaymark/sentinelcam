@@ -1,0 +1,15 @@
+# sentinel cleanup service unit file
+# SentinelCam Ansible Template
+
+[Unit]
+Description=Sentinel Daily Cleanup
+Wants=sentinel_cleanup.timer
+
+[Service]
+Type=oneshot
+User={{ sentinelcam_user }}
+WorkingDirectory={{ sentinel_install_path }}
+ExecStart={{ sentinel_venv_path }}/bin/python -u {{ sentinel_install_path }}/sentinel_task.py -t DailyCleanup
+
+[Install]
+WantedBy=multi-user.target

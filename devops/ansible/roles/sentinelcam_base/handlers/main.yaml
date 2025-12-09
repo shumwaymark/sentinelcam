@@ -1,0 +1,45 @@
+---
+# SentinelCam Base Role Handlers
+# Service restart handlers for code deployment
+
+- name: restart camwatcher
+  ansible.builtin.systemd:
+    name: camwatcher
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: restart datapump
+  ansible.builtin.systemd:
+    name: datapump
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: restart imagehub
+  ansible.builtin.systemd:
+    name: imagehub
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: restart imagenode
+  ansible.builtin.systemd:
+    name: imagenode
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: restart sentinel
+  ansible.builtin.systemd:
+    name: sentinel
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: restart watchtower
+  ansible.builtin.systemd:
+    name: watchtower
+    state: restarted
+    daemon_reload: yes
+  become: yes

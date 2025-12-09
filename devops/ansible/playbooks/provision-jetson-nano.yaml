@@ -1,0 +1,358 @@
+---
+# Jetson Nano Initial Provisioning Playbook
+# Prepares the Jetson Nano for ML training role
+# Run this BEFORE deploy-deepthink.yaml
+
+- name: Provision Jetson Nano for SentinelCam ML Training
+  hosts: ml_trainers
+  gather_facts: false
+  
+  vars:
+    target_hostname: "{{ node_name }}"
+    # Read target_ip from inventory, not from ansible_host override
+    target_ip: "192.168.10.100"
+    target_user: "{{ sentinelcam_user }}"
+    
+  tasks:
+    # ========================================================================
+    # Phase 1: Initial Connection & Prerequisites
+    # ========================================================================
+    
+    - name: Test connection with password authentication
+      ansible.builtin.ping:
+      vars:
+        ansible_ssh_common_args: ""
+      tags: [test]
+    
+    - name: Gather facts about the system
+      ansible.builtin.setup:
+      tags: [always]
+    
+    - name: Display current configuration
+      ansible.builtin.debug:
+        msg:
+          - "Current hostname: {{ ansible_hostname }}"
+          - "Current user: {{ ansible_user_id }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Target hostname: {{ target_hostname }}"
+          - "Target IP: {{ target_ip }}"
+      tags: [info]
+    
+    # ========================================================================
+    # Phase 2: SSH Key Distribution
+    # ========================================================================
+    
+    - name: Ensure .ssh directory exists
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.ssh"
+        state: directory
+        mode: '0700'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      tags: [ssh]
+    
+    - name: Deploy SSH public key for passwordless access
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user }}"
+        state: present
+        key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub') }}"
+      tags: [ssh]
+    
+    - name: Test passwordless SSH
+      ansible.builtin.ping:
+      tags: [ssh, test]
+    
+    # ========================================================================
+    # Phase 3: Passwordless Sudo
+    # ========================================================================
+    
+    - name: Configure passwordless sudo
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers.d/{{ ansible_user }}
+        line: "{{ ansible_user }} ALL=(ALL) NOPASSWD: ALL"
+        create: true
+        mode: '0440'
+        validate: 'visudo -cf %s'
+      become: true
+      tags: [sudo]
+    
+    - name: Test passwordless sudo
+      ansible.builtin.command:
+        cmd: sudo -n true
+      changed_when: false
+      tags: [sudo, test]
+    
+    # ========================================================================
+    # Phase 4: Static IP Configuration
+    # ========================================================================
+    
+    - name: Check current network configuration
+      ansible.builtin.command:
+        cmd: ip addr show {{ interface }}
+      register: current_ip
+      changed_when: false
+      tags: [network]
+    
+    - name: Display current IP configuration
+      ansible.builtin.debug:
+        msg: "{{ current_ip.stdout_lines }}"
+      tags: [network]
+    
+    - name: Check if NetworkManager is active
+      ansible.builtin.systemd:
+        name: NetworkManager
+      register: nm_status
+      become: true
+      tags: [network]
+    
+    - name: Get active NetworkManager connection name
+      ansible.builtin.shell:
+        cmd: nmcli -t -f NAME,DEVICE connection show --active | grep {{ interface }} | cut -d':' -f1
+      register: nm_connection_name
+      changed_when: false
+      become: true
+      when: nm_status.status.ActiveState == "active"
+      tags: [network]
+    
+    - name: Display connection name
+      ansible.builtin.debug:
+        msg: "Active connection: {{ nm_connection_name.stdout }}"
+      when: nm_status.status.ActiveState == "active"
+      tags: [network]
+    
+    - name: Configure static IP via NetworkManager
+      ansible.builtin.command:
+        cmd: >
+          nmcli connection modify "{{ nm_connection_name.stdout }}"
+          ipv4.method manual
+          ipv4.addresses "{{ target_ip }}/24"
+          ipv4.gateway "{{ gateway }}"
+          ipv4.dns "{{ dns_servers | join(',') }}"
+          ipv4.dns-search "local"
+      become: true
+      when: 
+        - nm_status.status.ActiveState == "active"
+        - nm_connection_name.stdout | length > 0
+      register: nm_configured
+      tags: [network]
+    
+    - name: Note about network change
+      ansible.builtin.debug:
+        msg: "Static IP configured. Reboot required to apply changes."
+      when: nm_configured.changed
+      tags: [network]
+    
+    - name: Disable systemd-resolved stub resolver
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/resolved.conf
+        regexp: '^#?DNSStubListener='
+        line: "DNSStubListener=no"
+        state: present
+      become: true
+      tags: [network, dns]
+    
+    - name: Restart systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+      become: true
+      tags: [network, dns]
+    
+    - name: Remove symlink to stub resolver
+      ansible.builtin.file:
+        path: /etc/resolv.conf
+        state: absent
+      become: true
+      tags: [network, dns]
+    
+    - name: Create direct resolv.conf
+      ansible.builtin.copy:
+        content: |
+          nameserver {{ dns_servers[0] }}
+          nameserver {{ dns_servers[1] if dns_servers | length > 1 else '8.8.8.8' }}
+          search local
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      tags: [network, dns]
+    
+    - name: Fix nsswitch.conf to use direct DNS
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^hosts:'
+        line: "hosts: files dns"
+        state: present
+      become: true
+      tags: [network, dns]
+    
+    # ========================================================================
+    # Phase 5: Hostname Verification
+    # ========================================================================
+    
+    - name: Verify hostname is correct
+      ansible.builtin.debug:
+        msg: "Hostname is: {{ ansible_hostname }} (target: {{ target_hostname }})"
+      tags: [hostname]
+    
+    - name: Update /etc/hosts to ensure hostname resolution
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1'
+        line: "127.0.1.1 {{ ansible_hostname }}"
+        state: present
+      become: true
+      tags: [hostname]
+    
+    # ========================================================================
+    # Phase 6: System Updates & Essential Packages
+    # ========================================================================
+    
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      become: true
+      tags: [packages]
+    
+    - name: Install essential packages
+      ansible.builtin.apt:
+        name:
+          - python3-pip
+          - python3-venv
+          - python3-dev
+          - build-essential
+          - git
+          - rsync
+          - htop
+          - tmux
+          - curl
+          - wget
+        state: present
+      become: true
+      tags: [packages]
+    
+    # ========================================================================
+    # Phase 7: Jetson-Specific Optimization
+    # ========================================================================
+    
+    - name: Check Jetson power mode
+      ansible.builtin.command:
+        cmd: nvpmodel -q
+      register: power_mode
+      changed_when: false
+      failed_when: false
+      tags: [jetson]
+    
+    - name: Display current power mode
+      ansible.builtin.debug:
+        msg: "{{ power_mode.stdout_lines }}"
+      when: power_mode.rc == 0
+      tags: [jetson]
+    
+    - name: Set Jetson to power mode 0 (MAXN - 10W)
+      ansible.builtin.command:
+        cmd: nvpmodel -m 0
+      become: true
+      when: 
+        - power_mode.rc == 0
+        - "'MAXN' not in power_mode.stdout"
+      tags: [jetson]
+    
+    - name: Enable all CPU cores
+      ansible.builtin.shell:
+        cmd: |
+          for cpu in /sys/devices/system/cpu/cpu[0-3]; do
+            if [ -f $cpu/online ]; then
+              echo 1 | sudo tee $cpu/online
+            fi
+          done
+      become: true
+      tags: [jetson]
+    
+    - name: Configure headless mode (disable GUI)
+      ansible.builtin.command:
+        cmd: systemctl set-default multi-user.target
+      become: true
+      when: 
+        - jetson_headless is defined
+        - jetson_headless | bool
+      register: headless_configured
+      tags: [jetson, headless]
+    
+    # ========================================================================
+    # Phase 8: Verification
+    # ========================================================================
+    
+    - name: Verify CUDA installation
+      ansible.builtin.command:
+        cmd: nvcc --version
+      register: cuda_version
+      changed_when: false
+      failed_when: false
+      tags: [verify]
+    
+    - name: Display CUDA version
+      ansible.builtin.debug:
+        msg: "{{ cuda_version.stdout_lines }}"
+      when: cuda_version.rc == 0
+      tags: [verify]
+    
+    - name: Check Python version
+      ansible.builtin.command:
+        cmd: python3 --version
+      register: python_version
+      changed_when: false
+      tags: [verify]
+    
+    - name: Display Python version
+      ansible.builtin.debug:
+        msg: "{{ python_version.stdout }}"
+      tags: [verify]
+    
+    - name: Final status report
+      ansible.builtin.debug:
+        msg:
+          - "========================================="
+          - "Jetson Nano Provisioning Complete!"
+          - "========================================="
+          - "Hostname: {{ ansible_hostname }}"
+          - "Static IP: {{ target_ip }}"
+          - "SSH: Passwordless access configured"
+          - "Sudo: Passwordless sudo configured"
+          - "Python: {{ python_version.stdout }}"
+          - "CUDA: {{ 'Available' if (cuda_version is defined and cuda_version.rc == 0) else 'Not detected' }}"
+          - "Mode: {{ 'Headless (no GUI)' if (jetson_headless is defined and jetson_headless | bool) else 'Desktop GUI' }}"
+          - ""
+          - "Next steps:"
+          - "1. Reboot to apply changes: ansible ml_trainers -b -a 'reboot'"
+          - "2. Wait 2 minutes for reboot to complete"
+          - "3. Test new IP: ansible ml_trainers -m ping"
+          - "4. Deploy ML training role: ansible-playbook playbooks/deploy-deepthink.yaml"
+          - ""
+          - "To switch modes later:"
+          - "  Headless: sudo systemctl set-default multi-user.target && sudo reboot"
+          - "  Desktop: sudo systemctl set-default graphical.target && sudo reboot"
+      tags: [info]
+
+- name: Post-Provisioning Reboot Check
+  hosts: ml_trainers
+  gather_facts: false
+  
+  tasks:
+    - name: Check if reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      tags: [reboot]
+    
+    - name: Prompt for reboot
+      ansible.builtin.debug:
+        msg: 
+          - "REBOOT REQUIRED"
+          - "Run: ansible ml_trainers -b -a 'reboot'"
+          - "Wait 2 minutes, then verify: ansible ml_trainers -m ping"
+      when: reboot_required.stat.exists
+      tags: [reboot]

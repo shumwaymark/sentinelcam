@@ -1,0 +1,65 @@
+---
+# NetworkManager Configuration Tasks
+# Addresses DNS conflicts and ensures proper service coordination
+
+- name: "Stop NetworkManager temporarily for configuration"
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: stopped
+  tags: [networkmanager]
+
+- name: "Refresh sudo credentials before long configuration tasks"
+  ansible.builtin.command: /bin/true
+  become: yes
+  changed_when: false
+  tags: [networkmanager]
+
+- name: "Configure NetworkManager main settings"
+  ansible.builtin.ini_file:
+    path: /etc/NetworkManager/NetworkManager.conf
+    section: main
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    backup: yes
+  loop:
+    - { key: "dns", value: "none" }  # Disable NM dnsmasq to prevent conflicts
+    - { key: "rc-manager", value: "file" }
+  notify: restart networkmanager
+  tags: [networkmanager, dns]
+
+- name: "Create NetworkManager conf.d directory"
+  ansible.builtin.file:
+    path: /etc/NetworkManager/conf.d
+    state: directory
+    mode: '0755'
+  tags: [networkmanager]
+
+- name: "Configure NetworkManager to not manage DNS"
+  ansible.builtin.copy:
+    content: |
+      # Disable NetworkManager DNS management
+      # Prevents conflicts with standalone dnsmasq service
+      [main]
+      dns=none
+      
+      # Don't create /etc/resolv.conf
+      [global-dns-domain-*]
+      address=/localhost/::1
+      address=/localhost/127.0.0.1
+    dest: /etc/NetworkManager/conf.d/no-dns.conf
+    mode: '0644'
+    backup: yes
+  notify: restart networkmanager
+  tags: [networkmanager, dns]
+
+- name: "Start NetworkManager with new configuration"
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: started
+    enabled: yes
+  tags: [networkmanager]
+
+- name: "Wait for NetworkManager to stabilize"
+  ansible.builtin.wait_for:
+    timeout: 10
+  tags: [networkmanager]

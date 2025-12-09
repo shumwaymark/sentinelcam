@@ -1,0 +1,21 @@
+[Unit]
+Description=SentinelCam Model Registry Cleanup
+Documentation=man:systemd.service(5)
+After=network.target
+
+[Service]
+Type=oneshot
+User={{ sentinelcam_user }}
+Group={{ sentinelcam_group }}
+ExecStart={{ sentinelcam_deployment_source }}/devops/scripts/cleanup_model_registry.sh
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths={{ sentinelcam_model_registry }} {{ sentinelcam_data_path }}/logs
+
+[Install]
+WantedBy=multi-user.target

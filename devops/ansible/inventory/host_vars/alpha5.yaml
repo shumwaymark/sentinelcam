@@ -1,0 +1,22 @@
+# Node-specific configuration for alpha5 outpost
+---
+# ImageNode configuration using unified template
+imagenode_config:
+  node_name: alpha5
+  heartbeat: 10
+  cameras:
+    P1:                          # PiCamera
+      viewname: PiCam3
+      resolution: [640, 480]
+      framerate: 32
+      vflip: false               # PiCamera-specific
+      threaded_read: false       # PiCamera-specific
+      detector:
+        detectobjects: mobilenetssd
+        accelerator: none        # none | ncs2 | coral
+        mobilenetssd:
+          target: cpu            # cpu | ncs2
+          confidence: 0.5
+        sentinel_tasks:
+          person: GetFaces2
+          default: MobileNetSSD_allFrames

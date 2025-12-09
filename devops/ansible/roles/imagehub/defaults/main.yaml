@@ -1,0 +1,9 @@
+---
+# Default variables for SentinelCam ImageHub Role
+# See group_vars/all/sentinelcam_ports.yaml for port definitions
+# See group_vars/all/sentinelcam_standards.yaml for path standards
+
+
+# Note: Port configuration moved to group_vars/all/sentinelcam_ports.yaml
+# Access via: {{ sentinelcam_ports.imagehub_zmq }}
+# Note: Directory structure moved to group_vars/all/sentinelcam_standards.yaml

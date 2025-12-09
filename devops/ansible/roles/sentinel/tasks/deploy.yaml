@@ -1,0 +1,47 @@
+---
+# SentinelCam Sentinel Role - Deployment Tasks
+# NOTE: Code deployment is handled by sentinelcam_base role 
+# This file contains sentinel-specific deployment tasks
+
+- name: "Set ownership of deployed files"
+  ansible.builtin.file:
+    path: "{{ sentinel_install_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    recurse: yes
+  tags: 
+    - deploy
+    - permissions
+
+- name: "Check Sentinel service status"
+  ansible.builtin.systemd:
+    name: "{{ sentinel_service }}"
+  register: sentinel_service_status
+  tags: 
+    - status
+    - health
+
+- name: "Display Sentinel service status"
+  ansible.builtin.debug:
+    msg: "Sentinel service is {{ sentinel_service_status.status.ActiveState | default('unknown') }}"
+  tags: 
+    - status
+    - health
+
+- name: "Check if Sentinel is responding on control port"
+  ansible.builtin.wait_for:
+    port: "{{ sentinelcam_ports.sentinel_control }}"
+    host: "{{ ansible_default_ipv4.address }}"
+    timeout: 10
+  ignore_errors: yes
+  register: sentinel_port_check
+  tags: 
+    - status
+    - health
+
+- name: "Display Sentinel port connectivity status"
+  ansible.builtin.debug:
+    msg: "Sentinel control port {{ sentinelcam_ports.sentinel_control }} is {{ 'accessible' if sentinel_port_check is succeeded else 'not accessible' }}"
+  tags: 
+    - status
+    - health

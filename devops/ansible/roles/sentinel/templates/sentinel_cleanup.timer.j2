@@ -1,0 +1,14 @@
+# sentinel cleanup timer unit file
+# SentinelCam Ansible Template
+
+[Unit]
+Description=Sentinel Daily Cleanup Timer
+Requires=sentinel_cleanup.service
+
+[Timer]
+Unit=sentinel_cleanup.service
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

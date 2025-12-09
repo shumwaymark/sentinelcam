@@ -1,0 +1,31 @@
+---
+# Backup existing configuration files before modification
+
+- name: "Backup NetworkManager configuration"
+  ansible.builtin.copy:
+    src: /etc/NetworkManager/NetworkManager.conf
+    dest: "{{ bastion_backup.backup_dir }}/NetworkManager.conf.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+    mode: '0600'
+  ignore_errors: yes
+
+- name: "Backup dnsmasq configuration"
+  ansible.builtin.copy:
+    src: /etc/dnsmasq.conf
+    dest: "{{ bastion_backup.backup_dir }}/dnsmasq.conf.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+    mode: '0600'
+  ignore_errors: yes
+
+- name: "Backup firewall configuration"
+  ansible.builtin.shell: |
+    firewall-cmd --list-all-zones > {{ bastion_backup.backup_dir }}/firewall.{{ ansible_date_time.epoch }}.txt
+  ignore_errors: yes
+
+- name: "List existing NetworkManager connections"
+  ansible.builtin.shell: nmcli connection show > {{ bastion_backup.backup_dir }}/nm-connections.{{ ansible_date_time.epoch }}.txt
+  ignore_errors: yes
+
+- name: "Backup summary"
+  ansible.builtin.debug:
+    msg: "Configuration backups created in {{ bastion_backup.backup_dir }}"

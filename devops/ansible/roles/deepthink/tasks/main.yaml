@@ -1,0 +1,95 @@
+---
+# Main tasks for DeepThink (ML Training Node) role
+
+# Note: Skip sentinelcam_base role for Jetson Nano - already provisioned
+# with py3cv4 virtualenv from PyImageSearch setup
+
+- name: Create deepthink directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deepthink_user }}"
+    group: "{{ deepthink_group }}"
+    mode: '0755'
+  loop:
+    - "{{ deepthink_install_path }}"
+    - "{{ deepthink_notebooks_path }}"
+    - "{{ deepthink_models_path }}"
+    - "{{ deepthink_data_path }}"
+    - "{{ deepthink_papermill_output_path }}"
+  tags: [config]
+
+- name: Check if py3cv4 virtualenv exists
+  ansible.builtin.stat:
+    path: "{{ deepthink_user_home }}/.virtualenvs/py3cv4"
+  register: py3cv4_venv
+  tags: [venv]
+
+- name: Set virtualenv path to existing py3cv4
+  ansible.builtin.set_fact:
+    deepthink_venv_path: "{{ deepthink_user_home }}/.virtualenvs/py3cv4"
+  when: py3cv4_venv.stat.exists
+  tags: [venv]
+
+- name: Create Python virtual environment if py3cv4 doesn't exist
+  ansible.builtin.pip:
+    name: pip
+    virtualenv: "{{ deepthink_venv_path }}"
+    virtualenv_command: python3 -m venv
+    state: latest
+  become: true
+  become_user: "{{ deepthink_user }}"
+  when: not py3cv4_venv.stat.exists
+  tags: [venv]
+
+- name: Upgrade pip in existing/new virtualenv
+  ansible.builtin.pip:
+    name: pip
+    virtualenv: "{{ deepthink_venv_path }}"
+    state: latest
+  become: true
+  become_user: "{{ deepthink_user }}"
+  tags: [venv]
+
+- name: Install additional ML training Python packages
+  ansible.builtin.pip:
+    name: "{{ deepthink_python_packages }}"
+    virtualenv: "{{ deepthink_venv_path }}"
+    state: present
+  become: true
+  become_user: "{{ deepthink_user }}"
+  tags: [packages]
+
+- name: Note about notebooks
+  ansible.builtin.debug:
+    msg: "Notebook deployment skipped - training pipeline still being developed manually"
+  tags: [deploy, notebooks]
+
+- name: Set Jetson Nano power mode
+  ansible.builtin.shell:
+    cmd: "nvpmodel -m {{ '0' if jetson_max_power_mode else '1' }}"
+  when: 
+    - platform is defined
+    - platform == "jetson_nano"
+  become: true
+  tags: [jetson]
+
+- name: Display deployment information
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - "DeepThink ML Training Node - Basic Setup Complete"
+      - "================================================"
+      - "Directories created:"
+      - "  - Notebooks: {{ deepthink_notebooks_path }}"
+      - "  - Models: {{ deepthink_models_path }}"
+      - "  - Data: {{ deepthink_data_path }}"
+      - ""
+      - "Virtual environment: {{ deepthink_venv_path }}"
+      - "ML packages installed: scikit-learn, papermill, jupyter, matplotlib, pandas"
+      - ""
+      - "Next steps (manual):"
+      - "  1. Develop/test training notebooks in {{ deepthink_notebooks_path }}"
+      - "  2. Create training scripts as workflows stabilize"
+      - "  3. Define model deployment procedures"
+  tags: [info]

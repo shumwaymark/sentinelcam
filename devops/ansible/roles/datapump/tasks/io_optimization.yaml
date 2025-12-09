@@ -1,0 +1,155 @@
+---
+# I/O Performance Optimization Tasks for SentinelCam Data Nodes
+# Optimizes Raspberry Pi 5 + NVMe SSD for high-throughput data operations
+# Used by camwatcher (image subscriber processes) and datapump (access requests)
+
+- name: "Configure SSD mount options for performance"
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(/dev/nvme0n1\s+\S+\s+ext4\s+)defaults(\s+\d+\s+\d+)$'
+    replace: '\1defaults,noatime,nodiratime,commit=60,barrier=0\2'
+    backup: yes
+  notify: remount_data_ssd
+  tags: [ssd, io, performance]
+
+- name: "Optimize ext4 filesystem for large file operations"
+  ansible.builtin.command:
+    cmd: "tune2fs -o journal_data_writeback {{ data_device | default('/dev/nvme0n1') }}"
+  register: tune2fs_result
+  changed_when: tune2fs_result.rc == 0
+  tags: [ssd, io, performance]
+
+- name: "Configure kernel parameters for I/O performance"
+  ansible.builtin.blockinfile:
+    path: /etc/sysctl.conf
+    block: |
+      # SentinelCam I/O Optimizations for Data Nodes
+      # Network buffer tuning for large image transfers
+      net.core.rmem_max = {{ network_buffer_size | default(134217728) }}
+      net.core.wmem_max = {{ network_buffer_size | default(134217728) }}
+      net.ipv4.tcp_rmem = 4096 131072 {{ network_buffer_size | default(134217728) }}
+      net.ipv4.tcp_wmem = 4096 65536 {{ network_buffer_size | default(134217728) }}
+      net.core.netdev_max_backlog = 5000
+      net.ipv4.tcp_congestion_control = bbr
+      
+      # Memory optimization for I/O workload
+      vm.swappiness = 1
+      vm.dirty_ratio = 15
+      vm.dirty_background_ratio = 5
+      vm.dirty_expire_centisecs = 1500
+      vm.dirty_writeback_centisecs = 500
+      
+      # ZeroMQ buffer optimization for imageZMQ
+      net.core.rmem_default = {{ zeromq_buffer_size | default(262144) }}
+      net.core.wmem_default = {{ zeromq_buffer_size | default(262144) }}
+    marker: "# {mark} SENTINELCAM I/O OPTIMIZATION"
+    backup: yes
+  notify: apply_sysctl_settings
+  tags: [kernel, io, performance]
+
+- name: "Set GPU memory split for headless operation"
+  ansible.builtin.lineinfile:
+    path: /boot/config.txt
+    regexp: '^gpu_mem='
+    line: 'gpu_mem={{ gpu_memory_split | default(16) }}'
+    backup: yes
+  notify: reboot_required
+  tags: [boot, io, performance]
+
+- name: "Create systemd service for SentinelCam performance optimizations"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sentinelcam-perf.service
+    content: |
+      [Unit]
+      Description=SentinelCam Performance Optimizations
+      After=multi-user.target
+      
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/bash -c 'echo {{ io_scheduler | default("none") }} > /sys/block/nvme0n1/queue/scheduler || true'
+      ExecStart=/bin/bash -c 'echo {{ cpu_governor | default("performance") }} | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor || true'
+      
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+    backup: yes
+  tags: [scheduler, io, performance]
+
+- name: "Enable SentinelCam performance optimization service"
+  ansible.builtin.systemd:
+    name: sentinelcam-perf
+    enabled: yes
+    daemon_reload: yes
+  tags: [scheduler, io, performance]
+
+- name: "Increase file descriptor limits for image processing"
+  ansible.builtin.blockinfile:
+    path: /etc/security/limits.conf
+    block: |
+      # SentinelCam file descriptor limits for multiple image subscribers
+      * soft nofile {{ max_open_files | default(65536) }}
+      * hard nofile {{ max_open_files | default(65536) }}
+    marker: "# {mark} SENTINELCAM FILE DESCRIPTOR LIMITS"
+    backup: yes
+  tags: [limits, io, performance]
+
+- name: "Disable unnecessary services for data node"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop:
+    - bluetooth
+    - cups
+    - avahi-daemon
+    - triggerhappy
+  ignore_errors: yes
+  tags: [services, io, performance]
+
+- name: "Install I/O monitoring tools"
+  ansible.builtin.package:
+    name:
+      - iotop
+      - htop
+      - nethogs
+      - nvme-cli
+    state: present
+  tags: [monitoring, io, performance]
+
+- name: "Create SentinelCam performance monitoring script"
+  ansible.builtin.copy:
+    dest: /usr/local/bin/sentinelcam-perf-check
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # SentinelCam Data Node Performance Check
+      echo "=== SentinelCam Data Node Performance Status ==="
+      echo "=== I/O Stats ==="
+      iostat -x 1 1
+      
+      echo "=== Network Stats ==="
+      ss -tuln
+      
+      echo "=== Memory Usage ==="
+      free -h
+      
+      echo "=== SSD Health ==="
+      nvme smart-log /dev/nvme0n1 2>/dev/null || echo "NVMe not available"
+      
+      echo "=== File Descriptor Usage ==="
+      lsof | wc -l
+      echo "Current open files"
+      
+      echo "=== Mount Options ==="
+      mount | grep nvme0n1
+  tags: [monitoring, io, performance]
+
+- name: "Verify data directory permissions for camwatcher"
+  ansible.builtin.file:
+    path: "{{ sentinelcam_data_path | default('/home/ops/sentinelcam') }}"
+    state: directory
+    owner: "{{ sentinelcam_user | default('ops') }}"
+    group: "{{ sentinelcam_group | default('ops') }}"
+    mode: '0755'
+  tags: [permissions, io, performance]

@@ -1,0 +1,234 @@
+---
+# Bootstrap playbook for fresh OS installations
+# Run this after initial SSH access is established but before network deployment
+# NOTE: Only for NEW modern nodes (Ubuntu 22.04+, Debian 12+, RPi OS Bookworm+)
+#       Legacy nodes should NOT be bootstrapped
+#
+# Usage:
+#   ansible-playbook -i inventory/bootstrap.yaml \
+#     playbooks/bootstrap_new_node.yaml \
+#     --extra-vars "target_hostname=north target_ip=192.168.10.23 target_role=outpost"
+
+- name: Bootstrap new SentinelCam node
+  hosts: new_nodes
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # These should be provided via extra-vars or inventory
+    target_hostname: "{{ target_hostname | default(inventory_hostname) }}"
+    target_timezone: "{{ target_timezone | default('America/Chicago') }}"
+    target_locale: "{{ target_locale | default('en_US.UTF-8') }}"
+    target_role: "{{ target_role | default('outpost') }}"
+    
+  pre_tasks:
+    - name: Display bootstrap configuration
+      debug:
+        msg:
+          - "Bootstrapping: {{ target_hostname }}"
+          - "Target Role: {{ target_role }}"
+          - "Timezone: {{ target_timezone }}"
+          - "Locale: {{ target_locale }}"
+    
+  tasks:
+    # System Configuration
+    - name: Set hostname
+      hostname:
+        name: "{{ target_hostname }}"
+        
+    - name: Update /etc/hosts with new hostname
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1'
+        line: "127.0.1.1       {{ target_hostname }}"
+        
+    - name: Set timezone
+      timezone:
+        name: "{{ target_timezone }}"
+        
+    - name: Generate and set locale
+      locale_gen:
+        name: "{{ target_locale }}"
+        state: present
+        
+    # System Updates
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+      register: upgrade_result
+      
+    - name: Display upgrade summary
+      debug:
+        msg: "System packages upgraded. {{ upgrade_result.changed | ternary('Reboot may be required.', 'System up to date.') }}"
+        
+    # Essential Packages
+    - name: Install essential system packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - python3-pip
+          - python3-venv
+          - python3-dev
+          - build-essential
+          - htop
+          - vim
+          - rsync
+          - net-tools
+        state: present
+        
+    # Hardware-specific packages for camera nodes
+    - name: Install camera dependencies (Bookworm+ only)
+      apt:
+        name:
+          - python3-picamera2
+          - libcamera-apps
+        state: present
+      when: 
+        - target_role in ['outpost', 'sentinel']
+        - ansible_distribution_version is version('11', '>=')
+        
+    # User and Group Management
+    - name: Create sentinelcam group
+      group:
+        name: ops
+        state: present
+        
+    - name: Create ops user if not exists
+      user:
+        name: ops
+        shell: /bin/bash
+        home: /home/ops
+        create_home: yes
+        group: ops
+        groups: sudo,gpio,spi,i2c,video,dialout
+        append: yes
+        
+    - name: Set up SSH directory for ops user
+      file:
+        path: /home/ops/.ssh
+        state: directory
+        owner: ops
+        group: ops
+        mode: '0700'
+        
+    - name: Set up SSH keys for ops user
+      authorized_key:
+        user: ops
+        state: present
+        key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub') }}"
+      ignore_errors: yes  # In case key doesn't exist on control node
+        
+    - name: Configure sudoers for ops user
+      lineinfile:
+        path: /etc/sudoers.d/010_ops-nopasswd
+        create: yes
+        line: 'ops ALL=(ALL) NOPASSWD: ALL'
+        mode: '0440'
+        validate: 'visudo -cf %s'
+        
+    # SSH Configuration
+    - name: Enable SSH service
+      systemd:
+        name: ssh
+        enabled: yes
+        state: started
+        
+    - name: Configure SSH for key-based authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        backup: yes
+      loop:
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication yes' }
+        - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+      notify: restart ssh
+        
+    # Legacy User Management (if upgrading from pi user)
+    - name: Check if pi user exists
+      getent:
+        database: passwd
+        key: pi
+      register: pi_user_check
+      ignore_errors: yes
+      
+    - name: Migrate pi user SSH keys to ops if needed
+      shell: |
+        if [ -d /home/pi/.ssh ] && [ -f /home/pi/.ssh/authorized_keys ]; then
+          cp /home/pi/.ssh/authorized_keys /home/ops/.ssh/
+          chown ops:ops /home/ops/.ssh/authorized_keys
+          chmod 600 /home/ops/.ssh/authorized_keys
+        fi
+      when: pi_user_check.failed is false
+      
+    - name: Add warning to pi user (do not disable yet)
+      lineinfile:
+        path: /home/pi/.bashrc
+        line: 'echo "WARNING: This account (pi) is deprecated. Please use ops account instead."'
+        create: yes
+      when: pi_user_check.failed is false
+      ignore_errors: yes
+      
+    # System Configuration Files
+    - name: Set up vim as default editor
+      alternatives:
+        name: editor
+        path: /usr/bin/vim.basic
+      ignore_errors: yes
+      
+    - name: Create base sentinelcam directory structure
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: ops
+        group: ops
+        mode: '0755'
+      loop:
+        - /home/ops/sentinelcam
+        - /home/ops/logs
+      
+  handlers:
+    - name: restart ssh
+      systemd:
+        name: ssh
+        state: restarted
+        
+  post_tasks:
+    - name: Gather updated facts after configuration
+      setup:
+      
+    - name: Display bootstrap completion summary
+      debug:
+        msg:
+          - "=== Bootstrap completed for {{ target_hostname }} ==="
+          - ""
+          - "Configuration Summary:"
+          - "  Hostname: {{ ansible_hostname }}"
+          - "  OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "  Python: {{ ansible_python_version }}"
+          - "  User: ops (with sudo access)"
+          - "  Groups: sudo, gpio, spi, i2c, video, dialout"
+          - ""
+          - "Next Steps:"
+          - "  1. Run static IP configuration playbook:"
+          - "     ansible-playbook -i inventory/bootstrap.yaml playbooks/configure_static_network.yaml \\"
+          - "       --extra-vars 'target_hostname={{ target_hostname }} target_ip={{ target_ip }}'"
+          - ""
+          - "  2. Add node to production inventory (inventory/production.yaml)"
+          - ""
+          - "  3. Deploy services based on role:"
+          - "     - Outpost: playbooks/deploy-outpost-complete.yaml"
+          - "     - Datasink: playbooks/deploy-{camwatcher,datapump,imagehub}.yaml"
+          - "     - AI Processing: playbooks/deploy_sentinel.yaml"
+          - "     - Watchtower: playbooks/deploy_watchtower.yaml"
+          - ""
+          - "For complete guide, see: devops/docs/ADD_NEW_NODE.md"

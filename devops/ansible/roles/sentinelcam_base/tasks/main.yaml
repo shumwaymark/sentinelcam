@@ -1,0 +1,133 @@
+---
+# SentinelCam Base Role - Common provisioning tasks for all SentinelCam nodes
+# This role provides the foundation that all other SentinelCam roles depend on
+
+- name: "Ensure critical variables are defined in role context"
+  ansible.builtin.set_fact:
+    primary_datasink: "{{ primary_datasink }}"
+    sentinelcam_requirements_file: "{{ sentinelcam_requirements_file }}"
+    sentinelcam_venv_opencv: "{{ sentinelcam_venv_opencv }}"
+  tags: always
+
+- name: "Create SentinelCam user group"
+  ansible.builtin.group:
+    name: "{{ sentinelcam_group }}"
+    state: present
+  when: skip_base_provisioning | default(false) == false
+  tags: users
+
+- name: "Ensure SentinelCam user exists"
+  ansible.builtin.user:
+    name: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    shell: /bin/bash
+    create_home: yes
+    state: present
+  when: skip_base_provisioning | default(false) == false
+  tags: users
+
+- name: "Install system dependencies for SentinelCam (modern nodes only)"
+  ansible.builtin.package:
+    name:
+      - python3-picamera2  # Pi Camera support for --system-site-packages (Bookworm+)
+    state: present
+  when: 
+    - skip_base_provisioning | default(false) == false
+    - inventory_hostname in groups['modern_nodes']
+  tags: system_deps
+
+- name: "Create SentinelCam Python virtual environment with system site packages"
+  ansible.builtin.command:
+    cmd: "python3 -m venv --system-site-packages {{ sentinelcam_venv_opencv }}"
+    creates: "{{ sentinelcam_venv_opencv }}/bin/activate"
+  become_user: "{{ sentinelcam_user }}"
+  when: 
+    - skip_base_provisioning | default(false) == false
+    - inventory_hostname in groups['modern_nodes']
+  tags: venv
+
+- name: "Install Python dependencies into virtual environment"
+  block:
+    # For datasinks: install from local repository
+    - name: "Install Python dependencies from local repository (datasinks)"
+      ansible.builtin.pip:
+        requirements: "{{ sentinelcam_requirements_file }}"
+        virtualenv: "{{ sentinelcam_venv_opencv }}"
+        virtualenv_command: "python3 -m venv"
+        state: present
+      become_user: "{{ sentinelcam_user }}"
+      when: inventory_hostname in groups['datasinks']
+      tags: 
+        - python_deps
+        - local_install
+
+    # For other nodes: sync requirements.txt from primary datasink, then install
+    - name: "Sync requirements.txt from primary datasink"
+      ansible.builtin.synchronize:
+        src: "{{ sentinelcam_requirements_file }}"
+        dest: "/tmp/sentinelcam_requirements.txt"
+        rsync_opts:
+          - "--chmod=644"
+      delegate_to: "{{ primary_datasink }}"
+      when: inventory_hostname not in groups['datasinks']
+      tags:
+        - python_deps
+        - remote_install
+
+    - name: "Install Python dependencies from synced requirements (non-datasinks)"
+      ansible.builtin.pip:
+        requirements: "/tmp/sentinelcam_requirements.txt"
+        virtualenv: "{{ sentinelcam_venv_opencv }}"
+        virtualenv_command: "python3 -m venv"
+        state: present
+      become_user: "{{ sentinelcam_user }}"
+      when: inventory_hostname not in groups['datasinks']
+      tags:
+        - python_deps
+        - remote_install
+
+    - name: "Clean up synced requirements file"
+      ansible.builtin.file:
+        path: "/tmp/sentinelcam_requirements.txt"
+        state: absent
+      when: inventory_hostname not in groups['datasinks']
+      tags:
+        - python_deps
+        - cleanup
+
+  when: skip_base_provisioning | default(false) == false
+  tags: python_deps
+
+- name: "Create activation script for SentinelCam environment"
+  ansible.builtin.copy:
+    dest: "/home/{{ sentinelcam_user }}/activate_sentinelcam"
+    mode: '0755'
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    content: |
+      #!/bin/bash
+      # SentinelCam Environment Activation
+      source {{ sentinelcam_venv_opencv }}/bin/activate
+      echo "SentinelCam Python environment activated"
+      echo "Python: $(which python)"
+      echo "Pip: $(which pip)"
+  when: skip_base_provisioning | default(false) == false
+  tags: venv
+
+- name: "Disable unnecessary system services"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop: "{{ disabled_services | default([]) }}"
+  when: 
+    - disabled_services is defined
+    - disabled_services | length > 0
+  failed_when: false  # Don't fail if service doesn't exist
+  tags: optimization
+
+- name: "Include code deployment tasks"
+  ansible.builtin.include_tasks: code_deployment.yaml
+  tags: 
+    - deploy
+    - code_deployment

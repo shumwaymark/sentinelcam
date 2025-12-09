@@ -1,0 +1,58 @@
+---
+# SentinelCam ImageHub Role - Main Tasks
+#
+# Responsibilities:
+# - Directory structure setup
+# - Systemd service file deployment (template)
+# - Configuration file deployment (template)
+#
+# Code deployment is handled by deploy.yaml (included below)
+# Uses watchtower pattern: no duplication between main.yaml and deploy.yaml
+
+- name: "Include deployment tasks"
+  ansible.builtin.include_tasks: deploy.yaml
+  tags:
+    - deploy
+    - deployment
+    - status
+    - health
+
+- name: "Create ImageHub installation directory"
+  ansible.builtin.file:
+    path: "{{ imagehub_install_path }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: directories
+
+- name: "Ensure ImageHub data directory exists"
+  ansible.builtin.file:
+    path: "{{ sentinelcam_directories.imagehub_data }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: directories
+
+- name: "Deploy ImageHub systemd service file"
+  ansible.builtin.template:
+    src: imagehub.service.j2
+    dest: /etc/systemd/system/{{ imagehub_service }}.service
+    mode: '0644'
+    backup: yes
+  notify:
+    - reload systemd
+  tags: service
+
+- name: "Deploy ImageHub configuration file"
+  ansible.builtin.template:
+    src: imagehub.yaml.j2
+    dest: "{{ imagehub_config_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  notify:
+    - restart imagehub
+  tags: config

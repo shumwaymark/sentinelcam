@@ -1,0 +1,90 @@
+---
+# WireGuard VPN Configuration Tasks
+# Handles VPN setup via NetworkManager with delayed startup for reliability
+
+- name: "Debug - Check if vault variables are defined"
+  ansible.builtin.debug:
+    msg:
+      - "vault_wireguard_private_key defined: {{ vault_wireguard_private_key is defined }}"
+      - "vault_wireguard_peer_public_key defined: {{ vault_wireguard_peer_public_key is defined }}"
+      - "vault_wireguard_endpoint defined: {{ vault_wireguard_endpoint is defined }}"
+  tags: [wireguard, debug]
+
+- name: "Install WireGuard tools"
+  ansible.builtin.dnf:
+    name: wireguard-tools
+    state: present
+  tags: [wireguard, packages]
+
+- name: "Create WireGuard configuration directory"
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    mode: '0700'
+  tags: [wireguard]
+
+- name: "Generate WireGuard NetworkManager connection"
+  ansible.builtin.template:
+    src: wg0.nmconnection.j2
+    dest: "/etc/NetworkManager/system-connections/wg0.nmconnection"
+    mode: '0600'
+  notify: reload networkmanager connections
+  tags: [wireguard, networkmanager]
+
+- name: "Create traditional WireGuard config for reference"
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "/etc/wireguard/wg0.conf"
+    mode: '0600'
+    setype: etc_t
+    seuser: system_u
+  tags: [wireguard]
+
+- name: "Ensure wg-quick service is disabled (using NetworkManager instead)"
+  ansible.builtin.systemd:
+    name: wg-quick@wg0
+    enabled: no
+    state: stopped
+  failed_when: false
+  tags: [wireguard]
+
+- name: "Reload NetworkManager connections"
+  ansible.builtin.shell: nmcli connection reload
+  changed_when: false
+  tags: [wireguard]
+
+- name: "Create WireGuard delayed start service"
+  ansible.builtin.template:
+    src: wireguard-delayed-start.service.j2
+    dest: /etc/systemd/system/wireguard-delayed-start.service
+    mode: '0644'
+  notify: 
+    - reload systemd
+    - restart wireguard delayed start
+  tags: [wireguard, startup]
+
+- name: "Create WireGuard delayed start timer"
+  ansible.builtin.template:
+    src: wireguard-delayed-start.timer.j2
+    dest: /etc/systemd/system/wireguard-delayed-start.timer
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart wireguard delayed start timer
+  tags: [wireguard, startup]
+
+- name: "Enable WireGuard delayed start timer"
+  ansible.builtin.systemd:
+    name: wireguard-delayed-start.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: bastion_services.wireguard_delayed_start.enabled
+  tags: [wireguard, startup]
+
+- name: "Create WireGuard management script"
+  ansible.builtin.template:
+    src: manage-wireguard.sh.j2
+    dest: /usr/local/bin/manage-wireguard.sh
+    mode: '0755'
+  tags: [wireguard, scripts]

@@ -1,0 +1,96 @@
+---
+# Site-specific configuration for SentinelCam deployment
+# 
+# This file is loaded automatically by Ansible from group_vars/all/
+# Variables defined here apply to all hosts in the inventory.
+
+# Site identification
+sentinelcam_site_name: chandler
+sentinelcam_site_location: "SWMO Homestead"
+
+# Bastion host identification (used for assertions and checks)
+# This should match the inventory_hostname of your bastion
+sentinelcam_bastion_hostname: chandler-gate
+
+# Primary datasink - authoritative source for code/config distribution
+# This should match the inventory_hostname of your primary datasink
+primary_datasink: data1
+
+# Sentinel node
+sentinelcam_sentinel: sentinel
+
+# ML Training node (Jetson Nano)
+sentinelcam_ml_trainer: deepend
+
+# Primary test/reference hosts for health checks
+# These should be hostnames from your inventory
+sentinelcam_health_check_hosts:
+  internal_network: data1        # Used to verify internal network connectivity
+  dns_test: data1                # Used to test DNS resolution
+
+# VPN/WireGuard health check
+sentinelcam_vpn_gateway: "10.0.0.1"
+
+# Bastion network interface names (hardware-specific)
+# These will vary based on hardware and can be overridden per site
+bastion_interface_external: eth0          # External/WAN interface
+bastion_interface_internal: enp1s0u1u4    # Internal/LAN interface (can be set from inventory)
+
+# ============================================================================
+# OUTPOST REGISTRY - Single source of truth for all outpost nodes at this site
+# ============================================================================
+# This defines the relationship between outposts, their cameras/views, and
+# which datasink processes their data. Used to auto-generate:
+#   - camwatcher.yaml (datasink subscriptions to outposts)
+#   - watchtower.yaml (watchtower connections to outposts + datasink mappings)
+#
+# Each outpost MUST exist in the inventory with matching hostname.
+# The hostname is used to resolve ansible_host for connection URLs.
+#
+# Port assignments use sentinelcam_ports.imagenode_publisher and imagenode_logging
+# defined in group_vars/all/sentinelcam_ports.yaml
+#
+# Architecture notes:
+#   - One outpost can have multiple cameras (P1, P2, etc.)
+#   - Each camera is assigned a viewname (PiCamera, Front, etc.)
+#   - Each view publishes on standard imagenode ports (unless overridden)
+#   - One outpost is processed by exactly ONE datasink (outpost -> datasink is many-to-one)
+#
+sentinelcam_outposts:
+  lab1:
+    datasink: data1           # Which datasink processes this outpost's data
+    cameras:
+      P1:                     # Camera identifier (matches imagenode.yaml cameras: key)
+        viewname: PiCamera    # View name (matches imagenode.yaml viewname:)
+        description: "Lab Workstation Desktop"
+        resolution: [640, 480]
+  
+  east:
+    datasink: data1
+    cameras:
+      P1:
+        viewname: Front
+        description: "Front Driveway"
+        resolution: [640, 360]
+  
+  alpha5:
+    datasink: data1
+    cameras:
+      P1:
+        viewname: PiCam3
+        description: "Raspberry Pi 5 Testbed"
+        resolution: [640, 480]
+
+# ============================================================================
+# WATCHTOWER CONFIGURATIONS - Which outposts each watchtower monitors
+# ============================================================================
+# By default, watchtowers see ALL outposts in the site.
+# Override at host_vars level to limit specific watchtowers to subsets.
+#
+# Example host_vars/wall1.yaml override:
+#   watchtower_monitored_outposts:
+#     - east
+#     - lab1
+#
+# If not overridden, defaults to all outposts in sentinelcam_outposts
+watchtower_monitored_outposts: "{{ sentinelcam_outposts.keys() | list }}"

@@ -1,0 +1,10 @@
+---
+# SentinelCam ImageHub-only Deployment Playbook
+# Use this when you only want to deploy imagehub
+
+- name: Deploy ImageHub to data sinks
+  hosts: datasinks
+  become: yes
+  roles:
+    - sentinelcam_base    # Common base configuration
+    - imagehub

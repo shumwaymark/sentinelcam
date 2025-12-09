@@ -1,0 +1,54 @@
+---
+# Bastion Host Configuration Tasks
+
+- name: "Create backup directory"
+  ansible.builtin.file:
+    path: "{{ bastion_backup.backup_dir }}"
+    state: directory
+    mode: '0700'
+  when: bastion_backup.enabled
+  tags: [bastion, backup]
+
+- name: "Configure sudo timeout if needed"
+  ansible.builtin.include_tasks: sudo_config.yaml
+  when: bastion_sudo_timeout is defined
+  tags: [bastion, sudo]
+
+- name: "Backup existing configuration files"
+  ansible.builtin.include_tasks: backup.yaml
+  when: bastion_backup.enabled
+  tags: [bastion, backup]
+
+- name: "Configure NetworkManager settings"
+  ansible.builtin.include_tasks: networkmanager.yaml
+  tags: [bastion, network, networkmanager]
+
+- name: "Configure network interfaces"
+  ansible.builtin.include_tasks: interfaces.yaml
+  tags: [bastion, network, interfaces]
+
+- name: "Configure WireGuard VPN"
+  ansible.builtin.include_tasks: wireguard.yaml
+  when: vault_wireguard_private_key is defined
+  tags: [bastion, network, wireguard, vpn, secrets]
+
+- name: "Configure DNS and DHCP services"
+  ansible.builtin.include_tasks: dnsmasq.yaml
+  tags: [bastion, dns, dhcp]
+
+- name: "Configure firewall zones and rules"
+  ansible.builtin.include_tasks: firewall.yaml
+  tags: [bastion, firewall]
+
+- name: "Apply network optimizations"
+  ansible.builtin.include_tasks: optimization.yaml
+  tags: [bastion, optimization, performance]
+
+- name: "Configure delayed WireGuard startup"
+  ansible.builtin.include_tasks: delayed_startup.yaml
+  when: vault_wireguard_private_key is defined
+  tags: [bastion, wireguard, startup, secrets]
+
+- name: "Validate configuration"
+  ansible.builtin.include_tasks: validate.yaml
+  tags: [bastion, validate, health]

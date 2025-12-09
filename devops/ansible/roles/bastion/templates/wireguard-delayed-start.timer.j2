@@ -1,0 +1,10 @@
+[Unit]
+Description=WireGuard Delayed Start Timer
+Requires=wireguard-delayed-start.service
+
+[Timer]
+OnBootSec={{ bastion_services.wireguard_delayed_start.delay }}s
+Unit=wireguard-delayed-start.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,40 @@
+---
+# Configure network interfaces via NetworkManager
+
+- name: "Get existing connection names"
+  ansible.builtin.shell: nmcli -t -f NAME,DEVICE connection show
+  register: existing_connections
+  changed_when: false
+
+- name: "Debug existing connections"
+  ansible.builtin.debug:
+    var: existing_connections.stdout_lines
+
+- name: "Configure external interface ({{ bastion_interfaces.external.name }}) for WAN"
+  ansible.builtin.shell: |
+    nmcli connection modify "{{ bastion_interfaces.external.uuid }}" \
+      connection.interface-name {{ bastion_interfaces.external.name }} \
+      ipv4.addresses "{{ bastion_interfaces.external.ip }}" \
+      ipv4.gateway "{{ bastion_interfaces.external.gateway }}" \
+      ipv4.dns "{{ bastion_interfaces.external.dns | join(' ') }}" \
+      ipv4.route-metric 200 \
+      ipv4.method manual \
+      connection.autoconnect yes \
+      connection.zone {{ bastion_interfaces.external.zone }}
+  register: wan_config
+  changed_when: wan_config.rc == 0
+  failed_when: wan_config.rc not in [0, 10]
+  notify: restart networkmanager
+
+- name: "Configure internal interface ({{ bastion_interfaces.internal.name }}) for LAN"
+  ansible.builtin.shell: |
+    nmcli connection modify "{{ bastion_interfaces.internal.uuid }}" \
+      connection.interface-name {{ bastion_interfaces.internal.name }} \
+      ipv4.addresses "{{ bastion_interfaces.internal.ip }}" \
+      ipv4.method manual \
+      connection.autoconnect yes \
+      connection.zone {{ bastion_interfaces.internal.zone }}
+  register: lan_config
+  changed_when: lan_config.rc == 0
+  failed_when: lan_config.rc not in [0, 10]
+  notify: restart networkmanager

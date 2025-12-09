@@ -1,0 +1,113 @@
+---
+# Setup SSH Key Distribution from Primary Data Sink to All Nodes
+#
+# This playbook configures SSH key authentication from the primary data sink
+# (data1) to all target nodes to enable code deployment via rsync delegation.
+#
+# Usage:
+#   ansible-playbook playbooks/setup-ssh-keys.yaml              # All nodes
+#   ansible-playbook playbooks/setup-ssh-keys.yaml --limit sentinels
+#   ansible-playbook playbooks/setup-ssh-keys.yaml --limit new_node
+
+- name: Generate SSH key on primary data sink
+  hosts: primary_datasink
+  gather_facts: true
+  become: false
+  
+  tasks:
+    - name: Ensure SSH directory exists
+      ansible.builtin.file:
+        path: "~/.ssh"
+        state: directory
+        mode: '0700'
+    
+    - name: Generate ed25519 SSH key pair if not exists
+      community.crypto.openssh_keypair:
+        path: "~/.ssh/id_ed25519"
+        type: ed25519
+        comment: "{{ ansible_user }}@{{ inventory_hostname }} - SentinelCam deployment key"
+        state: present
+      register: ssh_key_result
+    
+    - name: Display key generation result
+      ansible.builtin.debug:
+        msg: "{{ 'New SSH key generated' if ssh_key_result.changed else 'Existing SSH key found' }}"
+    
+    - name: Read public key
+      ansible.builtin.slurp:
+        src: "~/.ssh/id_ed25519.pub"
+      register: public_key_content
+    
+    - name: Store public key as fact
+      ansible.builtin.set_fact:
+        datasink_public_key: "{{ public_key_content['content'] | b64decode | trim }}"
+
+- name: Distribute SSH public key to target nodes
+  hosts: sentinelcam_nodes:!primary_datasink
+  gather_facts: false
+  become: false
+  
+  vars:
+    # Get the public key from the datasink host
+    datasink_key: "{{ hostvars[groups['primary_datasink'][0]]['datasink_public_key'] }}"
+  
+  tasks:
+    - name: Display target node info
+      ansible.builtin.debug:
+        msg:
+          - "Target: {{ inventory_hostname }}"
+          - "User: {{ ansible_user }}"
+          - "IP: {{ ansible_host }}"
+    
+    - name: Ensure target .ssh directory exists
+      ansible.builtin.file:
+        path: "~/.ssh"
+        state: directory
+        mode: '0700'
+    
+    - name: Add data sink public key to authorized_keys
+      ansible.builtin.lineinfile:
+        path: "~/.ssh/authorized_keys"
+        line: "{{ datasink_key }}"
+        create: true
+        mode: '0600'
+        state: present
+      register: key_added
+    
+    - name: Report key distribution status
+      ansible.builtin.debug:
+        msg: "{{ 'Key added to authorized_keys' if key_added.changed else 'Key already present in authorized_keys' }}"
+
+- name: Verify SSH connectivity from data sink
+  hosts: primary_datasink
+  gather_facts: false
+  become: false
+  
+  tasks:
+    - name: Test SSH connection to each target node
+      ansible.builtin.command:
+        cmd: "ssh -o StrictHostKeyChecking=no -o BatchMode=yes {{ hostvars[item]['ansible_user'] }}@{{ hostvars[item]['ansible_host'] }} 'echo Success'"
+      loop: "{{ groups['sentinelcam_nodes'] | difference(groups['primary_datasink']) }}"
+      register: ssh_test_results
+      changed_when: false
+      failed_when: false
+    
+    - name: Display connectivity test results
+      ansible.builtin.debug:
+        msg:
+          - "Target: {{ item.item }}"
+          - "User: {{ hostvars[item.item]['ansible_user'] }}"
+          - "Result: {{ 'SUCCESS' if item.rc == 0 else 'FAILED' }}"
+          - "Output: {{ item.stdout if item.rc == 0 else item.stderr }}"
+      loop: "{{ ssh_test_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+    
+    - name: Report overall status
+      ansible.builtin.debug:
+        msg: "{{ ssh_test_results.results | selectattr('rc', 'equalto', 0) | list | length }} of {{ ssh_test_results.results | length }} nodes reachable"
+    
+    - name: Fail if any SSH connections failed
+      ansible.builtin.fail:
+        msg: "SSH connectivity verification failed for some nodes. Check output above."
+      when: ssh_test_results.results | selectattr('rc', 'ne', 0) | list | length > 0

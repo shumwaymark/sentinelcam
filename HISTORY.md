@@ -28,9 +28,6 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
     Incorporate a job history report of statistics and performance metrics as an output. This
     could ultimately fuel a **sentinel** health check, perhaps built to support agency based on 
     self-diagnosis. 
-  - Add priority=3 for background sweep tasks, which should only go on-deck when higher priority 
-    queues are cleared. Limit frequency based on time, i.e. no more often than every five minutes.
-    These should be isolated by job class to a single task engine. 
   - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
     based on the queue length for tasks waiting in that job class.  
 - **datapump** needs data sink storage and data analysis with clean-up and reporting as a nightly 
@@ -45,13 +42,52 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.0-alpha - 2025-12-09
+
+### Added
+
+- *Complete DevOps infrastructure*: Full Ansible-based CI/CD pipeline and configuration management
+  system. A comprehensive automation framework for deployment, configuration, and maintenance of all 
+  system components:
+  
+  - Role-based architecture definitions for all major components including sentinel, imagenode, imagehub, 
+    camwatcher, datapump, watchtower, and supporting infrastructure roles: base provisioning, configuration, 
+    deployment, and management
+  - Centralized configuration management as a single source of truth for paths, standards, ports, and
+    deployment patterns (`sentinelcam_standards.yaml`). Data-driven component deployment with automatic
+    service discovery and registration
+  - Code deployment pipeline as an Rsync-based code distribution from primary datasink to all nodes
+    with integrity checking, service restart coordination, and rollback capability. Automated handling
+    of server provisioning, Python virtual environments and dependencies
+  - Network infrastructure management for SSH key distribution, bastion host integration, static IP
+    configuration, and automated network interface setup across heterogeneous hardware
+    
+- *Model registry and versioned deployment system*: Complete infrastructure for managing ML models
+  as a first-class concern, separate from code deployments:
+  
+  - Centralized model registry on primary datasink with YYYY-MM-DD timestamp versioning
+  - Dedicated deployment playbook (`deploy-models.yaml`) with pre-deployment validation and SHA256
+    checksum verification for model integrity
+  - Configuration-driven rollback capability where models persist on disk while only configs change,
+    enabling instant version switching without redeployment
+  - Automated cleanup via systemd timer with configurable retention policies
+  - Full integration with ML training pipeline including automated model upload, manifest generation, 
+    registry updates, and triggered deployment
+  - Interactive rollback utility script with version history, validation checks, and confirmation prompts
+  - Template-based server configurations with dynamic model version injection and per-host override support
+
+### Fixed
+
+- Addressed missing exception handling in the **watchtower** player daemon subprocess.
+
 ## 0.1.4-alpha - 2025-05-12
 
 ### Fixed
 
-- Added debug logging to the **watchtower**. Tightened the screws on the state machine by
-  implemented message passing between application control and the player subsystem through a 
-  centralized state manager. No further leaks detected.
+- Added debug logging to the **watchtower**.
+- Tightened the screws on the state machine in the **watchtower** by implementing message passing 
+  between application control and the player subsystem through a centralized state manager. No 
+  further leaks detected.
 
 ## 0.1.3-alpha - 2025-04-24
 

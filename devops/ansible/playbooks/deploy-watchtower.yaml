@@ -1,0 +1,34 @@
+---
+# SentinelCam Watchtower Deployment Playbook
+# This playbook deploys the watchtower role to designated nodes
+
+- name: Deploy SentinelCam Watchtower
+  hosts: watchtowers
+  become: yes
+  gather_facts: yes
+  
+  pre_tasks:
+    - name: "Ensure target is a valid watchtower node"
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in groups['watchtowers']
+        fail_msg: "This playbook should only run on watchtower nodes"
+        success_msg: "Target {{ inventory_hostname }} is a valid watchtower node"
+
+  roles:
+    - sentinelcam_base
+    - watchtower
+
+  post_tasks:
+    - name: "Verify watchtower service is running"
+      ansible.builtin.systemd:
+        name: watchtower
+      register: service_status
+      
+    - name: "Display deployment summary"
+      ansible.builtin.debug:
+        msg: |
+          Watchtower deployment completed on {{ inventory_hostname }}
+          Service status: {{ service_status.status.ActiveState }}
+          Configuration: /home/{{ sentinelcam_user }}/watchtower.yaml
+          Log access: journalctl -u watchtower -f

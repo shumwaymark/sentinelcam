@@ -1,0 +1,28 @@
+---
+# Quick Debug Mode Toggle Playbook
+# Enables/disables DEBUG logging across all SentinelCam services
+
+- name: Toggle Debug Mode for SentinelCam Services
+  hosts: "{{ target_hosts | default('datasinks') }}"
+  become: yes
+  vars:
+    # Override this at runtime: -e "enable_debug=true"
+    enable_debug: "{{ enable_debug | default(false) }}"
+    
+  tasks:
+    - name: "Display debug mode status"
+      ansible.builtin.debug:
+        msg: "{{ 'Enabling' if enable_debug else 'Disabling' }} DEBUG logging mode"
+      tags: always
+
+    - name: "Update CamWatcher configuration"
+      ansible.builtin.import_role:
+        name: camwatcher
+        tasks_from: configure
+      tags: camwatcher
+
+    - name: "Update DataPump configuration"
+      ansible.builtin.import_role:
+        name: datapump
+        tasks_from: configure
+      tags: datapump

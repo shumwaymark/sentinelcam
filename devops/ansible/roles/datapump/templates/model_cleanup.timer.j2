@@ -1,0 +1,15 @@
+[Unit]
+Description=SentinelCam Model Registry Cleanup Timer
+Documentation=man:systemd.timer(5)
+Requires=model_cleanup.service
+
+[Timer]
+# Run weekly on Sunday at 3:00 AM
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+
+# Random delay up to 30 minutes to avoid load spikes
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,24 @@
+# Node-specific configuration for lab1 outpost (legacy node)
+---
+# ImageNode configuration using unified template
+imagenode_config:
+  node_name: outpost
+  heartbeat: 10
+  cameras:
+    P1:                          # PiCamera
+      viewname: PiCamera
+      resolution: [640, 480]
+      framerate: 24              # Lower framerate for older hardware
+      vflip: false               # PiCamera-specific
+      threaded_read: false       # PiCamera-specific
+      detector:
+        detectobjects: mobilenetssd
+        accelerator: ncs2        # Intel Neural Compute Stick 2
+        mobilenetssd:
+          target: myriad         # NCS2 OpenVINO target
+          confidence: 0.5
+        sentinel_tasks:
+          person: GetFaces2
+
+# Legacy pi user 
+imagenode_venv_path: "{{ sentinelcam_venv_py3cv4 }}"

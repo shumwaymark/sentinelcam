@@ -1,0 +1,73 @@
+---
+# SentinelCam ImageHub Role - Deployment Tasks
+# NOTE: Code deployment is handled by sentinelcam_base role
+# This file contains imagehub-specific post-deployment tasks
+
+- name: "Set ownership of ImageHub installation directory"
+  ansible.builtin.file:
+    path: "{{ imagehub_install_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    recurse: yes
+  tags: 
+    - deploy
+    - permissions
+
+- name: "Ensure ImageHub service is started and enabled"
+  ansible.builtin.systemd:
+    name: "{{ imagehub_service }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  tags:
+    - service
+    - start
+
+- name: "Check ImageHub service status"
+  ansible.builtin.systemd:
+    name: "{{ imagehub_service }}"
+  register: imagehub_status
+  tags:
+    - status
+    - health
+
+- name: "Display ImageHub deployment status"
+  ansible.builtin.debug:
+    msg:
+      - "Service: {{ imagehub_service | default('imagehub') }}"
+      - "Status: {{ imagehub_status.status.ActiveState | default('not found') }}"
+      - "SubState: {{ imagehub_status.status.SubState | default('not found') }}"
+      - "Enabled: {{ imagehub_status.status.UnitFileState | default('unknown') }}"
+  when: imagehub_status is defined
+  tags:
+    - status
+    - health
+    - always
+
+- name: Wait for imagehub service to be healthy
+  pause:
+    seconds: 10
+  tags:
+    - health
+
+- name: Check imagehub service status
+  systemd:
+    name: "{{ imagehub_service | default('imagehub') }}"
+  register: imagehub_status
+  ignore_errors: true
+  tags:
+    - status
+    - health
+
+- name: Display imagehub service status
+  debug:
+    msg: 
+      - "Service: {{ imagehub_service | default('imagehub') }}"
+      - "Status: {{ imagehub_status.status.ActiveState | default('not found') }}"
+      - "SubState: {{ imagehub_status.status.SubState | default('not found') }}"
+      - "Enabled: {{ imagehub_status.status.UnitFileState | default('unknown') }}"
+  when: imagehub_status is defined
+  tags:
+    - status
+    - health
+    - always

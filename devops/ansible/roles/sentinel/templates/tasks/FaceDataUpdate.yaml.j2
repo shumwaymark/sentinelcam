@@ -1,0 +1,22 @@
+%YAML 1.0
+---
+# FaceDataUpdate.yaml.j2 - Update "facedata" HDF5 file with embeddings for new faces
+# Template for face data update task configuration
+# 
+# Model paths are injected from model_registry.yaml at deployment time.
+# Model versions can be overridden per-host in host_vars using model_version_overrides dict.
+#
+# This task generates updated facedata.hdf5 used for model training.
+# After successful execution, new face_recognition model should be trained.
+
+face_aligner:
+  haarcascade_path: {{ sentinel_models_path }}/haarcascades/{{ model_version_overrides.haarcascades | default(sentinelcam_models.haarcascades.current_version) }}/haarcascade_eye.xml
+  desiredLeftEye: [0.29, 0.27]  # [0.35, 0.35]
+  desiredFaceWidth: 96
+  desiredFaceHeight: 96
+
+face_embeddings:
+  model_path: {{ sentinel_models_path }}/openface_torch/{{ model_version_overrides.openface_torch | default(sentinelcam_models.openface_torch.current_version) }}/openface_nn4.small2.v1.t7
+
+facefile: {{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facelist.csv
+facedata: {{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facedata.hdf5

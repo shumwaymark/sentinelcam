@@ -1,0 +1,121 @@
+---
+# Bastion Host Deployment Playbook
+# Deploys and configures the SentinelCam bastion host
+
+- name: Deploy SentinelCam Bastion Host Configuration
+  hosts: infrastructure
+  become: yes
+  become_method: sudo
+  gather_facts: yes
+  
+  pre_tasks:
+    - name: "Check if vault file exists"
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../group_vars/infrastructure/vault.yaml"
+      register: vault_file
+      delegate_to: localhost
+      become: no
+      tags: [always]
+    
+    - name: "Load vault variables if file exists"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/infrastructure/vault.yaml"
+      when: 
+        - vault_file.stat.exists
+        - "'secrets' not in ansible_skip_tags | default([])"
+      tags: [always]
+      
+    - name: "Check vault variables status"
+      ansible.builtin.debug:
+        msg: |
+          Vault file: {{ 'FOUND' if vault_file.stat.exists else 'NOT FOUND (using vault.yaml.template to create)' }}
+          Secrets skipped: {{ 'YES - WireGuard will not be configured' if 'secrets' in ansible_skip_tags | default([]) else 'NO' }}
+          WireGuard secrets: {{ 'LOADED' if vault_wireguard_private_key is defined else 'MISSING - WireGuard configuration will be skipped' }}
+      tags: [always]
+
+    - name: "Verify we're targeting the bastion host"
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == sentinelcam_bastion_hostname
+          - "'infrastructure' in group_names"
+        fail_msg: "This playbook should only run on the bastion host ({{ sentinelcam_bastion_hostname }}), not {{ inventory_hostname }}"
+        success_msg: "Confirmed running on bastion host: {{ inventory_hostname }} at site {{ sentinelcam_site_name }}"
+      tags: [always]
+
+    - name: "Check current connectivity"
+      ansible.builtin.ping:
+      tags: [always]
+
+  tasks:
+    - name: "Deploy bastion configuration"
+      ansible.builtin.include_role:
+        name: bastion
+      tags: [bastion]
+
+  post_tasks:
+    - name: "Verify services are running"
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - NetworkManager
+        - dnsmasq
+        - firewalld
+      tags: [verify]
+
+    - name: "Test internal network connectivity"
+      ansible.builtin.shell: "ping -c 2 {{ hostvars[sentinelcam_health_check_hosts.internal_network]['ansible_host'] }}"
+      register: ping_result
+      failed_when: false
+      changed_when: false
+      tags: [verify]
+
+    - name: "Display connectivity test result"
+      ansible.builtin.debug:
+        msg: "Internal network test ({{ sentinelcam_health_check_hosts.internal_network }}): {{ 'PASSED' if ping_result.rc == 0 else 'FAILED' }}"
+      tags: [verify]
+
+    - name: "Test DNS resolution"
+      ansible.builtin.shell: "nslookup {{ sentinelcam_health_check_hosts.dns_test }} 127.0.0.1"
+      register: dns_result
+      failed_when: false
+      changed_when: false
+      tags: [verify]
+
+    - name: "Display DNS test result"
+      ansible.builtin.debug:
+        msg: "DNS resolution test: {{ 'PASSED' if dns_result.rc == 0 else 'FAILED' }}"
+      tags: [verify]
+
+    - name: "Check WireGuard status"
+      ansible.builtin.shell: nmcli connection show wg0
+      register: wg_status
+      failed_when: false
+      changed_when: false
+      tags: [verify]
+
+    - name: "Display WireGuard status"
+      ansible.builtin.debug:
+        var: wg_status.stdout_lines
+      when: wg_status.rc == 0
+      tags: [verify]
+
+    - name: "Create deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "===================================="
+          - "Bastion Deployment Summary"
+          - "===================================="
+          - "Host: {{ inventory_hostname }}"
+          - "Date: {{ ansible_date_time.iso8601 }}"
+          - "NetworkManager: {{ 'OK' if ansible_service_mgr == 'systemd' else 'CHECK' }}"
+          - "DNSmasq: {{ 'OK' if ping_result.rc == 0 else 'CHECK' }}"
+          - "DNS Resolution: {{ 'OK' if dns_result.rc == 0 else 'CHECK' }}"
+          - "WireGuard: {{ 'OK' if wg_status.rc == 0 else 'CHECK' }}"
+          - "===================================="
+          - "Manual checks needed:"
+          - "- Internet via VPN: ping 8.8.8.8"
+          - "- WireGuard tunnel: wg show"
+          - "- Firewall zones: firewall-cmd --get-active-zones"
+          - "===================================="
+      tags: [verify, summary]

@@ -1,0 +1,194 @@
+---
+# Playbook to validate outpost registry configuration
+# Tests the data-driven outpost->datasink->watchtower relationships
+
+- name: Validate Outpost Registry Configuration
+  hosts: localhost
+  gather_facts: false
+  tags: [outpost_registry, validation]
+  
+  tasks:
+    - name: Load inventory and group vars
+      ansible.builtin.set_fact:
+        outposts: "{{ groups['outposts'] | default([]) }}"
+        datasinks: "{{ groups['datasinks'] | default([]) }}"
+        watchtowers: "{{ groups['watchtowers'] | default([]) }}"
+    
+    - name: Validate all outposts in registry exist in inventory
+      ansible.builtin.assert:
+        that:
+          - item in outposts
+        fail_msg: "Outpost '{{ item }}' defined in sentinelcam_outposts but not found in inventory outposts group"
+        success_msg: "✓ Outpost '{{ item }}' exists in inventory"
+      loop: "{{ sentinelcam_outposts.keys() | list }}"
+      when: sentinelcam_outposts is defined
+    
+    - name: Validate all datasinks referenced in registry exist in inventory
+      ansible.builtin.assert:
+        that:
+          - sentinelcam_outposts[item].datasink in datasinks
+        fail_msg: "Datasink '{{ sentinelcam_outposts[item].datasink }}' for outpost '{{ item }}' not found in inventory datasinks group"
+        success_msg: "✓ Datasink '{{ sentinelcam_outposts[item].datasink }}' exists for outpost '{{ item }}'"
+      loop: "{{ sentinelcam_outposts.keys() | list }}"
+      when: sentinelcam_outposts is defined
+    
+    - name: Display outpost-to-datasink mappings
+      ansible.builtin.debug:
+        msg: "{{ item }} → {{ sentinelcam_outposts[item].datasink }}"
+      loop: "{{ sentinelcam_outposts.keys() | list }}"
+      when: sentinelcam_outposts is defined
+    
+    - name: Calculate datasink workload distribution
+      ansible.builtin.set_fact:
+        datasink_workload: >-
+          {%- set workload = {} -%}
+          {%- for outpost_name, outpost_config in sentinelcam_outposts.items() -%}
+            {%- set datasink = outpost_config.datasink -%}
+            {%- if datasink not in workload -%}
+              {%- set _ = workload.update({datasink: []}) -%}
+            {%- endif -%}
+            {%- set _ = workload[datasink].append(outpost_name) -%}
+          {%- endfor -%}
+          {{ workload }}
+      when: sentinelcam_outposts is defined
+    
+    - name: Display datasink workload distribution
+      ansible.builtin.debug:
+        msg: "{{ item.key }}: {{ item.value | length }} outposts ({{ item.value | join(', ') }})"
+      loop: "{{ datasink_workload | dict2items }}"
+      when: datasink_workload is defined
+    
+    - name: Check for custom port overrides
+      ansible.builtin.debug:
+        msg: "⚠️  Outpost '{{ item.0 }}' camera '{{ item.1[0] }}' view '{{ item.1[1][0] }}' has custom ports (image: {{ item.1[1][1].image_port | default('standard') }}, logger: {{ item.1[1][1].logger_port | default('standard') }})"
+      loop: "{{ sentinelcam_outposts | dict2items | subelements('value.cameras') | subelements('value') }}"
+      loop_control:
+        label: "{{ item.0 }}.{{ item.1[0] }}.{{ item.1[1][0] }}"
+      when: 
+        - sentinelcam_outposts is defined
+        - item.1[1][1].image_port is defined or item.1[1][1].logger_port is defined
+
+- name: Validate Datasink Configurations
+  hosts: datasinks
+  gather_facts: false
+  tags: [datasink, validation]
+  
+  tasks:
+    - name: Calculate outposts assigned to this datasink
+      ansible.builtin.set_fact:
+        my_outposts: >-
+          {%- set outpost_list = [] -%}
+          {%- for outpost_name, outpost_config in sentinelcam_outposts.items() -%}
+            {%- if outpost_config.datasink == inventory_hostname -%}
+              {%- set _ = outpost_list.append(outpost_name) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ outpost_list }}
+      when: sentinelcam_outposts is defined
+    
+    - name: Display datasink subscriptions
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} subscribes to: {{ my_outposts | join(', ') }}"
+      when: my_outposts is defined
+    
+    - name: Validate datasink has at least one outpost
+      ansible.builtin.assert:
+        that:
+          - my_outposts | length > 0
+        fail_msg: "Datasink '{{ inventory_hostname }}' has no outposts assigned"
+        success_msg: "✓ Datasink '{{ inventory_hostname }}' has {{ my_outposts | length }} outpost(s)"
+      when: my_outposts is defined
+
+- name: Validate Watchtower Configurations
+  hosts: watchtowers
+  gather_facts: false
+  tags: [watchtower, validation]
+  
+  tasks:
+    - name: Display monitored outposts for this watchtower
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} monitors: {{ watchtower_monitored_outposts | join(', ') }}"
+      when: watchtower_monitored_outposts is defined
+    
+    - name: Validate all monitored outposts exist in registry
+      ansible.builtin.assert:
+        that:
+          - item in sentinelcam_outposts.keys()
+        fail_msg: "Watchtower '{{ inventory_hostname }}' monitors '{{ item }}' which is not in sentinelcam_outposts registry"
+        success_msg: "✓ Monitored outpost '{{ item }}' exists in registry"
+      loop: "{{ watchtower_monitored_outposts }}"
+      when: 
+        - watchtower_monitored_outposts is defined
+        - sentinelcam_outposts is defined
+    
+    - name: Calculate unique datasinks needed by this watchtower
+      ansible.builtin.set_fact:
+        required_datasinks: >-
+          {%- set datasink_list = [] -%}
+          {%- for outpost_name in watchtower_monitored_outposts -%}
+            {%- if outpost_name in sentinelcam_outposts -%}
+              {%- set datasink = sentinelcam_outposts[outpost_name].datasink -%}
+              {%- if datasink not in datasink_list -%}
+                {%- set _ = datasink_list.append(datasink) -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ datasink_list }}
+      when: 
+        - watchtower_monitored_outposts is defined
+        - sentinelcam_outposts is defined
+    
+    - name: Display datasink connections for this watchtower
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} will connect to datasinks: {{ required_datasinks | join(', ') }}"
+      when: required_datasinks is defined
+    
+    - name: Count views available to this watchtower
+      ansible.builtin.set_fact:
+        view_count: >-
+          {%- set count = 0 -%}
+          {%- for outpost_name in watchtower_monitored_outposts -%}
+            {%- if outpost_name in sentinelcam_outposts -%}
+              {%- for camera_id, camera_config in sentinelcam_outposts[outpost_name].cameras.items() -%}
+                {%- set count = count + camera_config.keys() | length -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ count }}
+      when:
+        - watchtower_monitored_outposts is defined
+        - sentinelcam_outposts is defined
+    
+    - name: Display view count
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} will display {{ view_count }} view(s)"
+      when: view_count is defined
+
+- name: Generate Configuration Preview
+  hosts: datasinks,watchtowers
+  gather_facts: false
+  tags: [preview]
+  
+  tasks:
+    - name: Preview camwatcher.yaml (datasinks only)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/camwatcher/templates/camwatcher.yaml.j2"
+        dest: "/tmp/{{ inventory_hostname }}-camwatcher-preview.yaml"
+      when: inventory_hostname in groups['datasinks']
+    
+    - name: Preview watchtower.yaml (watchtowers only)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/watchtower/templates/watchtower.yaml.j2"
+        dest: "/tmp/{{ inventory_hostname }}-watchtower-preview.yaml"
+      when: inventory_hostname in groups['watchtowers']
+    
+    - name: Fetch preview files
+      ansible.builtin.fetch:
+        src: "/tmp/{{ inventory_hostname }}-{{ item }}-preview.yaml"
+        dest: "{{ playbook_dir }}/../../preview/{{ inventory_hostname }}-{{ item }}.yaml"
+        flat: yes
+      loop:
+        - camwatcher
+        - watchtower
+      when: inventory_hostname in groups['datasinks'] or inventory_hostname in groups['watchtowers']
+      ignore_errors: true

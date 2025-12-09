@@ -1,0 +1,53 @@
+---
+# Network optimization and system tuning for bastion host
+
+- name: "Remove bad sysctl entries from config file"
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.conf
+    regexp: 'net.ipv4.netfilter.ip_conntrack_tcp_timeout_established'
+    state: absent
+
+- name: "Enable IP forwarding"
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: no
+
+- name: "Configure connection tracking"
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: yes
+    reload: no
+  loop:
+    - { name: 'net.netfilter.nf_conntrack_max', value: '65536' }
+    - { name: 'net.netfilter.nf_conntrack_tcp_timeout_established', value: '7200' }
+  failed_when: false
+
+- name: "Optimize network buffer sizes"
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: yes
+    reload: no
+  loop:
+    - { name: 'net.core.rmem_max', value: '134217728' }
+    - { name: 'net.core.wmem_max', value: '134217728' }
+    - { name: 'net.ipv4.tcp_rmem', value: '4096 87380 67108864' }
+    - { name: 'net.ipv4.tcp_wmem', value: '4096 65536 67108864' }
+
+- name: "Disable IPv6 if not needed"
+  sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: present
+    sysctl_set: yes
+    reload: yes
+  loop:
+    - net.ipv6.conf.all.disable_ipv6
+    - net.ipv6.conf.default.disable_ipv6
+  when: bastion_disable_ipv6 | default(false) == true

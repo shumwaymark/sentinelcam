@@ -1,0 +1,26 @@
+---
+# Sudo timeout configuration task
+# Extends sudo timeout to handle longer Ansible runs
+
+- name: "Check current sudo timeout"
+  ansible.builtin.shell: sudo -V | grep timeout
+  register: sudo_timeout_check
+  failed_when: false
+  changed_when: false
+  tags: [sudo, config]
+
+- name: "Configure extended sudo timeout for Ansible"
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    line: "Defaults timestamp_timeout=60"
+    regexp: "^Defaults.*timestamp_timeout"
+    backup: yes
+    validate: visudo -cf %s
+  when: bastion_sudo_timeout is defined
+  tags: [sudo, config]
+
+- name: "Display current sudo configuration"
+  ansible.builtin.debug:
+    var: sudo_timeout_check.stdout_lines
+  when: sudo_timeout_check is defined
+  tags: [sudo, info]

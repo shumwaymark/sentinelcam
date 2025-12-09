@@ -1,0 +1,73 @@
+---
+# SentinelCam DataPump Role - Deployment Tasks
+# NOTE: Code deployment is handled by sentinelcam_base role
+# This file contains datapump-specific post-deployment tasks
+
+- name: "Set ownership of DataPump installation directory"
+  ansible.builtin.file:
+    path: "{{ datapump_install_path }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    recurse: yes
+  tags: 
+    - deploy
+    - permissions
+
+- name: "Ensure DataPump service is started and enabled"
+  ansible.builtin.systemd:
+    name: "{{ datapump_service }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  tags:
+    - service
+    - start
+
+- name: "Check DataPump service status"
+  ansible.builtin.systemd:
+    name: "{{ datapump_service }}"
+  register: datapump_status
+  tags:
+    - status
+    - health
+
+- name: "Display DataPump deployment status"
+  ansible.builtin.debug:
+    msg:
+      - "Service: {{ datapump_service | default('datapump') }}"
+      - "Status: {{ datapump_status.status.ActiveState | default('not found') }}"
+      - "SubState: {{ datapump_status.status.SubState | default('not found') }}"
+      - "Enabled: {{ datapump_status.status.UnitFileState | default('unknown') }}"
+  when: datapump_status is defined
+  tags:
+    - status
+    - health
+    - always
+
+- name: Wait for datapump service to be healthy
+  pause:
+    seconds: 10
+  tags:
+    - health
+
+- name: Check datapump service status
+  systemd:
+    name: "{{ datapump_service | default('datapump') }}"
+  register: datapump_status
+  ignore_errors: true
+  tags:
+    - status
+    - health
+
+- name: Display datapump service status
+  debug:
+    msg: 
+      - "Service: {{ datapump_service | default('datapump') }}"
+      - "Status: {{ datapump_status.status.ActiveState | default('not found') }}"
+      - "SubState: {{ datapump_status.status.SubState | default('not found') }}"
+      - "Enabled: {{ datapump_status.status.UnitFileState | default('unknown') }}"
+  when: datapump_status is defined
+  tags:
+    - status
+    - health
+    - always

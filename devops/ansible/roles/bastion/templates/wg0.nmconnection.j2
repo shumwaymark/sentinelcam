@@ -1,0 +1,32 @@
+# WireGuard NetworkManager connection configuration
+# Simple configuration with delayed startup via systemd timer
+
+[connection]
+id={{ bastion_wireguard.interface }}
+uuid={{ bastion_interfaces.external.uuid | default('62a1dd42-825c-45a0-8cd3-30b5c0af26ae') }}
+type=wireguard
+autoconnect=no
+interface-name={{ bastion_wireguard.interface }}
+timestamp={{ ansible_date_time.epoch }}
+zone={{ bastion_firewall.zones.vpn.name }}
+
+[wireguard]
+private-key={{ vault_wireguard_private_key }}
+
+[wireguard-peer.{{ vault_wireguard_peer_public_key }}]
+endpoint={{ vault_wireguard_endpoint }}:{{ vault_wireguard_port }}
+persistent-keepalive={{ bastion_wireguard.peer.persistent_keepalive }}
+allowed-ips={{ bastion_wireguard.peer.allowed_ips | replace(',', ';') }}
+
+[ipv4]
+address1={{ bastion_wireguard.address_ipv4 }}
+method=manual
+never-default=false
+
+[ipv6]
+addr-gen-mode=default
+address1={{ bastion_wireguard.address_ipv6 }}
+method=manual
+never-default=false
+
+[proxy]
