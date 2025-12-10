@@ -11,9 +11,8 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 - Continue refinements to `Outpost` implementation. 
   - Modernize object detector capabilities with support for newer algorithms, hardware.
-  - Implement filtering mechanism based on object detection results.
-  - Begin designing support for a model deployment framework that can be used
-    to support custom lenses as another layer beneath object detection.
+  - Support a hybrid model selection framework for supplemental edge inference based on 
+    object detection results.
 - Support multiple result sets from both `Outpost` event management, and from running 
   **sentinel** tasks. Needed to support the capture of multiple neural nets producing 
   results in parallel from a single event or task. 
@@ -78,7 +77,8 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
-- Addressed missing exception handling in the **watchtower** player daemon subprocess.
+- Addressed missing exception handling in the **watchtower** player daemon subprocess, along with stable
+  coordination with the state machine.
 
 ## 0.1.4-alpha - 2025-05-12
 

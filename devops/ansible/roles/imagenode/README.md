@@ -282,9 +282,7 @@ ssh <outpost> 'sudo journalctl -u imagenode -f'
 - `status` - Check service status
 - `health` - Run health checks
 
-## See Also
+## References
 
-- Main ansible README: `devops/ansible/README.md`
-- ImageNode documentation: `imagenode/README.rst`
-- CamWatcher role: `roles/camwatcher/README.md`
-- Sentinel role: `roles/sentinel/README.md` (AI processing)
+- [Baseline Documentation](../../../../imagenode/README.rst)
+- [Modifications for SentinelCam](../../../../docs/YingYangRanch_Changes.rst)

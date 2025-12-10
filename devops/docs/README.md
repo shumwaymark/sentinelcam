@@ -4,16 +4,16 @@
 
 ---
 
-## 📚 Documentation Structure
+## Documentation Structure
 
-### 🚀 [Getting Started](./getting-started/)
+### [Getting Started](./getting-started/)
 
 **New to SentinelCam or Ansible?** Start here.
 
 - **[Ansible Beginner Guide](./getting-started/ANSIBLE_BEGINNER_GUIDE.md)** - Learn Ansible basics and safe practice techniques
 - **[Adding a New Node](./getting-started/ADD_NEW_NODE.md)** - Step-by-step guide to provision a new Raspberry Pi node
 
-### 🚢 [Deployment](./deployment/)
+### [Deployment](./deployment/)
 
 **Ready to deploy?** Component deployment guides and workflows.
 
@@ -24,7 +24,7 @@
   - Watchtower monitoring
   - Role README cross-references
 
-### ⚙️ [Configuration](./configuration/)
+### [Configuration](./configuration/)
 
 **Configure your deployment** for single or multi-site operation.
 
@@ -34,14 +34,14 @@
 - **[Multi-Site Deployment](./configuration/MULTI_SITE_DEPLOYMENT.md)** - Deploy to multiple physical sites
 - **[Jetson Nano Setup](./configuration/JETSON_NANO_SETUP.md)** - Configure Jetson Nano for ML training (deepthink node)
 
-### 🌐 [Network](./network/)
+### [Network](./network/)
 
 **Network design and IP addressing** for isolated network operation.
 
 - **[Network Addressing Standard](./network/NETWORK_ADDRESSING_STANDARD.md)** - Network architecture principles and design
 - **[Network Addressing Plan](./network/NETWORK_ADDRESSING_PLAN.md)** - Current IP assignments and network map
 
-### 🔧 [Operations](./operations/)
+### [Operations](./operations/)
 
 **Day-to-day operations** and troubleshooting.
 
@@ -50,7 +50,7 @@
 
 ---
 
-## 🎯 Quick Navigation by Task
+## Quick Navigation by Task
 
 ### First Time Setup
 1. Read [Ansible Beginner Guide](./getting-started/ANSIBLE_BEGINNER_GUIDE.md)
@@ -79,7 +79,7 @@
 
 ---
 
-## 📖 Role-Specific Documentation
+## Role-Specific Documentation
 
 Detailed component deployment documentation is maintained in role READMEs:
 
@@ -96,7 +96,7 @@ Detailed component deployment documentation is maintained in role READMEs:
 
 ---
 
-## 🔗 Additional Resources
+## Additional Resources
 
 ### In This Repository
 - **[DevOps Overview](../README.rst)** - CI/CD pipeline architecture and philosophy
@@ -115,28 +115,14 @@ Detailed component deployment documentation is maintained in role READMEs:
 
 ---
 
-## 📋 Documentation Maintenance
+## Documentation Maintenance
 
 **Last Updated:** December 7, 2025  
 **Status:** Current (12 documents across 5 folders)
 
-### Documentation Standards
-- All docs use Markdown format
-- Role-specific details belong in role READMEs
-- Cross-reference related documents
-- Keep examples current with actual implementation
-- Update dates when content changes
-
-### Contributing
-When adding new documentation:
-1. Place in appropriate subfolder
-2. Update this index with link and description
-3. Cross-reference from related documents
-4. Follow existing formatting patterns
-
 ---
 
-## 🆘 Need Help?
+## Need Help?
 
 **Can't find what you're looking for?**
 

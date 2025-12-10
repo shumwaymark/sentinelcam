@@ -2,12 +2,13 @@
 
 ## Overview
 
-The prototype **DeepThink ML Training Pipeline** automates the training, validation, and deployment of machine learning models 
-for facial recognition tasks across the SentinelCam distributed system. Model training runs on a **Jetson Nano** (embedded ARM64 
-device) to maintain the philosophy of running exclusively on low-power embedded infrastructure.
+The prototype **ML Training Pipeline** automates the training, validation, and deployment of machine
+learning models for facial recognition functionality across the SentinelCam distributed system. Model 
+training runs on a **Jetson Nano** (embedded ARM64 device) to maintain the philosophy of running 
+exclusively on low-power embedded infrastructure.
 
-Once proven, this becomes the foundation for future model development and the scaffolding for other bespoke model
-training and retraining. For example, vehicle recognition. 
+Once proven, this becomes the foundation for future model development and the scaffolding for bespoke 
+model training and retraining. For example, vehicle recognition. 
 
 ## Architecture
 
@@ -24,15 +25,16 @@ training and retraining. For example, vehicle recognition.
    - **Sentinel**: Generates `facedata.hdf5` (OpenFace embeddings)
 
 3. **Deployment Targets**
-   - **Sentinels**: Receive `facemodel_*.pickle` and `baselines_*.hdf5`
+   - **Sentinels**: Receive `facemodel.pickle` and `baselines.hdf5` modeling outputs
    - **Datasinks**: Receive updated `facelist.csv` (for event retention)
-   - **Outposts**: Receive model-specific files (e.g., vehicle detection)
+   - **Outposts**: Receive models as specified (e.g., facial-recognition, vehicle recognition)
 
 ## Face Recognition Pipeline
 
 ### Data Collection
 
 
+## Sentinel Task Chain
 
 
 ### Model Training Data Flow

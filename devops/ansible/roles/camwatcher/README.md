@@ -22,7 +22,8 @@ CamWatcher configuration is **auto-generated** from the `sentinelcam_outposts` r
 
 **Example**: If data1 is the datasink, camwatcher.yaml will include all outposts with `datasink: data1`.
 
-See `devops/ansible/OUTPOST_REGISTRY_PATTERN.md` for complete documentation.
+See - [devops/docs/configuration/OUTPOST_REGISTRY_PATTERN.md](../../../docs/configuration/OUTPOST_REGISTRY_PATTERN.md)
+for complete documentation.
 
 ### Port Configuration (group_vars/all/sentinelcam_ports.yaml)
 

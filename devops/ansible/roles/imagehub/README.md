@@ -182,4 +182,3 @@ Consider implementing image rotation/archival policies.
 
 - [ImageHub GitHub Repository](https://github.com/jeffbass/imagehub)
 - [ImageZMQ Documentation](https://github.com/jeffbass/imagezmq)
-- Main application code: `imagehub/imagehub/`

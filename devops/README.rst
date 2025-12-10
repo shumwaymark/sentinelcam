@@ -224,6 +224,5 @@ Further Reading
 ===============
 
 - `Ansible Deployment Guide <ansible/README.md>`_ - Playbooks, roles, and inventory
-- `Model Registry Implementation <docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md>`_ - ML model versioning and deployment
-- `ML Training Pipeline <docs/operations/ML_TRAINING_PIPELINE.md>`_ - DeepThink training workflow
 - `DevOps Documentation Index <docs/README.md>`_ - Detailed documentation references
+- `ML Training Pipeline <docs/operations/ML_TRAINING_PIPELINE.md>`_ - DeepThink training workflow
