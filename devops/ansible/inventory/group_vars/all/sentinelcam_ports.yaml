@@ -29,7 +29,7 @@ sentinelcam_ports:
 
 # Port Usage Summary (for reference):
 # 5555 - ImageHub REQ/REP (data sinks only)
-# 5556 - DataPump control (data sinks only)
-# 5565 - Event/log publishers (sentinel, imagenode outposts)
-# 5566 - Control interfaces (camwatcher on data sinks and also sentinels)
-# 5567 - Image publishers (imagenode outposts)
+# 5556 - DataPump REQ/REP (data sinks only)
+# 5565 - Log publishers PUB/SUB (sentinel, imagenode outposts)
+# 5566 - Control interfaces REQ/REP (camwatcher on data sinks and also sentinels)
+# 5567 - Image publishers PUB/SUB (imagenode outposts)

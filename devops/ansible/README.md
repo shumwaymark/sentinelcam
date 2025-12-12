@@ -1,6 +1,6 @@
 # SentinelCam Ansible Deployment
 
-Ansible automation for deploying and managing SentinelCam distributed camera surveillance infrastructure.
+Ansible automation for SentinelCam software deployment, server configuration, and management on distributed infrastructure.
 
 ## Quick Start
 
@@ -21,33 +21,33 @@ ansible-playbook playbooks/deploy-<service>.yaml --tags deploy
 ### Service Roles
 
 - **sentinelcam_base** - Base provisioning for all nodes (users, Python venv, system packages)
-- **camwatcher** - Event monitoring and image capture coordination (datasinks)
-- **datapump** - Data retrieval and storage management (datasinks)
-- **imagehub** - ZeroMQ image aggregation hub (datasinks)
-- **imagenode** - Camera capture and publishing (outposts)
+- **camwatcher** - Subscriber for outpost event logging and image capture publication (datasinks)
+- **datapump** - Data retrieval engine, and storage management (datasinks)
+- **imagehub** - Aggregation hub for imagenode requests with data/image payload (datasinks)
+- **imagenode** - Camera image and event publishing (outposts)
 - **sentinel** - AI processing and inference tasks (sentinels)
-- **watchtower** - System monitoring and health checks (watchtowers)
+- **watchtower** - Wall console, outpost and event viewer (watchtowers)
 - **bastion** - Network gateway, VPN, DNS, firewall (infrastructure - manual only)
 
 ### Infrastructure Groups
 
 ```yaml
-outposts:        # Camera nodes running imagenode
-  - lab1         # Legacy pi user
-  - east         # Modern ops user
-  - alpha5       # Modern ops user
+outposts:        # Outpost camera nodes running imagenode
+  - lab1
+  - east
+  - alpha5
 
 datasinks:       # Data retrieval running camwatcher/datapump/imagehub
-  - data1        # Modern ops user
+  - data1
 
 sentinels:       # ML pipeline and model inference running sentinel
-  - sentinel     # Legacy pi user
+  - sentinel
 
-watchtowers:     # Monitoring running watchtower
-  - wall1        # Legacy pi user
+watchtowers:     # Wall console touch screen displays running watchtower
+  - wall1
 
 infrastructure:  # Network services (manual deployment only)
-  - chandler-gate  # Rocky Linux, rocky user
+  - chandler-gate
 ```
 
 ## Deployment Patterns
@@ -57,23 +57,23 @@ infrastructure:  # Network services (manual deployment only)
 Single playbook per service, use tags to control scope:
 
 ```bash
-# Full setup (initial deployment, config changes, service updates)
+# Full setup (initial provisioning, code deployment, configuration, service definitions)
 ansible-playbook playbooks/deploy-<service>.yaml
 
 # Code only (most common - just application code changes)
 ansible-playbook playbooks/deploy-<service>.yaml --tags deploy
 
-# Config only (just configuration file changes)
-ansible-playbook playbooks/deploy-<service>.yaml --tags config
+# Configuration change only (this example limited to a specific node)
+ansible-playbook playbooks/deploy-<service>.yaml --tags config --limit <hostname>
 ```
 
 ### Available Playbooks
 
 ```bash
 # Data sink services
-playbooks/deploy-camwatcher.yaml      # Event monitoring
-playbooks/deploy-datapump.yaml        # Data management
-playbooks/deploy-imagehub.yaml        # Image aggregation
+playbooks/deploy-camwatcher.yaml      # Output subscriber
+playbooks/deploy-datapump.yaml        # DataFeed request servicing
+playbooks/deploy-imagehub.yaml        # Image/sensor aggregation
 
 # Outpost services
 playbooks/deploy-outpost.yaml         # ImageNode deployment
@@ -81,8 +81,8 @@ playbooks/deploy-outpost.yaml         # ImageNode deployment
 # AI and ML processing
 playbooks/deploy-sentinel.yaml        # Inference tasks
 
-# Monitoring
-playbooks/deploy-watchtower.yaml      # Health checks
+# Wall consoles
+playbooks/deploy-watchtower.yaml      # Live viewer and event replay
 
 # Infrastructure (manual only)
 playbooks/deploy-bastion.yaml --ask-vault-pass  # Network/VPN/DNS/firewall
@@ -95,6 +95,7 @@ playbooks/deploy-bastion.yaml --ask-vault-pass  # Network/VPN/DNS/firewall
 Configuration is loaded in this order (later overrides earlier):
 
 1. `inventory/group_vars/all/` - Global defaults (CANONICAL)
+   - `model_registry.yaml` - Model repository version selections
    - `sentinelcam_ports.yaml` - Service port definitions
    - `sentinelcam_standards.yaml` - Paths, Python configs, code deployment
    - `site.yaml` - Site-specific settings
@@ -109,196 +110,41 @@ Configuration is loaded in this order (later overrides earlier):
 ansible/
   inventory/
     production.yaml                  # Node inventory (IPs, users, groups)
-    group_vars/                      # Must be in inventory/ for file-based inventory
+    group_vars/
       all/
+        model_registry.yaml          # Selections for model versions to be deployed
         sentinelcam_ports.yaml       # Port assignments (CANONICAL)
         sentinelcam_standards.yaml   # System-wide standards
         site.yaml                    # Site settings
       datasinks.yaml                 # Data sink nodes top-level configuration
       legacy_nodes.yaml              # Legacy nodes (pi user) overrides
-    host_vars/                       # Must be in inventory/ for file-based inventory
+    host_vars/
       <hostname>.yaml                # Per-node configuration (camera type, etc.)
-```
-
-### Port Assignments
-
-Defined in `group_vars/all/sentinelcam_ports.yaml`:
-
-```yaml
-sentinelcam_ports:
-  imagehub_zmq: 5555              # ImageHub ZeroMQ PUB
-  datapump_control: 5556          # DataPump TCP control
-  imagenode_logging: 5565         # ImageNode log publishing
-  camwatcher_control: 5566        # CamWatcher TCP control
-  sentinel_control: 5566          # Sentinel TCP control
-  imagenode_publisher: 5567       # ImageNode image publishing
-```
-
-## Development Workflow
-
-### 1. Local Development (Development Workstation running Windows/Linux/macOS)
-
-```bash
-# Edit code in repository
-code sentinelcam/
-
-# Stage changes to data1 (current_deployment/)
-python devops/scripts/sync/deploy.py <service>
-# Examples:
-python devops/scripts/sync/deploy.py camwatcher
-python devops/scripts/sync/deploy.py imagenode
-python devops/scripts/sync/deploy.py sentinel
-```
-
-### 2. Deploy to Production (from the ramrod node)
-
-```bash
-# SSH to ramrod control node, then
-cd ~/sentinelcam/devops/ansible
-
-# Code-only deployment (fast, most common)
-ansible-playbook playbooks/deploy-<service>.yaml --tags deploy
-
-# Full deployment (config + code)
-ansible-playbook playbooks/deploy-<service>.yaml
-
-# Limit to specific node
-ansible-playbook playbooks/deploy-<service>.yaml --limit <hostname>
-```
-
-### 3. Verification
-
-```bash
-# Check service status
-ssh <target_node> 'sudo systemctl status <service>'
-
-# View logs
-ssh <target_node> 'sudo journalctl -u <service> -f'
 ```
 
 ## Role Documentation
 
 Each role has detailed documentation in its directory:
 
-- `roles/sentinelcam_base/README.md` - Base provisioning
-- `roles/camwatcher/README.md` - Event monitoring
-- `roles/datapump/README.md` - Data management
-- `roles/imagehub/README.md` - Image aggregation
-- `roles/imagenode/README.md` - Camera capture (includes model deployment)
-- `roles/sentinel/README.md` - AI inference (includes model deployment)
-- `roles/watchtower/README.md` - System monitoring
-- `roles/bastion/README.md` - Network infrastructure
+- [`roles/sentinelcam_base/README.md`](../ansible/roles/sentinelcam_base/README.md) - Base provisioning
+- [`roles/camwatcher/README.md`](../ansible/roles/camwatcher/README.md) - Event monitoring
+- [`roles/datapump/README.md`](../ansible/roles/datapump/README.md) - Data management
+- [`roles/imagehub/README.md`](../ansible/roles/imagehub/README.md) - Image aggregation
+- [`roles/imagenode/README.md`](../ansible/roles/imagenode/README.md) - Camera capture (includes model deployment)
+- [`roles/sentinel/README.md`](../ansible/roles/sentinel/README.md) - AI inference (includes model deployment)
+- [`roles/watchtower/README.md`](../ansible/roles/watchtower/README.md) - System monitoring
+- [`roles/bastion/README.md`](../ansible/roles/bastion/README.md) - Network infrastructure
 
-## Common Tasks
+## Further Reading
 
-### Deploy Code Changes
+- [Code deployment pattern](../docs/configuration/CODE_DEPLOYMENT_PATTERN.md)
+- [Outpost registry pattern](../docs/configuration/OUTPOST_REGISTRY_PATTERN.md)
+- [Packaged based code deployment tool](../scripts/sync/README.md)
+- [Automated CI/CD code deployment pipeline](../README.rst)
 
-```bash
-# From development workstation
-python devops/scripts/sync/deploy.py camwatcher
+### Troubleshooting
 
-# From ramrod control node
-ansible-playbook playbooks/deploy-camwatcher.yaml --tags deploy
-```
-
-### Update Configuration
-
-```bash
-# Edit inventory/host_vars/<hostname>.yaml or inventory/group_vars
-# Then deploy with config tag
-ansible-playbook playbooks/deploy-outpost.yaml --tags config --limit alpha5
-```
-
-### New Outpost Setup
-
-```bash
-# 1. Add to inventory/production.yaml
-# 2. Create inventory/host_vars/<hostname>.yaml
-# 3. Deploy
-ansible-playbook playbooks/deploy-outpost.yaml --limit <new_node>
-```
-
-### Restart Services
-
-```bash
-# Via Ansible
-ansible <group> -m systemd -a "name=<service> state=restarted" --become
-
-# Direct SSH
-ssh <node> 'sudo systemctl restart <service>'
-```
-
-## Troubleshooting
-
-### Undefined Variable Errors
-
-Check variable precedence - ensure variables are defined in `inventory/group_vars/all/` (canonical source for ports and standards).
-
-### Permission Denied
-
-Verify `ansible_user` in inventory matches actual user on target node:
-- Modern nodes (east, alpha5, data1): `ops` user
-- Legacy nodes (lab1, sentinel, wall1): `pi` user
-
-### Service Won't Start
-
-```bash
-# Check service status
-ssh <node> 'sudo systemctl status <service>'
-
-# View detailed logs
-ssh <node> 'sudo journalctl -u <service> -n 100'
-
-# Validate config file
-ssh <node> 'python3 -c "import yaml; yaml.safe_load(open(\"/home/<user>/<service>.yaml\"))"'
-```
-
-### Code Not Deploying
-
-Verify staging area on data1:
-```bash
-ssh data1 'ls -la /home/ops/sentinelcam/current_deployment/<service>/'
-```
-
-If missing, run `python devops/scripts/sync/deploy.py <service>` from development workstation.
-
-## Infrastructure Notes
-
-### User Migration
-
-System is transitioning from `pi` to `ops` user:
-- **Complete**: east, alpha5, data1
-- **Pending**: lab1, sentinel, wall1
-
-Ansible handles this automatically via `ansible_user` in inventory.
-
-### Code Deployment Flow
-
-```
-Development workstation (repository)
-  ↓ deploy.py script
-data1:/home/ops/sentinelcam/current_deployment/  (staging)
-  ↓ sentinelcam_base role (--tags deploy)
-Target node:/home/<ansible_user>/<service>/  (production)
-```
-
-### Network Architecture
-
-- Internal network: 192.168.10.0/24
-- Gateway/DNS: chandler-gate (192.168.10.254)
-- Control node: buzz (192.168.10.10)
-- ZeroMQ pub/sub messaging for image distribution
-- TCP control ports for service coordination
-
-## Contributing
-
-When adding new services:
-
-1. Create role in `roles/<service>/`
-2. Add playbook to `playbooks/deploy-<service>.yaml`
-3. Define ports in `inventory/group_vars/all/sentinelcam_ports.yaml`
-4. Add node config to `inventory/host_vars/<hostname>.yaml`
-5. Document in `roles/<service>/README.md`
+For comprehensive troubleshooting guidance, see the [SentinelCam Troubleshooting Guide](../docs/troubleshooting/SENTINELCAM_TROUBLESHOOTING_GUIDE.md).
 
 ## License
 
