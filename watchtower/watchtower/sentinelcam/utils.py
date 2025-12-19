@@ -78,7 +78,7 @@ class ImageSubscriber(imagezmq.ImageHub):
                 try:
                     self.connect(self.publisher)
                     self._stop = False
-                    logging.info(f"Connected to publisher {self.publisher}")
+                    logging.debug(f"Connected to publisher {self.publisher}")
                     
                     while not self._stop:
                         if self.msg_waiting():
