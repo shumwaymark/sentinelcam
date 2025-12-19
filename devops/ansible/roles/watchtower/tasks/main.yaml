@@ -36,18 +36,6 @@
     mode: '0755'
   tags: directories
 
-- name: "Ensure Watchtower parent directories exist"
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: "{{ sentinelcam_user }}"
-    group: "{{ sentinelcam_group }}"
-    mode: '0755'
-  loop:
-    - "/home/{{ sentinelcam_user }}/watchtower"
-    - "{{ sentinelcam_venv_path }}"
-  tags: directories
-
 - name: "Deploy Watchtower systemd service file"
   ansible.builtin.template:
     src: watchtower.service.j2

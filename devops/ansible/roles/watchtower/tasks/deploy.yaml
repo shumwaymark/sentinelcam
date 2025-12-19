@@ -6,8 +6,8 @@
 - name: "Set ownership of Watchtower installation directory"
   ansible.builtin.file:
     path: "{{ watchtower_install_path }}"
-    owner: "{{ watchtower_user }}"
-    group: "{{ watchtower_group }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
     recurse: yes
   tags: 
     - deploy

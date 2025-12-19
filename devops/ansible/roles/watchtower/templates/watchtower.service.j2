@@ -14,7 +14,7 @@ WorkingDirectory={{ watchtower_install_path }}/watchtower
 Environment=DISPLAY={{ watchtower_display }}
 Restart=always
 RestartSec=5
-ExecStart={{ sentinelcam_venv_path }}/bin/python -u {{ watchtower_install_path }}/watchtower/watchtower.py
+ExecStart={{ sentinelcam_venv_opencv }}/bin/python -u {{ watchtower_install_path }}/watchtower/watchtower.py
 
 [Install]
 WantedBy=graphical.target

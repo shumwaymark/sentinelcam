@@ -56,6 +56,7 @@
       - "--exclude=.git"
       - "--exclude=*.swp"
       - "--exclude=models/"
+      - "--exclude=sockets/"
     owner: yes
     group: yes
   delegate_to: "{{ inventory_hostname }}"  # Run locally on the data sink
@@ -83,6 +84,7 @@
       - "--exclude=.git"
       - "--exclude=*.swp"
       - "--exclude=models/"
+      - "--exclude=sockets/"
     owner: yes
     group: yes
   delegate_to: "{{ primary_datasink }}"  # Run FROM the primary data sink
