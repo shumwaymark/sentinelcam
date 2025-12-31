@@ -1,7 +1,7 @@
-# Settings file imagenode.yaml -- sentinalcam settings version 7, with OAK-1 integration  
+# Settings file imagenode.yaml -- sentinalcam settings version 7, with OAK-1 integration
 ---
 node:
-  name: east 
+  name: east
   heartbeat: 15
   REP_watcher: False                 # Not recommended for sentinelcam
   queuemax: 50
@@ -11,7 +11,7 @@ node:
 hub_address:
   H1: tcp://data1:5555
 cameras:
-  O1:                                    # OAK-1 camera 
+  O1:                                    # OAK-1 camera
      viewname: Front
      resolution: (640, 360)
      framerate: 30
@@ -20,7 +20,7 @@ cameras:
             encoder: oak                  # encoding workload for image publisher [cpu, oak]
             publish_cam: 5567             # ZMQ port for image frame publishing
             publish_log: 5565             # ZMQ port for log publishing, must match logconfig below
-            logconfig:                    # logging configuration dictionary 
+            logconfig:                    # logging configuration dictionary
                 version: 1
                 handlers:
                     zmq:
@@ -38,9 +38,10 @@ cameras:
             tracker: none                 # [none, dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
             depthai:
                pipeline: MobileNetSSD     # dictionary key to configured pipelines in oak_camera.py module
-               images: frames             # queue name for image messages from camera 
-               jpegs: jpegs               # queue name for JPEG encoding messages from OAK camera 
+               model: /home/ops/imagenode/models/depthai/mobilenet-ssd_openvino_2021.4_6shave.blob  # path to OpenVINO blob
+               images: frames             # queue name for image messages from camera
+               jpegs: jpegs               # queue name for JPEG encoding messages from OAK camera
                neural_nets:
                   Q1:  nn                 # queue for neural net results
-            sentinel_tasks: 
+            sentinel_tasks:
                person: GetFaces2          # sentinel task submission for "person" detections

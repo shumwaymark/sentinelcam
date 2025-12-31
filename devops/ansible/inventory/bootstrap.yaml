@@ -10,22 +10,22 @@ all:
       hosts:
         # Add the temporary DHCP IP of the new node here
         new_node:
-          ansible_host: 192.168.10.100  # Replace with actual DHCP IP
-          ansible_user: ops  # or pi for initial connection
-          target_hostname: lab1  # The intended final hostname
-          target_ip: 192.168.10.20  # The intended final static IP
+          ansible_host: 192.168.10.220  # Replace with actual DHCP IP
+          ansible_user: ops  # for initial connection
+          target_hostname: lab2  # The intended final hostname
+          target_ip: 192.168.10.27  # The intended final static IP
           target_role: outpost  # outpost, datasink, sentinel, watchtower
           interface: eth0
-          
+
         # Example for additional nodes:
         # new_sentinel:
-        #   ansible_host: 192.168.10.101
+        #   ansible_host: 192.168.10.203
         #   ansible_user: ops
-        #   target_hostname: sentinel
-        #   target_ip: 192.168.10.60
+        #   target_hostname: sentinel2
+        #   target_ip: 192.168.10.61
         #   target_role: sentinel
         #   interface: eth0
-          
+
   vars:
     # Network configuration for final static IP setup
     subnet: 192.168.10.0/24
@@ -34,8 +34,8 @@ all:
     dns_servers:
       - 192.168.10.254
       - 8.8.8.8
-      
+
     # Default settings for all new nodes
     target_timezone: America/Chicago
     target_locale: en_US.UTF-8
-    network_manager: dhcpcd  # or systemd-networkd for modern nodes
+    network_manager: systemd-networkd

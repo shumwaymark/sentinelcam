@@ -65,6 +65,10 @@
         name: systemd-networkd
         enabled: yes
 
+    - name: Set hostname
+      hostname:
+        name: "{{ target_hostname }}"
+
     - name: Update /etc/hosts with static IP
       lineinfile:
         path: /etc/hosts

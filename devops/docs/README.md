@@ -46,7 +46,6 @@
 **Day-to-day operations** and troubleshooting.
 
 - **[Validation Checklist](./operations/VALIDATION_CHECKLIST.md)** - Pre-deployment validation steps
-- **[ML Training Pipeline](./operations/ML_TRAINING_PIPELINE.md)** - Machine learning model training and deployment workflow
 
 ---
 

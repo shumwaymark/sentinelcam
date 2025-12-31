@@ -41,6 +41,13 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.2-alpha - 2025-12-31
+
+### Added
+
+- Move DepthAI model file name into application configuration, and incorporate into the model
+  registry and devops playbooks.
+
 ## 0.2.1-alpha - 2025-12-30
 
 ### Added

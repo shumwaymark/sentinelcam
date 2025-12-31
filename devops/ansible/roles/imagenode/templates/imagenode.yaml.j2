@@ -51,6 +51,7 @@ cameras:
 {% if camera.detector.depthai is defined %}
             depthai:
                pipeline: {{ camera.detector.depthai.pipeline }}
+               model: {{ mobilenet_depthai_model }}
                images: {{ camera.detector.depthai.images }}
                jpegs: {{ camera.detector.depthai.jpegs }}
                neural_nets:

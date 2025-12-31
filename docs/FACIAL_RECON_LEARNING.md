@@ -1,4 +1,4 @@
-# Machine Learning Training Pipeline
+# Facial Recognition Training and Machine Learning Pipeline
 
 ## Overview
 

@@ -656,8 +656,9 @@ Additional documentation
 ========================
 - `Version History and Changelog <HISTORY.md>`_
 - `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
-- `ML Training Pipeline <devops/docs/operations/ML_TRAINING_PIPELINE.md>`_
-- `Ansible Deployment Guide <devops/ansible/README.md>`_
+- `Facial Recognition Training and Machine Learning Pipeline <docs/FACIAL_RECON_LEARNING.md>`_
+- `Ansible Operations Guide <devops/ansible/README.md>`_
+- `Edge Deployment CI/CD Pipeline <devops/README.rst>`_
 - `Development blog <https://blog.swanriver.dev>`_
 
 Technology foundation
@@ -688,6 +689,7 @@ technologies and libraries.
 - papermill
 - MessagePack
 - OpenFace
+- Ansible
 - Dlib
 
 Acknowledgements

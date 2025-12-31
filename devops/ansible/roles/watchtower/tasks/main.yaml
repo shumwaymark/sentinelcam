@@ -9,15 +9,6 @@
     - status
     - health
 
-- name: "Create Watchtower user if it doesn't exist"
-  ansible.builtin.user:
-    name: "{{ sentinelcam_user }}"
-    group: "{{ sentinelcam_group }}"
-    home: "/home/{{ sentinelcam_user }}"
-    shell: /bin/bash
-    create_home: yes
-  tags: users
-
 - name: "Create Watchtower installation directory"
   ansible.builtin.file:
     path: "{{ watchtower_install_path }}"

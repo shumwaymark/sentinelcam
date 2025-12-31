@@ -9,23 +9,6 @@
     sentinelcam_venv_opencv: "{{ sentinelcam_venv_opencv }}"
   tags: always
 
-- name: "Create SentinelCam user group"
-  ansible.builtin.group:
-    name: "{{ sentinelcam_group }}"
-    state: present
-  when: skip_base_provisioning | default(false) == false
-  tags: users
-
-- name: "Ensure SentinelCam user exists"
-  ansible.builtin.user:
-    name: "{{ sentinelcam_user }}"
-    group: "{{ sentinelcam_group }}"
-    shell: /bin/bash
-    create_home: yes
-    state: present
-  when: skip_base_provisioning | default(false) == false
-  tags: users
-
 - name: "Install system dependencies for SentinelCam (modern nodes only)"
   ansible.builtin.package:
     name:

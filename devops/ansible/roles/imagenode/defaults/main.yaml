@@ -67,9 +67,12 @@ model_version_overrides: {}
 # These variables construct paths referencing the current model version
 # and are injected into imagenode.yaml.j2 template
 mobilenet_base_path: "{{ imagenode_models_path }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}"
+mobilenet_depthai_path: "{{ imagenode_models_path }}/mobilenet_ssd_depthai/{{ model_version_overrides.mobilenet_ssd_depthai | default(sentinelcam_models.mobilenet_ssd_depthai.current_version) }}"
 mobilenet_edgetpu_path: "{{ imagenode_models_path }}/mobilenet_ssd_edgetpu/{{ model_version_overrides.mobilenet_ssd_edgetpu | default(sentinelcam_models.mobilenet_ssd_edgetpu.current_version) }}"
+# MobileNetSSD model files
 mobilenet_prototxt: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.prototxt"
 mobilenet_model: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.caffemodel"
+mobilenet_depthai_model: "{{ mobilenet_depthai_path }}/mobilenet-ssd_openvino_2021.4_6shave.blob"
 mobilenet_edgetpu_model: "{{ mobilenet_edgetpu_path }}/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"
 mobilenet_edgetpu_labels: "{{ mobilenet_edgetpu_path }}/coco_labels.txt"
 mobilenet_confidence: 0.5

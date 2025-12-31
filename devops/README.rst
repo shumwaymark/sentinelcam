@@ -5,16 +5,16 @@ SentinelCam: Development Operations and CI/CD Pipeline
 Philosophy
 ==========
 
-The design for SentinelCam operations, and code transmission pipeline, speaks to the need for an isolated network development 
-workflow which can integrate with, and bolster, automated day to day operations on embedded infrastructure in production. 
-Ansible was selected as the deployment automation tool due to its lightweight nature, SSH-based operation, and minimal resource 
+The design for SentinelCam operations, and code transmission pipeline, speaks to the need for an isolated network development
+workflow which can integrate with, and bolster, automated day to day operations on embedded infrastructure in production.
+Ansible was selected as the deployment automation tool due to its lightweight nature, SSH-based operation, and minimal resource
 footprint on constrained single-board computers (SBCs) such as the Raspberry Pi.
 
 Deployment is testing
 ----------------------
-In traditional software development, testing precedes deployment. However, in resource-constrained environments with specialized 
-hardware, deployment *becomes* the primary testing mechanism. SentinelCam operates on single-board computers performing real-time 
-vision processing and model inference in an isolated network. These conditions cannot be fully replicated in development 
+In traditional software development, testing precedes deployment. However, in resource-constrained environments with specialized
+hardware, deployment *becomes* the primary testing mechanism. SentinelCam operates on single-board computers performing real-time
+vision processing and model inference in an isolated network. These conditions cannot be fully replicated in development
 environments.
 
 **Testing through deployment means:**
@@ -25,11 +25,11 @@ environments.
 - **Resource constraints**: Genuine memory pressure, CPU limitations, and storage constraints
 - **System integration**: Services interact with actual systemd, network interfaces, and file systems
 
-The deployment pipeline provides **rollback safety** rather than pre-deployment test gates, recognizing that the only meaningful 
+The deployment pipeline provides **rollback safety** rather than pre-deployment test gates, recognizing that the only meaningful
 test is whether the system operates correctly in production. This approach prioritizes:
 
 1. **Rapid iteration**: Deploy changes quickly to real hardware
-2. **Observable behavior**: Monitor actual system operation  
+2. **Observable behavior**: Monitor actual system operation
 3. **Safe experimentation**: Automatic rollback checkpoints before every deployment
 4. **Reality-based validation**: Human observation of real system behavior
 
@@ -50,11 +50,11 @@ The SentinelCam deployment pipeline consists of four primary infrastructure comp
 
 Development Workstation
 -----------------------
-The development workstation is where SentinelCam code is authored and initially packaged for deployment. This could be a Windows, 
+The development workstation is where SentinelCam code is authored and initially packaged for deployment. This could be a Windows,
 macOS, or Linux laptop, or a virtual machine, which would typically run an IDE such as Visual Studio Code and publish via Git.
 
-**deploy.py** is the main script used to create a deployment package and send it to the bastion host. A YAML based configuration 
-file defines the structure and content of individual packages. Multiple components can be specified via command line arguments 
+**deploy.py** is the main script used to create a deployment package and send it to the bastion host. A YAML based configuration
+file defines the structure and content of individual packages. Multiple components can be specified via command line arguments
 which are then combined into a single package for transfer.
 
 **Key Features:**
@@ -67,8 +67,8 @@ which are then combined into a single package for transfer.
 - Automatically triggers downstream pipeline steps upon successful transfer
 
 **Filesystem structure:**
-  
-.. code-block:: 
+
+.. code-block::
 
   sentinelcam/
   ├── imagenode/
@@ -80,7 +80,7 @@ which are then combined into a single package for transfer.
   │   └── scripts/
   │       └── sync/
   │           ├── deploy.py                # Create deployment package and send to bastion
-  │           └── deployment-config.yaml               
+  │           └── deployment-config.yaml
   ├── docs/
   ├── modeling/
   ├── imagehub/
@@ -88,15 +88,15 @@ which are then combined into a single package for transfer.
 
 Bastion Host
 ------------
-The bastion host serves as a secure intermediary between the outside world and the internal network. It receives deployment packages from 
+The bastion host serves as a secure intermediary between the outside world and the internal network. It receives deployment packages from
 the development workstation and temporarily stores them before transferring to the primary data sink.
 
 - **Role**: Temporary staging for deployment packages
 - **Storage**: Small cache for active transfers
 - **Security**: SSH-based access control, provides isolation of production network
 
-**process-code-upload.sh** is the main script that runs on the bastion host to handle incoming deployment packages. It validates the integrity of received packages, 
-stores them in a transfer cache, and forwards them to the primary data sink. This is triggered automatically by the **deploy.py** script on the development 
+**process-code-upload.sh** is the main script that runs on the bastion host to handle incoming deployment packages. It validates the integrity of received packages,
+stores them in a transfer cache, and forwards them to the primary data sink. This is triggered automatically by the **deploy.py** script on the development
 workstation upon successful package upload.
 
 **Key Functions:**
@@ -109,12 +109,12 @@ workstation upon successful package upload.
 - Triggers execution of the **integrate-code-update.sh** script on the primary data sink
 - Automatically cleans up processed packages
 
-The bastion host acts as a security boundary, ensuring that only validated deployment packages enter the internal network. It prevents direct access to 
+The bastion host acts as a security boundary, ensuring that only validated deployment packages enter the internal network. It prevents direct access to
 production systems from external development environments.
 
 **Filesystem structure:**
-  
-.. code-block:: 
+
+.. code-block::
 
   /home/rocky/
   ├── transfer_cache/
@@ -127,19 +127,19 @@ production systems from external development environments.
 Primary Data Sink
 -----------------
 Most sentinelcam nodes have minimal local storage, hosting an entire operating system on only a microSD card. The data sinks, however, are equipped with
-large-capacity solid state disk (SSD) drives to serve as centralized repositories for images, collected data, and logfiles. The primary data sink (data1) 
+large-capacity solid state disk (SSD) drives to serve as centralized repositories for images, collected data, and logfiles. The primary data sink (data1)
 also functions as the authoritative source repository for all SentinelCam code and deployment artifacts.
 
-Deployment packages arriving from the bastion host are integrated into the data sink's repository structure. The data sink maintains a history of previous 
-deployment packages to facilitate rollback if needed. The data sink also hosts master copies of the complete DevOps toolchain, including Ansible playbooks 
+Deployment packages arriving from the bastion host are integrated into the data sink's repository structure. The data sink maintains a history of previous
+deployment packages to facilitate rollback if needed. The data sink also hosts master copies of the complete DevOps toolchain, including Ansible playbooks
 and support scripts.
 
-**integrate-code-update.sh** is the main script that runs on the primary data sink to process incoming deployment packages. It validates and integrates new packages 
-into the repository, preserving previous packages for rollback safety. Upon successful integration, it notifies the ramrod node to initiate deployment to target nodes. 
+**integrate-code-update.sh** is the main script that runs on the primary data sink to process incoming deployment packages. It validates and integrates new packages
+into the repository, preserving previous packages for rollback safety. Upon successful integration, it notifies the ramrod node to initiate deployment to target nodes.
 
 **Filesystem structure:**
-  
-.. code-block:: 
+
+.. code-block::
 
   /home/ops/
   ├── camwatcher/                      # Currently running camwatcher and datapump services
@@ -149,7 +149,7 @@ into the repository, preserving previous packages for rollback safety. Upon succ
   │   └── imagehub/
   ├── sentinelcam/                     # SSD mount point
   │   ├── backups/                     # Backup snapshots of previous source and devops repositories
-  │   ├── current_deployment/          # Repository for currently deployed source code 
+  │   ├── current_deployment/          # Repository for currently deployed source code
   │   │   ├── imagenode/
   │   │   ├── imagehub/
   │   │   ├── camwatcher/
@@ -164,17 +164,17 @@ into the repository, preserving previous packages for rollback safety. Upon succ
   │   ├── logs/                        # System and deployment logging
   │   ├── camwatcher/                  # Collected CSV data from camwatcher and sentinel
   │   ├── images/                      # Collected JPEG data from camwatcher
-  │   └── imagehub/                    # Data store for imagehub and librarian 
+  │   └── imagehub/                    # Data store for imagehub and librarian
   │       ├── images/
   │       └── logs/
   └── scripts/
       └── integrate-code-update.sh     # Integrate new package into current deployment
-  
+
 The ramrod control node
 -----------------------
-The ramrod node orchestrates Ansible deployments to all target nodes in the network and drives SentinelCam operations. 
-The latest copy of the DevOps toolchain from the primary data sink is pulled via SSH when deployment is initiated. 
-The ramrod node maintains a synchronized mirror of the `devops/` directory structure but does not permanently store source code. 
+The ramrod node orchestrates Ansible deployments to all target nodes in the network and drives SentinelCam operations.
+The latest copy of the DevOps toolchain from the primary data sink is pulled via SSH when deployment is initiated.
+The ramrod node maintains a synchronized mirror of the `devops/` directory structure but does not permanently store source code.
 It pulls fresh copies of this during each deployment cycle to ensure consistency with the authoritative repository on data1.
 
 **Key Functions:**
@@ -189,8 +189,8 @@ It pulls fresh copies of this during each deployment cycle to ensure consistency
 - **Storage**: Lightweight, pulls configuration from data1 via SSH only when deploying
 
 **Filesystem structure:**
-  
-.. code-block:: 
+
+.. code-block::
 
   /home/pi/
   └── sentinelcam/
@@ -225,4 +225,3 @@ Further Reading
 
 - `Ansible Deployment Guide <ansible/README.md>`_ - Playbooks, roles, and inventory
 - `DevOps Documentation Index <docs/README.md>`_ - Detailed documentation references
-- `ML Training Pipeline <docs/operations/ML_TRAINING_PIPELINE.md>`_ - DeepThink training workflow

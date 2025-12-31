@@ -1,5 +1,10 @@
 # Node-specific configuration for east outpost
 ---
+
+# Model selection for DepthAI co-processor without SpyGlass support
+outpost_models:
+  - mobilenet_ssd_depthai
+
 # ImageNode configuration using unified template
 imagenode_config:
   node_name: east
@@ -10,13 +15,13 @@ imagenode_config:
       framerate: 30
       detector:
         encoder: oak             # oak | cpu (JPEG encoding location)
-        detectobjects: none      # Spyglass not used with DepthAI
+        detectobjects: none      # SpyGlass not needed with DepthAI
         accelerator: none
         depthai:                 # DepthAI-specific config
           pipeline: MobileNetSSD
           images: frames         # Image queue name
-          jpegs: jpegs          # JPEG queue name
+          jpegs: jpegs           # JPEG queue name
           neural_nets:
-            Q1: nn              # Neural network output queue
+            Q1: nn               # Neural network output queue
         sentinel_tasks:
           person: GetFaces2

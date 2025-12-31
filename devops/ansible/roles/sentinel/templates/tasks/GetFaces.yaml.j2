@@ -11,7 +11,7 @@ all_frames: False         # restrict face detection to images with 'person' dete
 camwatcher_update: True
 
 face_detection:
-    confidence: 0.1
+    confidence: 0.15
     # OpenCV DNN
     prototxt_path: {{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/deploy.prototxt
     model_path: {{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/res10_300x300_ssd_iter_140000.caffemodel
