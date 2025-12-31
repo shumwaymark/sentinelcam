@@ -58,7 +58,7 @@ class MobileNetSSD_allFrames(Task):
 
 class GetFaces(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
-        self.fd = FaceDetector(cfg['dnn_face'], accelerator)
+        self.fd = FaceDetector(cfg['face_detection'], accelerator)
         self.cwUpd = cfg['camwatcher_update']
         self.refkey = cfg['trk_type']
         self.allFrames = cfg['all_frames']
