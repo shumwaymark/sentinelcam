@@ -1,4 +1,4 @@
-"""taskfactory: Defines task requests for the sentinel 
+"""taskfactory: Defines task requests for the sentinel
 
 Copyright (c) 2023 by Mark K Shumway, mark.shumway@swanriver.dev
 License: MIT, see the sentinelcam LICENSE for more details.
@@ -7,7 +7,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 import cv2
 import h5py
 import numpy as np
-import pandas as pd 
+import pandas as pd
 import pickle
 import time
 import imutils
@@ -31,14 +31,14 @@ class Task:
         return []
     def publish(self, msg, imageLogRef=None, cwUpd=False) -> None:
         pass
-    # Function prototypes, define these for task logic 
+    # Function prototypes, define these for task logic
     def pipeline(self, frame) -> bool:
-        # Return True to reiterate with the next frame 
+        # Return True to reiterate with the next frame
         # Return False to shutdown the pipeline and task
-        return False 
+        return False
     def finalize(self) -> bool:
         # Optional, for implementing end of task finalization logic.
-        # Return False to cancel any chained task. 
+        # Return False to cancel any chained task.
         return True
 
 class MobileNetSSD_allFrames(Task):
@@ -54,7 +54,7 @@ class MobileNetSSD_allFrames(Task):
             for i, objs in enumerate(detections):
                 result = (objs[0], i, int(objs[1][0]), int(objs[1][1]), int(objs[1][2]), int(objs[1][3]))
                 self.publish(result, self.refkey, self.cwUpd)
-        return True  # process every frame 
+        return True  # process every frame
 
 class GetFaces(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -69,7 +69,7 @@ class GetFaces(Task):
         if len(self.persons.index) > 0:
             # When processing a subset of frames, define a couple of iterators
             # to align image and tracking references within the event.
-            self.cursor = iter(self.persons[:].itertuples()) 
+            self.cursor = iter(self.persons[:].itertuples())
             self.frames = iter(self.imgs)
             self.trkRec = next(self.cursor)
             self.frametime = next(self.frames)
@@ -78,17 +78,19 @@ class GetFaces(Task):
         self.face_cnt = 0
         self._search_cnt = 0
 
-    def _publish_face_rects(self, faces) -> None:
+    def _publish_face_rects(self, faces, labels) -> None:
         if len(faces) > 0:
             for i, face in enumerate(faces):
                 result = ("Face", i, int(face[0]), int(face[1]), int(face[2]), int(face[3]))
+                if not self.cwUpd:
+                    result = result + tuple((x for x in labels[i].split(' ', 1)[1:]))  # append detailed label info if not updating camwatcher
                 self.publish(result, self.refkey, self.cwUpd)
                 self.face_cnt += 1
 
     def pipeline(self, frame) -> bool:
         if self.allFrames:
-            faces = self.fd.detect(frame)
-            if len(faces) > 0: self._publish_face_rects(faces)
+            (faces, labels) = self.fd.detect(frame)
+            if len(faces) > 0: self._publish_face_rects(faces, labels)
             self._search_cnt += 1
         else:
             if not self.cursor:
@@ -103,7 +105,7 @@ class GetFaces(Task):
                         image = self.getRing()[bucket]
                         try:
                             while self.frametime < self.trkRec.timestamp:
-                                self.frametime = next(self.frames) 
+                                self.frametime = next(self.frames)
                         except StopIteration:
                             return False   # Reached last image, end the task
                     else:
@@ -111,12 +113,12 @@ class GetFaces(Task):
                 search_not_completed = True
                 try:
                     while self.trkRec.timestamp <= self.frametime:
-                        # There could be multiple persons detected in the image, so will have a 
+                        # There could be multiple persons detected in the image, so will have a
                         # tracking record for each. Once face detection has executed for this frame,
                         # continue iterating through the tracker until next timestamp found.
                         if search_not_completed:
-                            faces = self.fd.detect(image)  # finds every face in the image
-                            if len(faces) > 0: self._publish_face_rects(faces)
+                            (faces, labels) = self.fd.detect(image)  # finds every face in the image
+                            if len(faces) > 0: self._publish_face_rects(faces, labels)
                             search_not_completed = False
                             self._search_cnt += 1
                         self.trkRec = next(self.cursor)
@@ -125,7 +127,7 @@ class GetFaces(Task):
                 except StopIteration:
                     return False      # Reached last detected person, end the task.
         return True
-    
+
     def finalize(self) -> bool:
         results = ('Faces', self.event_date, self.event_id, len(self.imgs), len(self.persons.index), self._search_cnt, self.face_cnt)
         self.publish(results)
@@ -152,7 +154,7 @@ class FaceRecon(Task):
         self.event_date = jobreq.eventDate
         if self.facecnt > 0:
             self.trkRec = next(self.trkrecs)
-            self.frametime = self.trkRec.timestamp 
+            self.frametime = self.trkRec.timestamp
         else:
             self.frametime = None
 
@@ -163,14 +165,14 @@ class FaceRecon(Task):
             if x1<0:x1=0
             if y1<0:y1=0
             face = frame[y1:y2, x1:x2]
-            if len(face) == 0: return True 
+            if len(face) == 0: return True
             if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
             facemarks = self.fa.landmarks(face)
             candidate = self.fa.assess(facemarks)
             if candidate:
                 validate = self.fa.align(face, facemarks)
             else:
-                validate = face  
+                validate = face
             v = validate.shape
             embeddings = self.fe.detect(validate, (0,0,v[1],v[0]))
             # perform classification to recognize the face
@@ -202,8 +204,8 @@ class FaceRecon(Task):
                             name, j = 'Unknown', self.unk
                     else:
                         name, j = self.labels.classes_[k], k
-            if margin < 0.05:  
-                # TODO: Parameterize (or improve) this. Always consider these as possible candidates 
+            if margin < 0.05:
+                # TODO: Parameterize (or improve) this. Always consider these as possible candidates
                 # for inclusion in recognition model, since distance within fudge factor over threshold?
                 candidate = True
             flag = 1 if candidate else 0
@@ -216,10 +218,10 @@ class FaceRecon(Task):
             try:
                 self.trkRec = next(self.trkrecs)
             except StopIteration:
-                return False 
-        self.frametime = self.trkRec.timestamp 
+                return False
+        self.frametime = self.trkRec.timestamp
         return True
-    
+
     def finalize(self) -> True:
         namelist = [self.labels.classes_[n] for n in range(len(self.labels.classes_))]
         namelist.append('Unknown')
@@ -238,7 +240,7 @@ class FaceSweep(Task):
         self.fa = FaceAligner(cfg["face_aligner"])
 
     def pipeline(self, frame) -> False:  # runs once
-        # Sweep for new candidates 
+        # Sweep for new candidates
         fldlist = ['date','event','timestamp','objid','source','status','name','proba','dist','margin',
                     'x1','y1','x2','y2','rx','ry','lx','ly','dx','dy','angle','focus']
         facerec = namedtuple('facerec', fldlist)
@@ -249,7 +251,7 @@ class FaceSweep(Task):
         cwIndx = self.feed.get_date_index(self.taskDate)
         # TODO: protect existing selections from being inadvertently over-written with new/duplicated data.
         # Probably OK to permit this if not included in the subset with non-zero status flags. But should first
-        # remove any exsiting content already held for that event. 
+        # remove any exsiting content already held for that event.
         for sweepchk in cwIndx.loc[cwIndx['type'] == self.ref_type].itertuples():
             try:
                 trkdata = facestats.df_apply(self.feed.get_tracking_data(self.taskDate, sweepchk.event, self.ref_type))
@@ -262,12 +264,12 @@ class FaceSweep(Task):
                 if len(targets.index) > 0:
                     for consider in targets[:].itertuples():
                         image = cv2.imdecode(np.frombuffer(
-                            self.feed.get_image_jpg(self.taskDate, sweepchk.event, consider.timestamp), 
+                            self.feed.get_image_jpg(self.taskDate, sweepchk.event, consider.timestamp),
                             dtype='uint8'), -1)
                         x1, y1, x2, y2 = consider.rect_x1, consider.rect_y1, consider.rect_x2, consider.rect_y2
                         if x1<0:x1=0
                         if y1<0:y1=0
-                        face = image[y1:y2, x1:x2]                    
+                        face = image[y1:y2, x1:x2]
                         if len(face) > 0:
                             hash = dhash(face)
                             if hash != prev_hash:
@@ -300,10 +302,10 @@ class FaceSweep(Task):
                                 if keytest not in refkeys:
                                     self.facelist.add_rows(pd.DataFrame(r.values(), index=fldlist).T)
                                     new_faces += 1
-                            prev_hash = hash 
+                            prev_hash = hash
             except DataFeed.TrackingSetEmpty:
                 pass
-        # Should always push any updates back to data sink. SFTP? 
+        # Should always push any updates back to data sink. SFTP?
         if new_faces:
             self.facelist.commit()
             self.publish(f'FaceSweep: {new_faces} face candidates added from {self.taskDate}.')
@@ -326,11 +328,11 @@ class FaceDataUpdate(Task):
             with h5py.File(self.facedata, 'a') as hdf5:
                 for r in updates[:].itertuples():
                     image = cv2.imdecode(np.frombuffer(
-                        self.feed.get_image_jpg(r.date, r.event, r.timestamp), 
+                        self.feed.get_image_jpg(r.date, r.event, r.timestamp),
                         dtype='uint8'), -1)
                     ((x1, y1, x2, y2), facemarks) = self.facelist.format_facemarks(r)
-                    if y1 < 0: y1 = 0 
-                    if x1 < 0: x1 = 0 
+                    if y1 < 0: y1 = 0
+                    if x1 < 0: x1 = 0
                     face = image[y1:y2, x1:x2]
                     if len(face) > 0:
                         if face.shape[1] < 96: face = imutils.resize(face, width=96, inter=cv2.INTER_CUBIC)
@@ -344,7 +346,7 @@ class FaceDataUpdate(Task):
                         hdf5[refkey] = embeddings
                         self.facelist.set_status(r.Index, 2, self.taskDate)
                         update_cnt += 1
-            # Should always push any updates back to data sink. SFTP? 
+            # Should always push any updates back to data sink. SFTP?
             if update_cnt:
                 self.facelist.commit()
                 self.publish(f'FaceDataUpdate: {update_cnt} face selections processed for {self.taskDate}.')
@@ -359,7 +361,7 @@ class DailyCleanup(Task):
         self.face_confidence = cfg['confidence']
 
     def pipeline(self, frame) -> bool:
-        # This is a one-shot pipeline to process all events within the eventDate 
+        # This is a one-shot pipeline to process all events within the eventDate
         cwIndx = self.dataFeed.get_date_index(self.event_date)
         facestats = FaceStats(None,None,None,None)
         types = cwIndx['type'].value_counts()
@@ -367,7 +369,7 @@ class DailyCleanup(Task):
         faces_cnt = types.get('fd1', 0)
         if trk_cnt:
             face_ratio = faces_cnt / trk_cnt
-            if face_ratio > self.face_ratio_cutoff: 
+            if face_ratio > self.face_ratio_cutoff:
                 trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
                 face_evts = cwIndx.loc[cwIndx['type'] == 'fd1']['event'].to_list()
                 recon_evts = cwIndx.loc[cwIndx['type'] == 'fr1']['event'].to_list()
@@ -424,17 +426,17 @@ class MeasureRingLatency(Task):
                 _wait_started = time.time()
                 bucket = self.ringNext()
                 ring_wait += time.time() - _wait_started
-                net_time += _wait_started - _net_started 
+                net_time += _wait_started - _net_started
             elapsed = round(time.time() - start_time, 2)
             if frame_cnt > 0:
                 result = ('RINGSTATS',
                           elapsed,                          # total_elapsed_time
                           frame_cnt,                        # frame_count
                           round(net_time,2),                # total_neuralnet_time
-                          round(net_time / frame_cnt, 4),   # neuralnet_framerate 
+                          round(net_time / frame_cnt, 4),   # neuralnet_framerate
                           round(ring_wait, 6),              # total_ring_latency
                           round(ring_wait / frame_cnt, 6),  # ringwait_per_frame
-                          round(frame_cnt / elapsed, 2))    # frames_per_second 
+                          round(frame_cnt / elapsed, 2))    # frames_per_second
                 self.publish(result)
         return False
 
@@ -450,4 +452,4 @@ def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
     }
     cfg = readConfig(cfgfile)
     task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg, accelerator)
-    return task 
+    return task

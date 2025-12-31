@@ -1,9 +1,9 @@
 ---
 # Model Deployment Playbook
-# 
+#
 # Deploys versioned ML models from the model registry (on primary_datasink)
-# to sentinel and imagenode hosts. Uses rsync with --update and --checksum
-# to ensure integrity and avoid unnecessary transfers.
+# to sentinel and imagenode hosts. Models are pulled directly from the
+# repository by each target node.
 #
 # Models are deployed independently from code, allowing version changes
 # via configuration updates only (no model file redeployment needed for rollback).
@@ -51,6 +51,12 @@
   hosts: sentinels
   become: yes
   tags: sentinels
+  roles:
+    - sentinel
+  vars:
+    repo_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"
+    repo_ip: "{{ hostvars[primary_datasink]['ansible_host'] }}"
+
   tasks:
     - name: "Ensure sentinel models directory exists"
       ansible.builtin.file:
@@ -60,62 +66,103 @@
         group: "{{ sentinelcam_group }}"
         mode: '0755'
 
+    - name: "Ensure version directory exists for each model"
+      ansible.builtin.file:
+        path: "{{ sentinel_models_path }}/{{ item }}/{{ model_version_overrides[item] | default(sentinelcam_models[item].current_version) }}"
+        state: directory
+        owner: "{{ sentinelcam_user }}"
+        group: "{{ sentinelcam_group }}"
+        mode: '0755'
+      loop: "{{ sentinelcam_models.keys() }}"
+
     - name: "Deploy MobileNet SSD model to sentinel"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}/"
-        dest: "{{ sentinel_models_path }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}/"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}/
+          {{ sentinel_models_path }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}/
+      become: false
+      register: mobilenet_sync
+      changed_when: mobilenet_sync.stdout is search('Number of .*files transferred.*[1-9]')
+      tags: mobilenet_ssd
+
+    - name: "Deploy MobileNet SSD EdgeTPU model to sentinel"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/mobilenet_ssd_edgetpu/{{ model_version_overrides.mobilenet_ssd_edgetpu | default(sentinelcam_models.mobilenet_ssd_edgetpu.current_version) }}/
+          {{ sentinel_models_path }}/mobilenet_ssd_edgetpu/{{ model_version_overrides.mobilenet_ssd_edgetpu | default(sentinelcam_models.mobilenet_ssd_edgetpu.current_version) }}/
+      become: false
+      register: mobilenet_sync
+      changed_when: mobilenet_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: mobilenet_ssd
 
     - name: "Deploy face detection model to sentinel"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/"
-        dest: "{{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/
+          {{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}/
+      become: false
+      register: face_detection_sync
+      changed_when: face_detection_sync.stdout is search('Number of .*files transferred.*[1-9]')
+      tags: face_detection
+
+    - name: "Deploy face detection EdgeTPU model to sentinel"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_detection_edgetpu/{{ model_version_overrides.face_detection_edgetpu | default(sentinelcam_models.face_detection_edgetpu.current_version) }}/
+          {{ sentinel_models_path }}/face_detection_edgetpu/{{ model_version_overrides.face_detection_edgetpu | default(sentinelcam_models.face_detection_edgetpu.current_version) }}/
+      become: false
+      register: face_detection_sync
+      changed_when: face_detection_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: face_detection
 
     - name: "Deploy face recognition model files to sentinel"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/"
-        dest: "{{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-          - "--exclude=facelist.csv"
-          - "--exclude=facedata.hdf5"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          --exclude=facelist.csv --exclude=facedata.hdf5
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/
+          {{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/
+      become: false
+      register: face_recognition_sync
+      changed_when: face_recognition_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: face_recognition
 
     - name: "Deploy haarcascades model to sentinel"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/haarcascades/{{ model_version_overrides.haarcascades | default(sentinelcam_models.haarcascades.current_version) }}/"
-        dest: "{{ sentinel_models_path }}/haarcascades/{{ model_version_overrides.haarcascades | default(sentinelcam_models.haarcascades.current_version) }}/"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/haarcascades/{{ model_version_overrides.haarcascades | default(sentinelcam_models.haarcascades.current_version) }}/
+          {{ sentinel_models_path }}/haarcascades/{{ model_version_overrides.haarcascades | default(sentinelcam_models.haarcascades.current_version) }}/
+      become: false
+      register: haarcascades_sync
+      changed_when: haarcascades_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: haarcascades
 
     - name: "Deploy openface torch model to sentinel"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/openface_torch/{{ model_version_overrides.openface_torch | default(sentinelcam_models.openface_torch.current_version) }}/"
-        dest: "{{ sentinel_models_path }}/openface_torch/{{ model_version_overrides.openface_torch | default(sentinelcam_models.openface_torch.current_version) }}/"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/openface_torch/{{ model_version_overrides.openface_torch | default(sentinelcam_models.openface_torch.current_version) }}/
+          {{ sentinel_models_path }}/openface_torch/{{ model_version_overrides.openface_torch | default(sentinelcam_models.openface_torch.current_version) }}/
+      become: false
+      register: openface_sync
+      changed_when: openface_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: openface_torch
 
 - name: "Deploy models to outpost (imagenode) nodes"
   hosts: outposts
   become: yes
   tags: outposts
+  roles:
+    - imagenode
+  vars:
+    repo_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"
+    repo_ip: "{{ hostvars[primary_datasink]['ansible_host'] }}"
+
   tasks:
     - name: "Ensure imagenode models directory exists"
       ansible.builtin.file:
@@ -125,24 +172,44 @@
         group: "{{ sentinelcam_group }}"
         mode: '0755'
 
-    - name: "Deploy models to outpost based on outpost_models list"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/{{ item }}/{{ model_version_overrides[item] | default(sentinelcam_models[item].current_version) }}/"
-        dest: "{{ imagenode_models_path }}/{{ item }}/{{ model_version_overrides[item] | default(sentinelcam_models[item].current_version) }}/"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
+    - name: "Ensure model version directory exists for each outpost model"
+      ansible.builtin.file:
+        path: "{{ imagenode_models_path }}/{{ item }}/{{ model_version_overrides[item] | default(sentinelcam_models[item].current_version) }}"
+        state: directory
+        owner: "{{ sentinelcam_user }}"
+        group: "{{ sentinelcam_group }}"
+        mode: '0755'
       loop: "{{ outpost_models }}"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
+      tags: outpost_models
+
+    - name: "Deploy models to outpost based on outpost_models list"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/{{ item }}/{{ model_version_overrides[item] | default(sentinelcam_models[item].current_version) }}/
+          {{ imagenode_models_path }}/{{ item }}/{{ model_version_overrides[item] | default(sentinelcam_models[item].current_version) }}/
+      loop: "{{ outpost_models }}"
+      become: false
+      register: outpost_sync
+      changed_when: outpost_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: outpost_models
 
 - name: "Deploy face recognition linked files to datasinks"
   hosts: datasinks
   become: yes
-  tags: 
+  tags:
     - datasinks
     - face_recognition
+
+  vars:
+    repo_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"
+    repo_ip: "{{ hostvars[primary_datasink]['ansible_host'] }}"
+
   tasks:
+    - name: "Skip primary datasink (this is the repository host)"
+      ansible.builtin.meta: end_host
+      when: inventory_hostname == primary_datasink
+
     - name: "Ensure datasink face_recognition directory exists"
       ansible.builtin.file:
         path: "{{ sentinelcam_data_path }}/face_recognition"
@@ -152,14 +219,14 @@
         mode: '0755'
 
     - name: "Deploy facelist.csv to datasink"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/face_recognition/{{ sentinelcam_models.face_recognition.current_version }}/facelist.csv"
-        dest: "{{ sentinelcam_data_path }}/face_recognition/facelist_{{ sentinelcam_models.face_recognition.current_version }}.csv"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
-      when: inventory_hostname != groups['primary_datasink'][0]
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_recognition/{{ sentinelcam_models.face_recognition.current_version }}/facelist.csv
+          {{ sentinelcam_data_path }}/face_recognition/facelist_{{ sentinelcam_models.face_recognition.current_version }}.csv
+      become: false
+      register: facelist_sync
+      changed_when: facelist_sync.stdout is search('Number of .*files transferred.*[1-9]')
 
     - name: "Create symlink for current facelist"
       ansible.builtin.file:
@@ -170,11 +237,11 @@
         group: "{{ sentinelcam_group }}"
 
     - name: "Deploy facedata.hdf5 to datasink"
-      ansible.posix.synchronize:
-        src: "{{ sentinelcam_model_registry }}/face_recognition/{{ sentinelcam_models.face_recognition.current_version }}/facedata.hdf5"
-        dest: "{{ sentinelcam_data_path }}/face_recognition/facedata_{{ sentinelcam_models.face_recognition.current_version }}.hdf5"
-        rsync_opts:
-          - "--update"
-          - "--checksum"
-      delegate_to: "{{ groups['primary_datasink'][0] }}"
-      when: inventory_hostname != groups['primary_datasink'][0]
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_recognition/{{ sentinelcam_models.face_recognition.current_version }}/facedata.hdf5
+          {{ sentinelcam_data_path }}/face_recognition/facedata_{{ sentinelcam_models.face_recognition.current_version }}.hdf5
+      register: facedata_sync
+      changed_when: facedata_sync.stdout is search('Number of .*files transferred.*[1-9]')
+      become: false

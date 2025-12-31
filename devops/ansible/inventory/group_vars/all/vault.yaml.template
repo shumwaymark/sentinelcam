@@ -1,0 +1,20 @@
+# Ansible vault template for sentinelcam and bastion secrets
+# Encrypt this file with: ansible-vault encrypt inventory/group_vars/all/vault.yaml
+
+# WireGuard Configuration (SENSITIVE - Encrypt with ansible-vault)
+vault_wireguard_private_key: "YOUR_PRIVATE_KEY_HERE"
+vault_wireguard_peer_public_key: "YOUR_PEER_PUBLIC_KEY_HERE"
+vault_wireguard_endpoint: "208.217.112.65"
+vault_wireguard_endpoint_ip: "208.217.112.65"
+vault_wireguard_port: "54321"
+
+# Sudo password for rocky user on bastion (if not using passwordless sudo)
+# vault_rocky_become_password: "YOUR_ROCKY_SUDO_PASSWORD_HERE"
+
+# ssh key pair for operations and deployment
+vault_ssh_private_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  ...
+  -----END OPENSSH PRIVATE KEY-----
+
+vault_ssh_public_key: "SSH_PUBLIC_KEY_HERE"

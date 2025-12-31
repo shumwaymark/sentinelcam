@@ -41,6 +41,22 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.1-alpha - 2025-12-30
+
+### Added
+
+- Full support for Google Coral USB Accelerator, for both the outposts and sentinels. This includes 
+  software package provisioning, application configuration, as well as model registry and deployment 
+  for `mobilenet_ssd_edgetpu` and `face_detection_edgetpu`. Support for face detection on the outposts, 
+  as a supplementary lens for the `SpyGlass`, is a current To Do List item.
+
+### Changed
+
+- Code and model deployment tasks now pull from the repositories on the primary data sink directly to each 
+  target node via locally executed rsync commands. An operational SSH key is stored as a variable in
+  an Ansible encrypted vault for deployment and use by target nodes. See `playbooks/deploy-ssh-key.yaml` 
+  for details.
+
 ## 0.2.0-alpha - 2025-12-09
 
 ### Added
@@ -77,17 +93,17 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
-- Addressed missing exception handling in the **watchtower** player daemon subprocess, along with stable
-  coordination with the state machine.
+- Addressed missing exception handling in the **watchtower** player daemon subprocess, including purposeful
+  coordination with player state.
 
 ## 0.1.4-alpha - 2025-05-12
 
 ### Fixed
 
 - Added debug logging to the **watchtower**.
-- Tightened the screws on the state machine in the **watchtower** by implementing message passing 
-  between application control and the player subsystem through a centralized state manager. No 
-  further leaks detected.
+- Tightened the screws on the **watchtower** state machine. Implemented a message passing mechanism between 
+  application control and the player subsystem, coordinated through a centralized state manager. No further 
+  leaks detected.
 
 ## 0.1.3-alpha - 2025-04-24
 

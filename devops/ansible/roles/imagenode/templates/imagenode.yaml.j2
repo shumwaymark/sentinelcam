@@ -23,7 +23,7 @@ cameras:
     framerate: {{ camera.framerate }}
 {% if camera_id.startswith('P') %}
     vflip: {{ camera.vflip | default(false) }}
-    threaded_read: {{ camera.threaded_read | default(false) }}
+    threaded_read: False
 {% endif %}
     detectors:
         outpost:
@@ -43,7 +43,7 @@ cameras:
                 root:
                     handlers: [zmq]
                     level: {{ 'DEBUG' if (camera.debug_mode | default(debug_mode)) else 'INFO' }}
-            camwatcher: tcp://{{ datasink }}:{{ sentinelcam_ports.camwatcher_control }}
+            # camwatcher: tcp://{{ datasink }}:{{ sentinelcam_ports.camwatcher_control }}
             spyglass: {{ camera.resolution | string }}
             detectobjects: {{ camera.detector.detectobjects | default('none') }}
             accelerator: {{ camera.detector.accelerator | default('none') }}
@@ -66,10 +66,14 @@ cameras:
 {% endif %}
 {% if camera.detector.detectobjects == 'mobilenetssd' %}
             mobilenetssd:
+                confidence: {{ mobilenet_confidence }}
+{% if camera.detector.accelerator == 'coral' %}
+                edgetpu_model: {{ mobilenet_edgetpu_model }}
+                model_labels: {{ mobilenet_edgetpu_labels }}
+{% else %}
                 prototxt_path: {{ mobilenet_prototxt }}
                 model_path: {{ mobilenet_model }}
-                confidence: {{ mobilenet_confidence }}
                 target: {% if camera.detector.accelerator == 'ncs2' %}myriad{% else %}cpu{% endif %}
-
+{% endif %}
 {% endif %}
 {% endfor %}

@@ -1,0 +1,97 @@
+---
+# Coral EdgeTPU Package Provisioning for Sentinel Nodes
+#
+# Installs pre-built Coral packages from the model registry:
+#   - libedgetpu: EdgeTPU runtime library (.deb)
+#   - pycoral: Python API for Coral EdgeTPU (.whl)
+#   - tflite_runtime: TensorFlow Lite runtime (.whl)
+#
+# Package sources: feranick's community builds
+#   - https://github.com/feranick/libedgetpu
+#   - https://github.com/feranick/pycoral
+#   - https://github.com/feranick/TFlite-builds
+#
+# Prerequisites:
+#   - Packages must be downloaded to {{ sentinelcam_coral_packages }} on primary_datasink
+#
+# This file is included by sentinel/tasks/main.yaml when sentinel_install_coral_packages is true
+
+- name: "Check if Coral packages are already installed"
+  ansible.builtin.command:
+    cmd: dpkg -s libedgetpu1-std
+  register: coral_deb_check
+  failed_when: false
+  changed_when: false
+
+- name: "Check if pycoral is already installed"
+  ansible.builtin.command:
+    cmd: "{{ sentinel_venv_path }}/bin/pip show pycoral"
+  register: coral_pip_check
+  failed_when: false
+  changed_when: false
+  become_user: "{{ sentinelcam_user }}"
+
+- name: "Install Coral packages"
+  when: coral_deb_check.rc != 0 or coral_pip_check.rc != 0
+  block:
+    - name: "Sync Coral packages from repository to local staging directory"
+      ansible.builtin.command:
+        cmd: "rsync -avz --checksum {{ primary_datasink }}:{{ sentinelcam_coral_packages }}/ /tmp/coral_packages/"
+      register: rsync_coral_result
+      changed_when: "'files transferred' in rsync_coral_result.stdout or 'total size is' in rsync_coral_result.stdout"
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "List downloaded Coral package files"
+      ansible.builtin.find:
+        paths: "/tmp/coral_packages"
+      register: coral_package_files
+
+    - name: "Show downloaded Coral package files"
+      ansible.builtin.debug:
+        msg: "{{ coral_package_files.files | map(attribute='path') | list }}"
+
+    - name: "Install Coral udev rules"
+      ansible.builtin.copy:
+        src: 99-coral-edgetpu.rules
+        dest: "/etc/udev/rules.d/99-coral-edgetpu.rules"
+        mode: '0644'
+      notify: reload udev rules
+
+    - name: "Install libedgetpu runtime deb"
+      ansible.builtin.apt:
+        deb: "/tmp/coral_packages/{{ coral_packages.libedgetpu.deb_package }}"
+        state: present
+      notify: reload udev rules
+
+    - name: "Install tflite_runtime wheel"
+      ansible.builtin.pip:
+        name: "/tmp/coral_packages/{{ coral_packages.tflite_runtime.wheel }}"
+        virtualenv: "{{ sentinel_venv_path }}"
+        state: present
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "Install pycoral wheel"
+      ansible.builtin.pip:
+        name: "/tmp/coral_packages/{{ coral_packages.pycoral.wheel }}"
+        virtualenv: "{{ sentinel_venv_path }}"
+        state: present
+      become_user: "{{ sentinelcam_user }}"
+
+    - name: "Cleanup staging directory"
+      ansible.builtin.file:
+        path: "/tmp/coral_packages"
+        state: absent
+
+    - name: "Verify Coral installation"
+      ansible.builtin.command:
+        cmd: "{{ sentinel_venv_path }}/bin/python -c 'import pycoral; import tflite_runtime; print(\"Coral packages OK\")'"
+      become_user: "{{ sentinelcam_user }}"
+      changed_when: false
+
+- name: "Display Coral status"
+  ansible.builtin.debug:
+    msg: >-
+      Coral EdgeTPU support: {{ 'INSTALLED' if coral_deb_check.rc == 0 and coral_pip_check.rc == 0 else 'INSTALLING' }}
+      (libedgetpu: {{ coral_packages.libedgetpu.version }},
+       pycoral: {{ coral_packages.pycoral.version }},
+       tflite: {{ coral_packages.tflite_runtime.version }})

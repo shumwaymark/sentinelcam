@@ -49,7 +49,7 @@
   
   vars:
     # Get the public key from the datasink host
-    datasink_key: "{{ hostvars[groups['primary_datasink'][0]]['datasink_public_key'] }}"
+    datasink_key: "{{ hostvars['primary_datasink']['datasink_public_key'] }}"
   
   tasks:
     - name: Display target node info

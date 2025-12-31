@@ -23,11 +23,10 @@ Define cameras in `host_vars/<hostname>.yaml`:
 ```yaml
 # host_vars/alpha5.yaml
 imagenode_config:
-  node_name: alpha5              # Internal tag (appears in logs)
-  heartbeat: 10                  # Heartbeat interval in seconds
+  node_name: alpha5              # Outpost identifier
   cameras:
     P1:                          # PiCamera type
-      viewname: PiCam3           # View identifier
+      viewname: PiCam3           # Camera view identifier
       resolution: [640, 480]
       framerate: 32
       vflip: false
@@ -45,7 +44,6 @@ imagenode_config:
 # host_vars/east.yaml
 imagenode_config:
   node_name: east
-  heartbeat: 15
   cameras:
     O1:                          # OAK camera type
       viewname: Front
@@ -70,8 +68,7 @@ imagenode_config:
 ```yaml
 # host_vars/multinode.yaml
 imagenode_config:
-  node_name: multinode
-  heartbeat: 10
+  node_name: multinode0
   cameras:
     P1:
       viewname: Indoor
@@ -165,9 +162,9 @@ Models are deployed from the model registry on `primary_datasink` to outpost nod
 │       ├── MobileNetSSD_deploy.caffemodel
 │       └── manifest.yaml
 ├── face_detection/
-│   └── 2020-03-25/
+│   └── 2025-02-25/
 └── vehicle_detection/
-    └── 2024-11-15/
+    └── YYYY-MM-DD/
 ```
 
 **Deployment**:

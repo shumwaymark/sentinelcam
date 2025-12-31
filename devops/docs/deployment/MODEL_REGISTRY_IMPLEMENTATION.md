@@ -444,6 +444,134 @@ Before production deployment:
 - **Service won't start**: Check task config paths and model file existence
 - **Rollback fails**: Verify target version exists in registry
 
+## Coral EdgeTPU Package Management
+
+### Overview
+
+Pre-built Coral/EdgeTPU packages are stored in the model registry for deployment to
+nodes requiring hardware acceleration. Packages sourced from feranick's community ports:
+
+- **libedgetpu**: https://github.com/feranick/libedgetpu
+- **pycoral**: https://github.com/feranick/pycoral
+- **tflite_runtime**: https://github.com/feranick/TFlite-builds
+
+### Package Registry Structure
+
+```
+{{ sentinelcam_model_registry }}/coral_packages/
+├── libedgetpu1-std_16.0tf2.17.1-1.bookworm_arm64.deb
+├── libedgetpu-dev_16.0tf2.17.1-1.bookworm_arm64.deb
+├── pycoral-2.0.3-cp311-cp311-linux_aarch64.whl
+├── tflite_runtime-2.17.1-cp311-cp311-linux_aarch64.whl
+└── manifest.yaml
+```
+
+### Configuration
+
+Coral package versions are defined in `model_registry.yaml`:
+
+```yaml
+coral_packages:
+  tf_version: "2.17.1"
+  python_version: "3.11"
+  
+  libedgetpu:
+    version: "16.0tf2.17.1-1"
+    deb_package: "libedgetpu1-std_16.0tf2.17.1-1.bookworm_arm64.deb"
+    
+  pycoral:
+    version: "2.0.3"
+    wheel: "pycoral-2.0.3-cp311-cp311-linux_aarch64.whl"
+    
+  tflite_runtime:
+    version: "2.17.1"
+    wheel: "tflite_runtime-2.17.1-cp311-cp311-linux_aarch64.whl"
+```
+
+### Deployment
+
+**Step 1: Download packages to datasink**
+```bash
+# Using Ansible (recommended)
+ansible-playbook playbooks/deploy-coral-packages.yaml --tags=download
+
+# Or manually
+./devops/scripts/operations/download_coral_packages.sh
+```
+
+**Step 2: Deploy to nodes**
+```bash
+# Deploy to all coral-configured nodes
+ansible-playbook playbooks/deploy-coral-packages.yaml
+
+# Deploy to specific node type
+ansible-playbook playbooks/deploy-coral-packages.yaml --limit=sentinels
+ansible-playbook playbooks/deploy-coral-packages.yaml --limit=outposts
+```
+
+### Node Configuration
+
+**Sentinel** (in host_vars or deploy-sentinel.yaml):
+```yaml
+sentinel_accelerator_type: coral  # [cpu, ncs2, coral]
+```
+
+**ImageNode** (in host_vars):
+```yaml
+imagenode_config:
+  detector:
+    accelerator: coral  # [none, ncs2, coral]
+```
+
+### Version Updates
+
+When updating Coral package versions:
+
+1. Update versions in `model_registry.yaml`
+2. Run download playbook: `--tags=download`
+3. Deploy to nodes: full playbook run
+4. Services automatically restart to use new packages
+
+### Role-Based Provisioning
+
+Coral packages are automatically installed during role provisioning when configured:
+
+**Sentinel Role** - Coral is the default accelerator for new deployments:
+```yaml
+# devops/ansible/roles/sentinel/defaults/main.yaml
+sentinel_accelerator_type: coral  # [coral, cpu, ncs2]
+sentinel_install_coral_packages: "{{ sentinel_accelerator_type == 'coral' }}"
+```
+
+**ImageNode Role** - Enable Coral in host_vars for outposts with hardware:
+```yaml
+# host_vars/my_outpost.yaml
+imagenode_accelerator_type: coral
+imagenode_install_coral_packages: true
+```
+
+The provisioning tasks (`coral_provisioning.yaml`) in each role will:
+1. Check if packages are already installed
+2. Sync packages from the datasink
+3. Install udev rules for USB access
+4. Install libedgetpu deb package
+5. Install Python wheels into the venv
+6. Verify installation
+
+### Hardware Accelerator Migration Notes
+
+**NCS2 (Intel Neural Compute Stick 2)** - DEPRECATED
+- Intel discontinued support; no drivers for Raspberry Pi OS Bookworm/Python 3.11
+- Legacy PyImageSearch OS image had OpenVINO pre-installed
+- Existing NCS2 nodes will continue to work until hardware fails
+- No new NCS2 deployments possible
+
+**Coral EdgeTPU** - RECOMMENDED
+- Thanks to feranick's community ports, Coral remains viable on modern OS
+- Pre-built packages for arm64/Python 3.11 available on GitHub
+- Now the default accelerator for new sentinel deployments
+- Requires packages downloaded to datasink before provisioning
+
 ## Future Enhancements
 
 1. **Training metrics extraction** - Parse Papermill notebook outputs
@@ -460,10 +588,13 @@ Before production deployment:
 - Outpost registry pattern: `devops/docs/configuration/OUTPOST_REGISTRY_PATTERN.md`
 - Multi-site design: `devops/docs/future/MULTI_SITE_MODEL_SYNC.md`
 - Code deployment: `devops/ansible/roles/sentinelcam_base/tasks/code_deployment.yaml`
+- Coral packages: `devops/ansible/playbooks/deploy-coral-packages.yaml`
+- Coral provisioning: `devops/ansible/roles/sentinel/tasks/coral_provisioning.yaml`
 
 ---
 
 **Implementation Complete**: 2025-12-08  
+**Coral Support Added**: 2025-12-19  
 **Ready for Initial Deployment**: Yes  
 **Breaking Changes**: No (backward compatible)  
-**Requires Manual Steps**: Yes (model migration)
+**Requires Manual Steps**: Yes (model migration, package download)

@@ -10,25 +10,6 @@ exclusively on low-power embedded infrastructure.
 Once proven, this becomes the foundation for future model development and the scaffolding for bespoke 
 model training and retraining. For example, vehicle recognition. 
 
-## Architecture
-
-### Components
-
-1. **DeepEnd Node** (Jetson Nano)
-   - **Hardware**: NVIDIA Jetson Nano Developer Kit
-   - **OS**: Ubuntu 18.04 (JetPack 4.6)
-   - **Role**: Model training using Jupyter notebooks executed via Papermill
-   - **Network**: 192.168.10.100 (deepend)
-
-2. **Training Data Sources**
-   - **Sentinel**: Provides `facelist.csv` (curated training selections)
-   - **Sentinel**: Generates `facedata.hdf5` (OpenFace embeddings)
-
-3. **Deployment Targets**
-   - **Sentinels**: Receive `facemodel.pickle` and `baselines.hdf5` modeling outputs
-   - **Datasinks**: Receive updated `facelist.csv` (for event retention)
-   - **Outposts**: Receive models as specified (e.g., facial-recognition, vehicle recognition)
-
 ## Face Recognition Pipeline
 
 ### Data Collection
@@ -102,41 +83,6 @@ model training and retraining. For example, vehicle recognition.
 - Previous versions: beta2, beta, alpha, etc.
 - Version tracks entire pipeline: embeddings → model → baselines
 
-## Jetson Nano Configuration
-
-### Why Jetson Nano for Training?
-
-**Challenges:**
-- Jetson Nano is designed for **inference**, not training
-- Limited RAM (4GB), slower CPU than desktop
-- ARM64 architecture has fewer pre-built ML packages
-
-**Advantages:**
-- **Low power consumption** (~10W vs 200W+ for desktop GPU)
-- **Embedded architecture** fits SentinelCam design philosophy
-- **CUDA support** (128 cores, Maxwell architecture)
-- **Always-on** availability for overnight training
-- **Cost effective** (~$100 vs $1000+ for workstation)
-
-**Trade-offs:**
-- Training takes longer (overnight vs minutes)
-- **This is acceptable** - training happens infrequently
-- SVM training on embeddings is computationally light
-- Most work already done by OpenFace (on Sentinel)
-
-### JetPack Integration
-
-The Jetson Nano comes with **JetPack SDK** pre-installed:
-- CUDA Toolkit
-- cuDNN
-- TensorRT
-- Pre-built TensorFlow, PyTorch (for JetPack 4.6)
-
-**Our approach:**
-- Use JetPack's system Python for CUDA-enabled packages
-- Create venv for additional packages (scikit-learn, papermill)
-- Let Ansible manage the venv, not JetPack packages
-
 ## Training Notebooks
 
 ### facelist_gamma3.ipynb
@@ -198,6 +144,61 @@ facialembeddings: facedata_gamma3.hdf5
 modelout:         facemodel_gamma3.pickle
 newbaselines:     baselines_gamma3.hdf5
 ```
+
+## Architecture
+
+### Components
+
+1. **DeepEnd Node** (Jetson Nano)
+   - **Hardware**: NVIDIA Jetson Nano Developer Kit
+   - **OS**: Ubuntu 18.04 (JetPack 4.6)
+   - **Role**: Model training using Jupyter notebooks executed via Papermill
+   - **Network**: 192.168.10.100 (deepend)
+
+2. **Training Data Sources**
+   - **Sentinel**: Provides `facelist.csv` (curated training selections)
+   - **Sentinel**: Generates `facedata.hdf5` (OpenFace embeddings)
+
+3. **Deployment Targets**
+   - **Sentinels**: Receive `facemodel.pickle` and `baselines.hdf5` modeling outputs
+   - **Datasinks**: Receive updated `facelist.csv` (for event retention)
+   - **Outposts**: Receive models as specified (e.g., facial-recognition, vehicle recognition)
+
+## Jetson Nano Configuration
+
+### Why Jetson Nano for Training?
+
+**Challenges:**
+- Jetson Nano is designed for edge **inference**, not model training
+- Limited RAM (4GB), slower CPU than desktop
+- ARM64 architecture has fewer pre-built ML packages
+
+**Advantages:**
+- **Low power consumption** (~10W vs 200W+ for desktop GPU)
+- **Embedded architecture** fits SentinelCam design philosophy
+- **CUDA support** (128 cores, Maxwell architecture)
+- **Always-on** availability for overnight training
+- **Cost effective** (~$100 vs $1000+ for workstation)
+
+**Trade-offs:**
+- Training takes longer (overnight vs minutes)
+- **This is acceptable** - training happens infrequently
+- SVM training on embeddings is computationally light
+- Most work already done by OpenFace (on Sentinel)
+- Can be utilized for model retraining, such as for vehicle and pet recognition
+
+### JetPack Integration
+
+The Jetson Nano comes with **JetPack SDK** pre-installed:
+- CUDA Toolkit
+- cuDNN
+- TensorRT
+- Pre-built TensorFlow, PyTorch (for JetPack 4.6)
+
+**Solution approach:**
+- Use JetPack's system Python for CUDA-enabled packages
+- Create venv for additional packages (scikit-learn, papermill)
+- Let Ansible manage the venv, not JetPack packages
 
 ## Deployment Workflow
 

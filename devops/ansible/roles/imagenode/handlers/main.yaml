@@ -16,9 +16,22 @@
   become: yes
   listen: "start imagenode service"
 
+- name: restart imagenode service
+  systemd:
+    name: "{{ imagenode_service }}"
+    state: restarted
+  become: yes
+
 - name: stop imagenode
   systemd:
     name: "{{ imagenode_service }}"
     state: stopped
   become: yes
   listen: "stop imagenode service"
+
+- name: reload udev rules
+  ansible.builtin.shell: |
+    udevadm control --reload-rules
+    udevadm trigger
+  become: yes
+  changed_when: true

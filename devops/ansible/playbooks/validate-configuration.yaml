@@ -158,8 +158,6 @@
           - "Install Path: {{ imagenode_install_path | default('NOT DEFINED') }}"
           - "Config File: {{ imagenode_config_file | default('NOT DEFINED') }}"
           - "Venv Path: {{ imagenode_venv_path | default('NOT DEFINED') }}"
-          - "Camera Type: {{ camera_type | default('NOT DEFINED') }}"
-          - "Camera View: {{ camera_viewname | default('NOT DEFINED') }}"
           - "Detection: {{ detection_objects | default('NOT DEFINED') }}"
           - "Accelerator: {{ accelerator | default('NOT DEFINED') }}"
           - "Hub Address: {{ hub_address | default('NOT DEFINED') }}"
@@ -173,14 +171,6 @@
         fail_msg: "ImageNode paths don't match user {{ ansible_user }}"
         success_msg: "✓ ImageNode configuration valid for {{ inventory_hostname }}"
         
-    - name: "Check for camera-specific configuration"
-      ansible.builtin.assert:
-        that:
-          - camera_viewname is defined
-          - camera_type is defined
-        fail_msg: "Camera configuration missing for {{ inventory_hostname }}"
-        success_msg: "✓ Camera configured: {{ camera_viewname }} ({{ camera_type }})"
-
 - name: Validate Sentinel Configuration
   hosts: sentinels
   gather_facts: no

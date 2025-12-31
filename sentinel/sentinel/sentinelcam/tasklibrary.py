@@ -23,14 +23,20 @@ class MobileNetSSD:
 
         logging.debug("Loading MobileNetSSD model")
         if accelerator == "coral":
-            from edgetpu.detection.engine import DetectionEngine
             self.engine = MobileNetSSD.ENGINE_edgetpu
-            self.net = DetectionEngine(self.conf['edgetpu_model'])
+            from pycoral.utils.edgetpu import make_interpreter
+            from pycoral.utils.dataset import read_label_file
+            # create interpreter for EdgeTPU model
+            self.net = make_interpreter(self.conf["edgetpu_model"])
+            self.net.allocate_tensors()
             # load labels for model
-            self.labels = {}
-            for row in open(self.conf["model_labels"]):
-                (classID, label) = row.strip().split(maxsplit=1)
-                self.labels[int(classID)] = label.strip()
+            self.labels = read_label_file(self.conf["model_labels"])
+            # import required modules for EdgeTPU inference
+            from pycoral.adapters import common
+            from pycoral.adapters import detect as edgetpu_detect
+            # store imported modules for later use
+            self.common = common
+            self.edgetpu_detect = edgetpu_detect
         else:
             self.engine = MobileNetSSD.ENGINE_opencvDNN
             self.net = cv2.dnn.readNetFromCaffe(
@@ -52,20 +58,22 @@ class MobileNetSSD:
         # initialize output lists
         objs = []
         labls = []
-        
+
         if self.engine == MobileNetSSD.ENGINE_edgetpu:
-            image = imutils.resize(frame, width=500)
-            image = PIL.Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            # get model predictions
-            results = self.net.detect_with_image(image,
-                threshold=self.conf["confidence"],
-                keep_aspect_ratio=True, relative_coord=False)
-            # parse results
-            for r in results:
-                box = r.bounding_box.flatten().astype("int")
-                #(startX, startY, endX, endY) = box
-                objs.append(box)
-                labls.append(self.labels[r.label_id])
+            image = PIL.Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            # prepare the frame for object detection
+            _, scale = self.common.set_resized_input(
+                self.net, image.size, lambda size: image.resize(size, PIL.Image.LANCZOS))
+            self.net.invoke()
+            detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+
+            for detection in detections:
+                # extract the bounding box coordinates
+                bbox = detection.bbox
+                objs.append((bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax))
+                labls.append("{}: {:.4f}".format(
+                    self.labels[detection.id],
+                    detection.score))
 
         else:
             H, W = frame.shape[:2]
@@ -74,7 +82,7 @@ class MobileNetSSD:
             blob = cv2.dnn.blobFromImage(frame, size=(300, 300), ddepth=cv2.CV_8U)
             self.net.setInput(blob, scalefactor=1.0/127.5, mean=[127.5, 127.5, 127.5])
             detections = self.net.forward()
-            
+
             # loop over the detections
             for i in np.arange(0, detections.shape[2]):
                 # extract the confidence (i.e., probability) associated
@@ -105,9 +113,17 @@ class FaceDetector:
     def __init__(self, conf, accelerator="cpu") -> None:
         self.conf = conf  # configuration dictionary
         if accelerator == "coral":
-            from edgetpu.detection.engine import DetectionEngine
             self.engine = FaceDetector.ENGINE_edgetpu
-            self.detector = DetectionEngine(self.conf['edgetpu_model'])
+            from pycoral.utils.edgetpu import make_interpreter
+            # create interpreter for EdgeTPU model
+            self.net = make_interpreter(self.conf["edgetpu_model"])
+            self.net.allocate_tensors()
+            # import required modules for EdgeTPU inference
+            from pycoral.adapters import common
+            from pycoral.adapters import detect as edgetpu_detect
+            # store imported modules for later use
+            self.common = common
+            self.edgetpu_detect = edgetpu_detect
         else:
             self.engine = FaceDetector.ENGINE_opencvDNN
             self.detector = cv2.dnn.readNetFromCaffe(
@@ -125,19 +141,23 @@ class FaceDetector:
                 self.detector.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
 
     def detect(self, frame) -> list:
-        rects = []
+        rects, labls = [], []
         if self.engine == MobileNetSSD.ENGINE_edgetpu:
-            image = imutils.resize(frame, width=500)
-            image = PIL.Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            # get model predictions
-            results = self.detector.detect_with_image(image,
-                threshold=self.conf["confidence"],
-                keep_aspect_ratio=True, relative_coord=False)
-            # parse results
-            for r in results:
-                box = r.bounding_box.flatten().astype("int")
-                #(startX, startY, endX, endY) = box
-                rects.append(box)
+            # prepare the frame for object detection
+            image = PIL.Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            _, scale = self.common.set_resized_input(
+                self.net, image.size, lambda size: image.resize(size, PIL.Image.LANCZOS))
+            self.net.invoke()
+            detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+            for detection in detections:
+                # extract the bounding box coordinates
+                bbox = detection.bbox
+                rects.append((bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax))
+                labls.append("Face {}: {:.4f} [{},{}] ({}) {}".format(
+                    detection.id,
+                    detection.score,
+                    bbox.width, bbox.height, bbox.area, bbox.valid))
+
         else:
             h, w = frame.shape[:2]
             blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0,
@@ -148,8 +168,8 @@ class FaceDetector:
                 confidence = faces[0, 0, i, 2]
                 if confidence > self.conf["confidence"]:
                     box = faces[0, 0, i, 3:7] * np.array([w, h, w, h])
-                    rects.append(box.astype("int"))  # (x, y, x1, y1) 
-        return rects
+                    rects.append(box.astype("int"))  # (x, y, x1, y1)
+        return (rects, labls)
 
 def get_eyesHaarCascade(path=None):
     if path is None:
@@ -157,14 +177,14 @@ def get_eyesHaarCascade(path=None):
         opencv_home = cv2.__file__
         for folder in opencv_home.split(os.path.sep)[0:-1]:
             path += folder + os.path.sep
-        eye_cascacde = os.path.join(path, 'data', 'haarcascade_eye.xml') 
+        eye_cascacde = os.path.join(path, 'data', 'haarcascade_eye.xml')
     else:
         eye_cascacde = path
-    eye_detector = cv2.CascadeClassifier(eye_cascacde) 
+    eye_detector = cv2.CascadeClassifier(eye_cascacde)
     return eye_detector
 
 class FaceAligner:
-    # Modified from original at https://pyimagesearch.com/2017/05/22/face-alignment-with-opencv-and-python/ 
+    # Modified from original at https://pyimagesearch.com/2017/05/22/face-alignment-with-opencv-and-python/
     def __init__(self, cfg):
         self.config = cfg
         # store the facial landmark predictor, desired output left
@@ -179,7 +199,7 @@ class FaceAligner:
             self.desiredFaceHeight = self.desiredFaceWidth
 
     def landmarks(self, face) -> tuple:
-        gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)            
+        gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
         eyes = self.eye_detector.detectMultiScale(image=gray,
             scaleFactor=1.05, minNeighbors=3, minSize=(20,20), maxSize=(35,35))
         # establish eye centroids
@@ -189,7 +209,7 @@ class FaceAligner:
         for (x, y, w, h) in eyes:
             cX = int((x + x + w) / 2.0)
             cY = int((y + y + h) / 2.0)
-            if cY > centerY * 1.05 or cY < centerY // 2: 
+            if cY > centerY * 1.05 or cY < centerY // 2:
                 continue   # discard oblique perspectives and any false-positive detections
             eyeCentroids.append((cX, cY))
 
@@ -214,10 +234,10 @@ class FaceAligner:
 
         facemarks = (rightEyeCenter, leftEyeCenter, (dX, dY), angle, focus)
         return facemarks
-    
+
     def assess(self, facemarks) -> bool:
         (rightEye, leftEye, distance, angle, focus) = facemarks
-        relative_angle = 360 + angle if angle < -180 else abs(angle)  
+        relative_angle = 360 + angle if angle < -180 else abs(angle)
         candidate = (
             #  found 2 eyes?
             distance[0] != 0 and
@@ -229,7 +249,7 @@ class FaceAligner:
             #  for filtering out extreme alignment angles
             relative_angle < 17 and
             #  focus metric above a currently hard-coded, and low, threshold?
-            focus > 50 
+            focus > 50
         )
         return candidate
 
@@ -266,7 +286,7 @@ class FaceAligner:
         # apply the affine transformation
         (w, h) = (self.desiredFaceWidth, self.desiredFaceHeight)
         output = cv2.warpAffine(face, M, (w, h), flags=cv2.INTER_CUBIC)
-        
+
         # return the aligned face
         return output
 

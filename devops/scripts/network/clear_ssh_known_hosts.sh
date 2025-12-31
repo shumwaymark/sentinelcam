@@ -8,14 +8,14 @@ echo ""
 
 # Define the static IP addresses that need cleaning
 IPS=(
-    "192.168.10.10"   # buzz
+    #"192.168.10.10"   # buzz
     "192.168.10.20"   # lab1
     "192.168.10.21"   # east
     "192.168.10.22"   # alpha5
-    "192.168.10.50"   # data1
+    #"192.168.10.50"   # data1
     "192.168.10.60"   # sentinel
     "192.168.10.70"   # wall1
-    "192.168.10.254"  # chandler-gate
+    #"192.168.10.254"  # chandler-gate
 )
 
 KNOWN_HOSTS_FILE="$HOME/.ssh/known_hosts"

@@ -12,7 +12,7 @@ WorkingDirectory={{ sentinel_install_path }}/sentinel
 User={{ sentinelcam_user }}
 Restart=always
 RestartSec=5
-ExecStart={{ sentinel_install_path }}/sentinel_{{ sentinel_accelerator_type }}.sh
+ExecStart={{ sentinelcam_services.python_executable }} -u {{ sentinel_install_path }}/sentinel/sentinel.py
 
 [Install]
 WantedBy=multi-user.target

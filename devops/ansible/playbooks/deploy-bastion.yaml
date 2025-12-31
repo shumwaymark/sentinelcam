@@ -7,24 +7,24 @@
   become: yes
   become_method: sudo
   gather_facts: yes
-  
+
   pre_tasks:
     - name: "Check if vault file exists"
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../group_vars/infrastructure/vault.yaml"
+        path: "{{ playbook_dir }}/../inventory/group_vars/all/vault.yaml"
       register: vault_file
       delegate_to: localhost
       become: no
       tags: [always]
-    
+
     - name: "Load vault variables if file exists"
       ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../group_vars/infrastructure/vault.yaml"
-      when: 
+        file: "{{ playbook_dir }}/../inventory/group_vars/all/vault.yaml"
+      when:
         - vault_file.stat.exists
         - "'secrets' not in ansible_skip_tags | default([])"
       tags: [always]
-      
+
     - name: "Check vault variables status"
       ansible.builtin.debug:
         msg: |

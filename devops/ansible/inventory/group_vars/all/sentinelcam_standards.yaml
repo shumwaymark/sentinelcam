@@ -23,6 +23,10 @@ sentinelcam_requirements_file: "{{ sentinelcam_deployment_source }}/requirements
 # Centralized storage for versioned ML models
 sentinelcam_model_registry: "{{ sentinelcam_data_path }}/model_registry"
 
+# Coral EdgeTPU Packages Location (on the primary data sink)
+# Pre-built wheels and debs for Coral USB accelerator support
+sentinelcam_coral_packages: "{{ sentinelcam_model_registry }}/coral_packages"
+
 # Model Retention Policy
 # Number of historical model versions to retain (excludes current_version + previous_version)
 sentinelcam_model_retention: 5

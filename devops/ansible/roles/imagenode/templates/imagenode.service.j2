@@ -13,11 +13,7 @@ User={{ sentinelcam_user }}
 Group={{ sentinelcam_group }}
 Restart=always
 RestartSec=5
-{% if sentinelcam_user == 'pi' and accelerator == 'ncs2' %}
-ExecStart={{ imagenode_install_path }}/imagenode_ncs2.sh
-{% else %}
-ExecStart={{ imagenode_venv_path }}/bin/python -u {{ imagenode_install_path }}/imagenode/imagenode.py
-{% endif %}
+ExecStart={{ sentinelcam_services.python_executable }} -u {{ imagenode_install_path }}/imagenode/imagenode.py
 
 # Environment variables
 Environment=PYTHONPATH={{ imagenode_install_path }}/imagenode

@@ -6,7 +6,7 @@ deployment:
   bastion_host: chandler-gate.local
   transfer_cache: ~/transfer_cache/incoming
   processing_script: ~/scripts/process-code-upload.sh
-  
+
   # File extensions to include in deployment packages
   include_extensions:
     - "*.py"
@@ -21,7 +21,8 @@ deployment:
     - "*.j2"
     - "*.cfg"
     - "*.template"
-  
+    - "*.rules"
+
   # Global exclusion patterns (applied to all components)
   exclude_patterns:
     - ".git"
@@ -58,10 +59,10 @@ components:
     description: Sentinel monitoring and event detection service
     paths:
       - sentinel/sentinel/
-      - sentinel/tasks/
     required_files:
       - sentinel/sentinel/sentinel.py
     exclude_patterns:
+      - sentinel/tasks
       - sentinel/outpost
     ansible_playbook: deploy-sentinel-code-only.yaml
 

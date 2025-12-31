@@ -1,0 +1,13 @@
+# Google Coral EdgeTPU USB Accelerator udev rules
+# Allow non-root users to access the Coral USB device
+#
+# Installation: 
+#   sudo cp 99-coral-edgetpu.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Coral USB Vendor/Product IDs:
+#   1a6e:089a - Google Inc. (bootloader mode)
+#   18d1:9302 - Google Inc. (runtime mode)
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a6e", ATTRS{idProduct}=="089a", MODE="0664", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="18d1", ATTRS{idProduct}=="9302", MODE="0664", GROUP="plugdev", TAG+="uaccess"

@@ -15,12 +15,11 @@
   hosts: outposts
   become: yes
   serial: 1  # One at a time for complete setup
-  
+
   pre_tasks:
     - name: Display setup target
       debug:
-        msg: "Setting up outpost {{ inventory_hostname }} ({{ node_name }}) with {{ camera_type }} camera"
-
+        msg: "Setting up outpost {{ inventory_hostname }} ({{ node_name }})"
   roles:
     - sentinelcam_base
     - imagenode
@@ -30,15 +29,11 @@
       systemd:
         name: "{{ imagenode_service }}"
       register: service_status
-      
+
     - name: Display final status
       debug:
         msg: |
           Outpost {{ inventory_hostname }} setup complete:
           - Node name: {{ node_name }}
-          - Camera type: {{ camera_type }}
-          - Detection: {{ detection_objects }}
-          - Accelerator: {{ accelerator }}
+          - Accelerator: {{ imagenode_accelerator_type }}
           - Service status: {{ service_status.status.ActiveState }}
-          - Config file: {{ imagenode_config_file }}
-          - Hub address: {{ hub_address }}

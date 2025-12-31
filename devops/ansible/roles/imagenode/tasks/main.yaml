@@ -6,6 +6,15 @@
     - deploy
     - code
 
+# Coral EdgeTPU provisioning (for new Bookworm/Python 3.11 deployments)
+- name: "Install Coral EdgeTPU packages"
+  ansible.builtin.include_tasks: coral_provisioning.yaml
+  when: imagenode_install_coral_packages | default(false) | bool
+  tags:
+    - coral
+    - accelerator
+    - provisioning
+
 - name: Deploy imagenode configuration
   template:
     src: imagenode.yaml.j2
@@ -19,6 +28,20 @@
   tags:
     - config
     - configuration
+
+#- name: Deploy imagenode launcher script
+#  ansible.builtin.template:
+#    src: imagenode_launcher.sh.j2
+#    dest: "{{ imagenode_install_path }}/imagenode_{{ imagenode_accelerator_type }}.sh"
+#    owner: "{{ sentinelcam_user }}"
+#    group: "{{ sentinelcam_group }}"
+#    mode: '0755'
+#    backup: yes
+#  become: yes
+#  notify: restart imagenode service
+#  tags:
+#    - scripts
+#    - config
 
 - name: Deploy imagenode systemd service file
   template:

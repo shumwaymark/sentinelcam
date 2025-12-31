@@ -43,7 +43,7 @@ log "Syncing complete devops structure from datasink..."
 # Primary sync: Complete devops directory structure with clean output
 rsync -az --checksum --delete --itemize-changes --ignore-errors \
       --exclude='logs/*' --exclude='*.retry' --exclude='.git*' \
-      --filter='protect group_vars/infrastructure/vault.yaml' \
+      --filter='protect inventory/group_vars/all/vault.yaml' \
       $DATASINK_USER@$DATASINK_HOST:$DATASINK_DEVOPS/ "$SENTINELCAM_HOME/devops/" | \
       grep -E '^[>.]f' | sed 's/^[>.]f[^ ]* /  /' | while read file; do
           log "Updated: $file"

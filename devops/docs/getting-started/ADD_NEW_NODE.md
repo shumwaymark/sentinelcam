@@ -49,44 +49,37 @@ Refer to `devops/docs/NETWORK_ADDRESSING_STANDARD.md` for IP allocation strategy
 
 ## Phase 1: Prepare the SD Card
 
-### 1. Create Bootable SD Card with Raspberry Pi Imager
+### 1. Write Pre-Downloaded Image to SD Card (Headless Method)
 
-1. Launch **Raspberry Pi Imager**
-2. Choose Device: Select your Raspberry Pi model
-3. Choose OS: **Raspberry Pi OS Lite (64-bit)** - Bookworm or newer
-4. Choose Storage: Your microSD card
+1. Download the latest Raspberry Pi OS Lite (64-bit) image (Bookworm or newer) and store it on the primary data sink (e.g., `/home/ops/sentinelcam/diskimages/raspios/`).
+2. Insert the target microSD card into your Linux workstation or the data sink.
+3. Write the image to the SD card using:
+   ```bash
+   xzcat /home/ops/sentinelcam/diskimages/raspios/2024-11-19-raspios-bookworm-arm64-lite.img.xz | sudo dd of=/dev/sdX status=progress bs=4M
+   sync
+   ```
+   Replace `/dev/sdX` with your SD card device (double-check with `lsblk`).
 
-### 2. Configure OS Customization (IMPORTANT)
+### 2. Post-Process SD Card for Headless Boot
 
-Click the **gear icon** (⚙️) or press `Ctrl+Shift+X` to open advanced options:
+After imaging, run the provided post-processing script to enable headless setup (no keyboard/monitor required):
 
-**General Settings:**
-```yaml
-Hostname: <node-name>.local    # Example: north.local
-Username: ops                  # Standard user for modern nodes
-Password: <secure-password>    # Set a strong password
+```bash
+sudo ./copilot_work/postprocess_pi_sd.sh /dev/sdX <hostname> <username> <password> <timezone> <keyboard_layout>
+# Example:
+sudo ./copilot_work/postprocess_pi_sd.sh /dev/sdX north ops mypassword America/Chicago us
 ```
 
-**Services:**
-```yaml
-Enable SSH: ✅ Yes
-  Use password authentication: ✅ (for initial setup)
-```
+This script will:
+- Enable SSH on first boot
+- Set the hostname (e.g., `north`)
+- Create the user with the specified password
+- Set timezone and keyboard layout
 
-**Locale Settings:**
-```yaml
-Timezone: America/Chicago
-Keyboard layout: us
-```
+**Note:** The script must be run as root and requires `openssl` for password hashing.
 
-**Options:**
-```yaml
-Eject media when finished: ✅
-```
-
-3. Click **Save** then **Write**
-4. Wait for write and verification to complete
-5. Remove SD card when prompted
+3. Eject the SD card and insert it into the Raspberry Pi.
+4. Continue with the initial boot and connection steps below.
 
 ---
 
@@ -159,7 +152,6 @@ all:
           target_hostname: <node-name>       # Final hostname
           target_ip: 192.168.10.YYY          # Final static IP
           target_role: outpost               # Node role
-          target_type: modern                # modern or legacy
           interface: eth0
 ```
 
@@ -171,7 +163,6 @@ all:
           target_hostname: north
           target_ip: 192.168.10.23           # Assigned static IP
           target_role: outpost
-          target_type: modern
           interface: eth0
 ```
 

@@ -31,7 +31,7 @@
     name:
       - python3-picamera2  # Pi Camera support for --system-site-packages (Bookworm+)
     state: present
-  when: 
+  when:
     - skip_base_provisioning | default(false) == false
     - inventory_hostname in groups['modern_nodes']
   tags: system_deps
@@ -41,7 +41,7 @@
     cmd: "python3 -m venv --system-site-packages {{ sentinelcam_venv_opencv }}"
     creates: "{{ sentinelcam_venv_opencv }}/bin/activate"
   become_user: "{{ sentinelcam_user }}"
-  when: 
+  when:
     - skip_base_provisioning | default(false) == false
     - inventory_hostname in groups['modern_nodes']
   tags: venv
@@ -57,18 +57,18 @@
         state: present
       become_user: "{{ sentinelcam_user }}"
       when: inventory_hostname in groups['datasinks']
-      tags: 
+      tags:
         - python_deps
         - local_install
 
     # For other nodes: sync requirements.txt from primary datasink, then install
     - name: "Sync requirements.txt from primary datasink"
-      ansible.builtin.synchronize:
-        src: "{{ sentinelcam_requirements_file }}"
-        dest: "/tmp/sentinelcam_requirements.txt"
-        rsync_opts:
-          - "--chmod=644"
-      delegate_to: "{{ primary_datasink }}"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --chmod=644
+          {{ primary_datasink }}:{{ sentinelcam_requirements_file }}
+          "/tmp/sentinelcam_requirements.txt"
+      become: false
       when: inventory_hostname not in groups['datasinks']
       tags:
         - python_deps
@@ -120,7 +120,7 @@
     enabled: no
     state: stopped
   loop: "{{ disabled_services | default([]) }}"
-  when: 
+  when:
     - disabled_services is defined
     - disabled_services | length > 0
   failed_when: false  # Don't fail if service doesn't exist
@@ -128,6 +128,6 @@
 
 - name: "Include code deployment tasks"
   ansible.builtin.include_tasks: code_deployment.yaml
-  tags: 
+  tags:
     - deploy
     - code_deployment

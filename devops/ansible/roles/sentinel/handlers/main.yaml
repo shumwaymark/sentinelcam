@@ -10,3 +10,9 @@
     name: sentinel
     state: restarted
     daemon_reload: yes
+
+- name: reload udev rules
+  ansible.builtin.shell: |
+    udevadm control --reload-rules
+    udevadm trigger
+  changed_when: true

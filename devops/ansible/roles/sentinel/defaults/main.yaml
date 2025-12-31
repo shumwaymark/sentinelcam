@@ -9,10 +9,22 @@ sentinel_config_file: sentinel.yaml
 sentinel_install_path: "/home/{{ sentinelcam_user }}/sentinel"
 sentinel_config_path: "/home/{{ sentinelcam_user }}/sentinel.yaml"
 
-# OpenVINO environment
+# Hardware Accelerator Configuration
+# -----------------------------------
+# Supported accelerators:
+#   - coral: Google Coral USB Accelerator
+#   - cpu: CPU-only inference (slower, no special hardware needed)
+#   - ncs2: Intel Neural Compute Stick 2 (deprecated, hardware no longer supported by OpenVINO)
+sentinel_accelerator_type: coral
+
+# Virtual environment path
+# For Coral/CPU: use standard SentinelCam venv
+# For NCS2 (legacy): use OpenVINO venv
+sentinel_venv_path: "{{ sentinelcam_venv_opencv }}"
+
+# OpenVINO environment (LEGACY - only for nodes with an NCS2 accelerator)
 openvino_setup_script: "/home/{{ sentinelcam_user }}/openvino/bin/setupvars.sh"
-# Note: openvino_setup_script and sentinel_venv_path defined in group_vars based on sentinelcam_user
-sentinel_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/openvino"
+sentinel_venv_path_openvino: "/home/{{ sentinelcam_user }}/.virtualenvs/openvino"
 
 # IPC socket directory (absolute path)
 sentinel_socket_dir: "{{ sentinel_install_path }}/sockets"
@@ -25,8 +37,10 @@ sentinel_models_path: "{{ sentinel_install_path }}/models"
 # Example: model_version_overrides: { face_recognition: "2025-12-01" }
 model_version_overrides: {}
 
-# Environment setup for accelerators
-sentinel_accelerator_type: ncs2  # [cpu, ncs2, coral]
+# Coral package provisioning flag
+# Set to true to install Coral packages during sentinel role provisioning
+# Packages are sourced from model registry on primary_datasink
+sentinel_install_coral_packages: "{{ sentinel_accelerator_type == 'coral' }}"
 
 # Debug mode flag
 debug_mode: false

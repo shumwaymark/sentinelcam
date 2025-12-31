@@ -1,22 +1,24 @@
 # Node-specific configuration for alpha5 outpost
 ---
-# ImageNode configuration using unified template
+# optional co-processor type for this node
+#imagenode_accelerator_type: coral  # [none, coral, ncs2]
+
+outpost_models:
+  - mobilenet_ssd
+  - mobilenet_ssd_edgetpu
+
+# unified template for imagenode configuration
 imagenode_config:
   node_name: alpha5
-  heartbeat: 10
   cameras:
     P1:                          # PiCamera
       viewname: PiCam3
-      resolution: [640, 480]
+      resolution: (640, 480)
       framerate: 32
-      vflip: false               # PiCamera-specific
-      threaded_read: false       # PiCamera-specific
+      vflip: false
       detector:
+        accelerator: none          # none | ncs2 | coral
         detectobjects: mobilenetssd
-        accelerator: none        # none | ncs2 | coral
-        mobilenetssd:
-          target: cpu            # cpu | ncs2
-          confidence: 0.5
         sentinel_tasks:
           person: GetFaces2
           default: MobileNetSSD_allFrames

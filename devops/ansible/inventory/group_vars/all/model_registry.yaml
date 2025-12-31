@@ -1,14 +1,14 @@
 ---
 # Model Registry Configuration
 # Single source of truth for model versions across the SentinelCam system
-# 
+#
 # This registry maps model names to their current deployed versions (timestamps).
 # Models are stored in the registry on the primary datasink and deployed to nodes
 # as needed. Versioning happens via configuration changes - models stay deployed
 # and only configs/service restarts are needed to switch versions.
 #
 # Version Format: YYYY-MM-DD (timestamp)
-# 
+#
 # To rollback a model:
 #   1. Edit the current_version to desired version
 #   2. Run: ansible-playbook playbooks/deploy-models.yaml
@@ -21,39 +21,92 @@ sentinelcam_models:
   mobilenet_ssd:
     current_version: "2020-12-06"
     previous_version: null
-  
+
+  # Object Detection - MobileNet SSD (COCO classes) for EdgeTPU
+  # Deployed to: sentinels, imagenodes
+  # Framework: TensorFlow Lite (EdgeTPU optimized)
+  mobilenet_ssd_edgetpu:
+    current_version: "2025-12-19"
+    previous_version: null
+
   # Face Detection - OpenCV DNN (ResNet-10 SSD)
   # Deployed to: sentinels
   # Framework: Caffe
   face_detection:
     current_version: "2020-03-25"
     previous_version: null
-  
+
+  # Face Detection - edgetpu-optimized MobileNet SSD
+  # Deployed to: sentinels
+  # Framework: tensorflow lite (EdgeTPU)
+  face_detection_edgetpu:
+    current_version: "2025-12-19"
+    previous_version: null
+
   # Face Recognition - Trained SVM Classifier
   # Deployed to: sentinels (model files), datasinks (facelist.csv)
   # Framework: Pickle (scikit-learn)
   # Linked files: facemodel.pickle, baselines.hdf5, facelist.csv, facedata.hdf5
   face_recognition:
-    current_version: "2025-02-25"  
+    current_version: "2025-02-25"
     previous_version: null
-  
+
   # Haar Cascades - Eye detection for face alignment
   # Deployed to: sentinels
   # Framework: OpenCV XML
   haarcascades:
     current_version: "2020-03-25"
     previous_version: null
-  
+
   # OpenFace Embeddings - Face feature extraction
   # Deployed to: sentinels
   # Framework: Torch
   openface_torch:
     current_version: "2020-03-25"
     previous_version: null
-  
+
   # Vehicle Detection - Future model (placeholder)
   # Deployed to: sentinels, imagenodes (selective)
   # Framework: TBD
   # vehicle_detection:
-  #   current_version: "2025-12-01"
+  #   current_version: "2026-12-25"
   #   previous_version: null
+
+# Coral EdgeTPU Runtime Packages
+# Pre-built wheels and libraries from feranick's ports
+# https://github.com/feranick/libedgetpu
+# https://github.com/feranick/pycoral
+# https://github.com/feranick/TFlite-builds
+#
+# These packages enable Google Coral USB Accelerator support for:
+#   - Sentinel: EdgeTPU inference for object and face detection
+#   - ImageNode: EdgeTPU inference for real-time object detection
+#
+# Package versions are coordinated - all must match TensorFlow version
+# Storage location: {{ sentinelcam_model_registry }}/coral_packages/
+coral_packages:
+  # Current package version (TensorFlow version they're built against)
+  tf_version: "2.17.1"
+  python_version: "3.11"
+
+  # libedgetpu - EdgeTPU runtime library
+  # Install: sudo dpkg -i libedgetpu1-std_*.deb
+  libedgetpu:
+    version: "16.0tf2.17.1-1"
+    deb_package: "libedgetpu1-std_16.0tf2.17.1-1.bookworm_arm64.deb"
+    dev_package: "libedgetpu-dev_16.0tf2.17.1-1.bookworm_arm64.deb"
+    download_url: "https://github.com/feranick/libedgetpu/releases/download/16.0TF2.17.1-1"
+
+  # pycoral - Python API for Coral EdgeTPU
+  # Install: pip install pycoral-*.whl
+  pycoral:
+    version: "2.0.3"
+    wheel: "pycoral-2.0.3-cp311-cp311-linux_aarch64.whl"
+    download_url: "https://github.com/feranick/pycoral/releases/download/2.0.3TF2.17.1"
+
+  # tflite_runtime - TensorFlow Lite runtime for EdgeTPU
+  # Install: pip install tflite_runtime-*.whl
+  tflite_runtime:
+    version: "2.17.1"
+    wheel: "tflite_runtime-2.17.1-cp311-cp311-linux_aarch64.whl"
+    download_url: "https://github.com/feranick/TFlite-builds/releases/download/v2.17.1"

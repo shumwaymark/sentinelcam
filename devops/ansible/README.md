@@ -16,39 +16,19 @@ ansible-playbook playbooks/deploy-<service>.yaml
 ansible-playbook playbooks/deploy-<service>.yaml --tags deploy
 ```
 
-## Architecture
+## Service Roles
 
-### Service Roles
+Each role has detailed documentation in its directory:
 
-- **sentinelcam_base** - Base provisioning for all nodes (users, Python venv, system packages)
-- **camwatcher** - Subscriber for outpost event logging and image capture publication (datasinks)
-- **datapump** - Data retrieval engine, and storage management (datasinks)
-- **imagehub** - Aggregation hub for imagenode requests with data/image payload (datasinks)
-- **imagenode** - Camera image and event publishing (outposts)
-- **sentinel** - AI processing and inference tasks (sentinels)
-- **watchtower** - Wall console, outpost and event viewer (watchtowers)
-- **bastion** - Network gateway, VPN, DNS, firewall (infrastructure - manual only)
-
-### Infrastructure Groups
-
-```yaml
-outposts:        # Outpost camera nodes running imagenode
-  - lab1
-  - east
-  - alpha5
-
-datasinks:       # Data retrieval running camwatcher/datapump/imagehub
-  - data1
-
-sentinels:       # ML pipeline and model inference running sentinel
-  - sentinel
-
-watchtowers:     # Wall console touch screen displays running watchtower
-  - wall1
-
-infrastructure:  # Network services (manual deployment only)
-  - chandler-gate
-```
+| Component | Role README | Purpose |
+|-----------|-------------|---------|
+| imagemode | [roles/imagenode/README.md](../ansible/roles/imagenode/README.md) | Outpost cameras and edge inference |
+| camwatcher | [roles/camwatcher/README.md](../ansible/roles/camwatcher/README.md) | Outpost subscriber (datasink) |
+| datapump | [roles/datapump/README.md](../ansible/roles/datapump/README.md) | Data retrieval (datasink) |
+| imagehub | [roles/imagehub/README.md](../ansible/roles/imagehub/README.md) | Ad hoc image collection (datasink) |
+| sentinel | [roles/sentinel/README.md](../ansible/roles/sentinel/README.md) | AI/ML processing and inference |
+| watchtower | [roles/watchtower/README.md](../ansible/roles/watchtower/README.md) | Wall console, outpost and event viewer |
+| bastion | [roles/bastion/README.md](../ansible/roles/bastion/README.md) | Network gateway/VPN |
 
 ## Deployment Patterns
 
@@ -121,19 +101,6 @@ ansible/
     host_vars/
       <hostname>.yaml                # Per-node configuration (camera type, etc.)
 ```
-
-## Role Documentation
-
-Each role has detailed documentation in its directory:
-
-- [`roles/sentinelcam_base/README.md`](../ansible/roles/sentinelcam_base/README.md) - Base provisioning
-- [`roles/camwatcher/README.md`](../ansible/roles/camwatcher/README.md) - Event monitoring
-- [`roles/datapump/README.md`](../ansible/roles/datapump/README.md) - Data management
-- [`roles/imagehub/README.md`](../ansible/roles/imagehub/README.md) - Image aggregation
-- [`roles/imagenode/README.md`](../ansible/roles/imagenode/README.md) - Camera capture (includes model deployment)
-- [`roles/sentinel/README.md`](../ansible/roles/sentinel/README.md) - AI inference (includes model deployment)
-- [`roles/watchtower/README.md`](../ansible/roles/watchtower/README.md) - System monitoring
-- [`roles/bastion/README.md`](../ansible/roles/bastion/README.md) - Network infrastructure
 
 ## Further Reading
 

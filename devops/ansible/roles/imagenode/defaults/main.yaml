@@ -15,6 +15,22 @@ imagenode_venv_path: "{{ sentinelcam_venv_opencv }}"
 imagenode_service_enabled: true
 imagenode_service_state: started
 
+# Hardware Accelerator Configuration
+# -----------------------------------
+# Supported accelerators:
+#   - coral: Google Coral USB Accelerator (RECOMMENDED for new deployments)
+#   - none: CPU-only inference (slower, no special hardware needed)
+#   - ncs2: Intel Neural Compute Stick 2 (LEGACY - deprecated, no new deployments)
+#
+# Note: NCS2 support requires OpenVINO which is no longer maintained for
+# Raspberry Pi OS Bookworm/Python 3.11. Only use for legacy nodes.
+imagenode_accelerator_type: none  # [coral, none, ncs2]
+
+# Coral package provisioning flag
+# Set to true to install Coral packages during imagenode role provisioning
+# Packages are sourced from model registry on primary_datasink
+imagenode_install_coral_packages: "{{ imagenode_accelerator_type == 'coral' }}"
+
 # Model paths (versioned from registry)
 imagenode_models_path: "{{ imagenode_install_path }}/models"
 
@@ -51,8 +67,11 @@ model_version_overrides: {}
 # These variables construct paths referencing the current model version
 # and are injected into imagenode.yaml.j2 template
 mobilenet_base_path: "{{ imagenode_models_path }}/mobilenet_ssd/{{ model_version_overrides.mobilenet_ssd | default(sentinelcam_models.mobilenet_ssd.current_version) }}"
+mobilenet_edgetpu_path: "{{ imagenode_models_path }}/mobilenet_ssd_edgetpu/{{ model_version_overrides.mobilenet_ssd_edgetpu | default(sentinelcam_models.mobilenet_ssd_edgetpu.current_version) }}"
 mobilenet_prototxt: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.prototxt"
 mobilenet_model: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.caffemodel"
+mobilenet_edgetpu_model: "{{ mobilenet_edgetpu_path }}/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"
+mobilenet_edgetpu_labels: "{{ mobilenet_edgetpu_path }}/coco_labels.txt"
 mobilenet_confidence: 0.5
 
 # Debug mode flag
