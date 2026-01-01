@@ -654,11 +654,11 @@ as a vehicle to centralize knowledge and state.
 
 Additional documentation
 ========================
-- `Version History and Changelog <HISTORY.md>`_
+- `Version history and Changelog <HISTORY.md>`_
 - `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
-- `Facial Recognition Training and Machine Learning Pipeline <docs/FACIAL_RECON_LEARNING.md>`_
-- `Ansible Operations Guide <devops/ansible/README.md>`_
-- `Edge Deployment CI/CD Pipeline <devops/README.rst>`_
+- `Facial recognition, model training, and machine learning pipeline <docs/FACIAL_RECON_LEARNING.md>`_
+- `Ansible playbooks for provisioning, application deployment, and configuration <devops/ansible/README.md>`_
+- `Automated edge deployment and CI/CD pipeline <devops/README.rst>`_
 - `Development blog <https://blog.swanriver.dev>`_
 
 Technology foundation
