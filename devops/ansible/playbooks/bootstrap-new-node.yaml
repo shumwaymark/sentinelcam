@@ -89,12 +89,23 @@
         group: ops
         mode: '0700'
 
-    - name: Set up SSH keys for ops user
+    - name: Deploy Ansible controller's SSH key to ops user
       authorized_key:
         user: ops
         state: present
-        key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub') }}"
-      ignore_errors: yes  # In case key doesn't exist on control node
+        key: "{{ lookup('file', '/home/pi/.ssh/id_rsa.pub') }}"
+        comment: "ansible-controller@buzz"
+      # This allows buzz (Ansible controller) to connect without password
+
+    - name: Deploy additional SSH keys if present
+      authorized_key:
+        user: ops
+        state: present
+        key: "{{ item }}"
+      loop:
+        - "{{ lookup('file', '/home/pi/.ssh/id_ed25519.pub', errors='ignore') }}"
+      when: item != ""
+      ignore_errors: yes
 
     # SSH Configuration
     - name: Enable SSH service

@@ -65,21 +65,27 @@ Refer to `devops/docs/NETWORK_ADDRESSING_STANDARD.md` for IP allocation strategy
 After imaging, run the provided post-processing script to enable headless setup (no keyboard/monitor required):
 
 ```bash
-sudo ./copilot_work/postprocess_pi_sd.sh /dev/sdX <hostname> <username> <password> <timezone> <keyboard_layout>
+sudo ./devops/scripts/utilities/postprocess_pi_sd.sh /dev/sdX <hostname> <password>
+
 # Example:
-sudo ./copilot_work/postprocess_pi_sd.sh /dev/sdX north ops mypassword America/Chicago us
+sudo ./devops/scripts/utilities/postprocess_pi_sd.sh /dev/sda north MySecurePass123
 ```
 
-This script will:
-- Enable SSH on first boot
-- Set the hostname (e.g., `north`)
-- Create the user with the specified password
-- Set timezone and keyboard layout
+**What this does:**
+- ✅ Enables SSH on first boot
+- ✅ Creates `ops` user with specified password
+- ✅ Sets hostname to your chosen name
+- ✅ Configures first-run script for clean initialization
 
-**Note:** The script must be run as root and requires `openssl` for password hashing.
+**Note:** The script requires root access and `openssl` for password hashing.
 
-3. Eject the SD card and insert it into the Raspberry Pi.
-4. Continue with the initial boot and connection steps below.
+**Important:** Remove the SD card safely:
+```bash
+sudo eject /dev/sdX
+```
+
+3. Insert the SD card into the Raspberry Pi and power it on.
+4. Continue with finding the node's DHCP address below.
 
 ---
 
@@ -94,17 +100,25 @@ This script will:
 
 ### 2. Find the Node's DHCP Address
 
-From your Windows control machine:
+From chandler-gate (bastion):
+
+```bash
+# Check dnsmasq DHCP leases (most reliable)
+ssh rocky@chandler-gate.local
+sudo cat /var/lib/misc/dnsmasq.leases | grep north
+
+# Or scan the network
+sudo nmap -sn 192.168.10.0/24 | grep -B 2 "Raspberry"
+```
+
+From Windows control machine:
 
 ```powershell
 # Scan your network for the new node
 arp -a | Select-String "192.168.10"
-
-# Or try to resolve by hostname
-ping <node-name>.local
 ```
 
-Or check your router's DHCP lease table for the newest device.
+Or check your router's DHCP lease table for the newest device with hostname "north".
 
 ### 3. Test Initial SSH Connection
 
@@ -173,11 +187,14 @@ From `buzz` or your control machine:
 ```bash
 cd ~/sentinelcam/devops/ansible
 
-# Test connection to the new node
-ansible -i inventory/bootstrap.yaml new_nodes -m ping
+# Test connection to the new node (will prompt for password)
+ansible -i inventory/bootstrap.yaml new_nodes -m ping -k
 
+# Enter the password you set in postprocess_pi_sd.sh when prompted
 # Should see GREEN success message
 ```
+
+**Important**: Use the `-k` flag to prompt for SSH password. This is required because the controller's SSH key hasn't been installed yet.
 
 ---
 
@@ -197,23 +214,32 @@ The bootstrap playbook (`playbooks/bootstrap_new_node.yaml`) will:
 
 ### 2. Run Bootstrap Playbook
 
+**Important**: Have the password ready that you set during SD card post-processing.
+
 ```bash
 cd ~/sentinelcam/devops/ansible
 
+# Run bootstrap playbook with password authentication
 ansible-playbook -i inventory/bootstrap.yaml \
   playbooks/bootstrap_new_node.yaml \
-  --extra-vars "target_hostname=north target_ip=192.168.10.23"
+  --extra-vars "target_hostname=north target_ip=192.168.10.23" \
+  -k
+
+# When prompted, enter the password from postprocess_pi_sd.sh
+# The playbook will install the controller's SSH key for future passwordless access
 ```
 
 **What to Expect:**
+- Password prompt at start (SSH password: )
 - Task output showing each configuration step
 - Package updates (may take 5-10 minutes)
+- Controller's SSH key installed - no password needed after this
 - Success message at completion
 
 ### 3. Verify Bootstrap
 
 ```bash
-# Test connection using temporary DHCP IP
+# Test connection using temporary DHCP IP (no password needed now - key-based auth)
 ansible -i inventory/bootstrap.yaml new_nodes -m shell -a "hostname"
 # Should return: north
 
@@ -243,9 +269,9 @@ ansible-playbook -i inventory/bootstrap.yaml \
 
 ### 2. Wait for Network Restart
 
-**IMPORTANT**: The node will briefly disconnect during network restart.
+**IMPORTANT**: The node will reboot to ensure clean network configuration.
 
-Wait 30-60 seconds, then test the new static IP:
+Wait for the playbook to complete (it will wait for the node to come back online), then verify:
 
 ```bash
 # Test new static IP
@@ -253,7 +279,31 @@ ping 192.168.10.23
 
 # Test SSH on new IP
 ssh ops@192.168.10.23
+
+# Verify only one IP is active
+ssh ops@192.168.10.23 'ip -4 addr show eth0 | grep inet'
+# Should show ONLY the static IP, no secondary addresses
 ```
+
+### 3. Clear Bastion DHCP Leases
+
+**CRITICAL**: The bastion's dnsmasq may have cached the old DHCP address. Clear it:
+
+```bash
+# From chandler-gate
+ssh rocky@chandler-gate.local
+sudo rm -f /var/lib/misc/dnsmasq.leases
+sudo systemctl restart dnsmasq
+
+# Verify DNS now returns correct IP
+dig @localhost north.local +short
+# Should return: 192.168.10.23 (the static IP, not old DHCP)
+
+# Test name resolution
+ping north.local
+```
+
+Without this step, DNS will return the wrong IP!
 
 ---
 

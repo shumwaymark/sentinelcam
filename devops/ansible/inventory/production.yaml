@@ -20,7 +20,7 @@ all:
               node_name: data1
               node_role: datasink
               interface: eth0
-            sentinel2:
+            sentinel:
               ansible_host: 192.168.10.60
               node_name: sentinel
               node_role: sentinel

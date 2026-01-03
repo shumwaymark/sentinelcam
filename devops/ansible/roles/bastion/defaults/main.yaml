@@ -77,6 +77,7 @@ bastion_dnsmasq:
   generate_from_inventory: true
   inventory_groups:
     - sentinelcam_nodes
+    - ml_trainers
   # Additional static entries not in inventory (optional)
   extra_static_hosts:
     - { name: "gateway", ip: "{{ gateway | default('192.168.10.254') }}" }

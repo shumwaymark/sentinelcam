@@ -60,6 +60,33 @@
         mode: '0644'
       notify: restart systemd-networkd
 
+    - name: Stop and mask dhcpcd to prevent conflicts
+      systemd:
+        name: dhcpcd
+        state: stopped
+        enabled: no
+        masked: yes
+      failed_when: false
+      register: dhcpcd_disabled
+
+    - name: Stop and mask NetworkManager to prevent conflicts
+      systemd:
+        name: NetworkManager
+        state: stopped
+        enabled: no
+        masked: yes
+      failed_when: false
+      register: nm_disabled
+
+    - name: Stop and mask systemd-resolved to prevent DNS conflicts
+      systemd:
+        name: systemd-resolved
+        state: stopped
+        enabled: no
+        masked: yes
+      failed_when: false
+      register: resolved_disabled
+
     - name: Ensure systemd-networkd is enabled
       systemd:
         name: systemd-networkd
@@ -93,6 +120,45 @@
         state: restarted
 
   post_tasks:
+    - name: Remove any secondary DHCP addresses
+      shell:
+        cmd: |
+          ip -4 addr show {{ interface }} | grep "inet " | grep "secondary" | while read -r line; do
+            secondary_ip=$(echo "$line" | cut -d' ' -f6)
+            echo "Removing secondary IP: $secondary_ip"
+            ip addr del $secondary_ip dev {{ interface }} || true
+          done
+      become: yes
+      register: secondary_cleanup
+      changed_when: "'Removing' in secondary_cleanup.stdout"
+
+    - name: Display secondary IP cleanup
+      debug:
+        msg: "{{ secondary_cleanup.stdout_lines }}"
+      when: secondary_cleanup.stdout_lines | length > 0
+
+    - name: Reboot to ensure clean network state
+      reboot:
+        reboot_timeout: 300
+        msg: "Rebooting to apply clean static network configuration"
+      become: yes
+
+    - name: Wait for node to come back online
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Verify only static IP is active
+      shell: |
+        echo "=== Final IP Configuration ==="
+        ip -4 addr show {{ interface }} | grep inet
+      register: final_ip
+      changed_when: false
+
+    - name: Display final IP configuration
+      debug:
+        msg: "{{ final_ip.stdout_lines }}"
+
     - name: Wait for network to stabilize
       wait_for:
         timeout: 10
@@ -103,12 +169,14 @@
         msg:
           - "=== Network Configuration Complete ==="
           - ""
+          - "Node is now accessible at: {{ target_ip }}"
+          - "Hostname: {{ target_hostname }}"
+          - ""
           - "Next steps:"
-          - "1. Wait 30-60 seconds for network to fully restart"
-          - "2. Test connectivity: ping {{ target_ip }}"
-          - "3. Test SSH: ssh {{ ansible_user }}@{{ target_ip }}"
-          - "4. Add node to production inventory with static IP"
-          - "5. Deploy services using role-specific playbooks"
+          - "1. Clear bastion DHCP leases: ssh bastion 'sudo rm /var/lib/misc/dnsmasq.leases && sudo systemctl restart dnsmasq'"
+          - "2. Verify DNS from bastion: dig @localhost {{ target_hostname }}.local +short"
+          - "3. Add node to production inventory with static IP"
+          - "4. Deploy services using role-specific playbooks"
           - ""
           - "Backup location: {{ backup_dir }}"
       run_once: true

@@ -6,19 +6,20 @@
 # Usage:
 #   ansible-playbook playbooks/deploy-ssh-key.yaml
 #   ansible-playbook playbooks/deploy-ssh-key.yaml --limit <target_node>
+#   ansible-playbook playbooks/deploy-ssh-key.yaml --limit ml_trainers
 
 - name: Deploy repository access key to all nodes
-  hosts: sentinelcam_nodes
+  hosts: sentinelcam_nodes:ml_trainers
   gather_facts: false
   become: false
-  
+
   vars:
     # private key should be in ansible-vault
     repo_deploy_private_key: "{{ vault_ssh_private_key }}"
     repo_hostname: "{{ primary_datasink }}"
     repo_ip_address: "{{ hostvars[primary_datasink]['ansible_host'] }}"
     repo_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"
-  
+
   tasks:
     - name: Skip if this is the primary data sink
       ansible.builtin.meta: end_host
@@ -30,13 +31,13 @@
           - "Configuring: {{ inventory_hostname }}"
           - "User: {{ ansible_user }}"
           - "For repository: {{ repo_hostname }} ({{ repo_ip_address }}) as user {{ repo_user }}"
-    
+
     - name: Ensure SSH directory exists
       ansible.builtin.file:
         path: "~/.ssh"
         state: directory
         mode: '0700'
-    
+
     - name: Deploy repository deployment key
       ansible.builtin.copy:
         content: "{{ repo_deploy_private_key }}"
@@ -44,7 +45,7 @@
         mode: '0600'
         owner: "{{ ansible_user }}"
       no_log: true  # Don't log the private key
-    
+
     - name: Configure SSH to use deployment key for repository
       ansible.builtin.blockinfile:
         path: "~/.ssh/config"
@@ -61,13 +62,13 @@
 
 # Deploy key to primary data sink authorized_keys
 - name: Add deployment key to primary data sink authorized_keys
-  hosts: sentinelcam_nodes
+  hosts: sentinelcam_nodes:ml_trainers
   gather_facts: false
   become: false
-  
+
   vars:
     deploy_key: "{{ vault_ssh_public_key }}"
-  
+
   tasks:
     - name: Skip if this is not the primary data sink
       ansible.builtin.meta: end_host
@@ -78,7 +79,7 @@
         path: "~/.ssh"
         state: directory
         mode: '0700'
-    
+
     - name: Add deployment key to authorized_keys
       ansible.builtin.authorized_key:
         user: "{{ ansible_user }}"
@@ -88,15 +89,15 @@
 
 
 - name: Verify repository connectivity from all nodes
-  hosts: sentinelcam_nodes
+  hosts: sentinelcam_nodes:ml_trainers
   gather_facts: false
   become: false
-  
+
   vars:
     repo_hostname: "{{ primary_datasink }}"
     repo_ip_address: "{{ hostvars[primary_datasink]['ansible_host'] }}"
     repo_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"
-  
+
   tasks:
     - name: Test SSH connection to repository
       ansible.builtin.command:
@@ -104,7 +105,7 @@
       register: ssh_test_result
       changed_when: false
       failed_when: false
-    
+
     - name: Display connectivity test result
       ansible.builtin.debug:
         msg:
@@ -112,20 +113,20 @@
           - "Repository: {{ repo_hostname }}"
           - "Result: {{ 'SUCCESS' if ssh_test_result.rc == 0 else 'FAILED' }}"
           - "Output: {{ ssh_test_result.stdout if ssh_test_result.rc == 0 else ssh_test_result.stderr }}"
-    
+
     - name: Test rsync access (dry-run)
       ansible.builtin.command:
         cmd: "rsync -avzn {{ repo_user }}@{{ repo_hostname }}:/etc/hosts /tmp/rsync-test"
       register: rsync_test_result
       changed_when: false
       failed_when: false
-    
+
     - name: Display rsync test result
       ansible.builtin.debug:
         msg:
           - "Rsync test: {{ 'SUCCESS' if rsync_test_result.rc == 0 else 'FAILED' }}"
           - "{{ rsync_test_result.stdout_lines[:5] | default(['No output']) }}"
-    
+
     - name: Fail if connectivity verification failed
       ansible.builtin.fail:
         msg: "Repository connectivity verification failed for {{ inventory_hostname }}"

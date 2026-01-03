@@ -37,7 +37,7 @@ This document records the **actual current IP assignments** for the SentinelCam 
 
 | IP Address | Hostname | User | Role | Status |
 |------------|----------|------|------|--------|
-| 192.168.10.60 | sentinel | pi (legacy) | AI inference (NCS2) | ✅ Active |
+| 192.168.10.60 | sentinel | ops (modern) | AI inference (NCS2) | ✅ Active |
 | 192.168.10.61-69 | - | - | - | Available |
 
 ### Wall Consoles (Watchtowers)
