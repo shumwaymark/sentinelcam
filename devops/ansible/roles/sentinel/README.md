@@ -29,9 +29,40 @@ sentinelcam_ports:
 ### Required Configuration
 
 ```yaml
-sentinel_accelerator_type: ncs2    # cpu | ncs2 | coral
+sentinel_accelerator_type: coral    # cpu | ncs2 | coral
 sentinel_user: "{{ ansible_user }}"  # Service user (pi or ops)
 ```
+
+### Face Detection Model Selection
+
+When using Coral EdgeTPU, choose face detection model:
+
+```yaml
+# In host_vars/<hostname>.yaml
+sentinel_accelerator_type: coral
+sentinel_face_detection_model: blazeface  # ssd_mobilenet | blazeface
+
+# Optional: Override confidence thresholds
+face_detection_confidence:
+  blazeface: 0.6
+  ssd_mobilenet: 0.5
+```
+
+**Model Comparison:**
+- **ssd_mobilenet**: SSD MobileNet V2 (default, general purpose)
+  - Good for general face detection
+  - May produce more false positives at low confidence
+  - Use confidence >= 0.5
+  
+- **blazeface**: BlazeFace from MediaPipe (recommended)
+  - Purpose-built for faces, fewer false positives
+  - Better performance (~30 FPS vs ~14 FPS)
+  - Works well with confidence 0.6-0.7
+  - Two variants: short_range (0-2m) and full_range (0-5m)
+
+**Examples:**
+
+See `inventory/host_vars/sentinel_example.yaml.example` for detailed configuration examples.
 
 ### Optional Overrides
 

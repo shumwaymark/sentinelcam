@@ -64,6 +64,7 @@ deepthink_python_packages:
   - ipykernel
   - matplotlib
   - seaborn
+  - imbalanced-learn  # For SMOTE oversampling
 
 # Debug mode flag
 debug_mode: false

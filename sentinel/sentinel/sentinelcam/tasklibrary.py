@@ -109,14 +109,23 @@ class FaceDetector:
 
     ENGINE_opencvDNN = 0
     ENGINE_edgetpu = 1
+    ENGINE_blazeface = 2
 
     def __init__(self, conf, accelerator="cpu") -> None:
         self.conf = conf  # configuration dictionary
         if accelerator == "coral":
-            self.engine = FaceDetector.ENGINE_edgetpu
+            # Determine which EdgeTPU model type to use
+            model_path = self.conf.get("edgetpu_model", "")
+            if "blazeface" in model_path.lower():
+                self.engine = FaceDetector.ENGINE_blazeface
+                logging.debug("Loading BlazeFace EdgeTPU model")
+            else:
+                self.engine = FaceDetector.ENGINE_edgetpu
+                logging.debug("Loading SSD MobileNet EdgeTPU model")
+
             from pycoral.utils.edgetpu import make_interpreter
             # create interpreter for EdgeTPU model
-            self.net = make_interpreter(self.conf["edgetpu_model"])
+            self.net = make_interpreter(model_path)
             self.net.allocate_tensors()
             # import required modules for EdgeTPU inference
             from pycoral.adapters import common
@@ -142,21 +151,126 @@ class FaceDetector:
 
     def detect(self, frame) -> list:
         rects, labls = [], []
-        if self.engine == MobileNetSSD.ENGINE_edgetpu:
+        if self.engine == FaceDetector.ENGINE_edgetpu:  # Fixed: was MobileNetSSD.ENGINE_edgetpu
             # prepare the frame for object detection
             image = PIL.Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             _, scale = self.common.set_resized_input(
                 self.net, image.size, lambda size: image.resize(size, PIL.Image.LANCZOS))
             self.net.invoke()
             detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+
+            # DEBUG: Log detection count if excessive (per-frame threshold)
+            if len(detections) > 5:
+                logging.warning(f"FaceDetector: Excessive detections per frame ({len(detections)}) - "
+                              f"conf={self.conf['confidence']}, frame_shape={frame.shape}")
+                # Sample first few to see what's happening
+                for i, det in enumerate(detections[:3]):
+                    logging.warning(f"  Detection {i}: id={det.id}, score={det.score:.4f}, "
+                                  f"bbox=({det.bbox.xmin},{det.bbox.ymin},{det.bbox.xmax},{det.bbox.ymax}), "
+                                  f"size=[{det.bbox.width}x{det.bbox.height}]")
+
+            valid_count = 0
             for detection in detections:
                 # extract the bounding box coordinates
                 bbox = detection.bbox
+
+                # More aggressive validation to filter out garbage detections
+                h, w = frame.shape[:2]
+
+                # Check for completely invalid coordinates
+                if (bbox.xmin < 0 or bbox.ymin < 0 or
+                    bbox.xmax > w or bbox.ymax > h or
+                    bbox.xmax <= bbox.xmin or bbox.ymax <= bbox.ymin):
+                    continue
+
+                # Face-specific size constraints (faces should be reasonably sized)
+                # Reject too small (noise) or too large (false positives)
+                if bbox.width < 20 or bbox.height < 20:
+                    continue
+                if bbox.width > w * 0.8 or bbox.height > h * 0.8:
+                    continue
+
+                # Aspect ratio check: faces are roughly square-ish (0.5 to 2.0 ratio)
+                aspect_ratio = bbox.width / bbox.height if bbox.height > 0 else 0
+                if aspect_ratio < 0.5 or aspect_ratio > 2.0:
+                    continue
+
+                valid_count += 1
                 rects.append((bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax))
                 labls.append("Face {}: {:.4f} [{},{}] ({}) {}".format(
                     detection.id,
                     detection.score,
                     bbox.width, bbox.height, bbox.area, bbox.valid))
+
+            # Log filtering effectiveness
+            if len(detections) > 0 and valid_count < len(detections):
+                logging.info(f"FaceDetector: Filtered {len(detections)-valid_count}/{len(detections)} invalid detections")
+
+        elif self.engine == FaceDetector.ENGINE_blazeface:
+            # BlazeFace has different output format - requires custom parsing
+            image = PIL.Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            _, scale = self.common.set_resized_input(
+                self.net, image.size, lambda size: image.resize(size, PIL.Image.LANCZOS))
+
+            # Run inference
+            self.net.invoke()
+
+            # Get output tensors
+            # BlazeFace outputs:
+            # [0] regressors: bounding boxes and keypoints [1, num_anchors, 16]
+            # [1] classificators: confidence scores [1, num_anchors, 1]
+            output_details = self.net.get_output_details()
+
+            # Get score and box tensors
+            if len(output_details) >= 2:
+                scores = self.net.get_tensor(output_details[0]['index'])
+                boxes = self.net.get_tensor(output_details[1]['index'])
+            else:
+                logging.warning("BlazeFace: Unexpected output tensor count")
+                return (rects, labls)
+
+            h, w = frame.shape[:2]
+
+            # Parse detections - BlazeFace uses different anchor-based format
+            num_detections = scores.shape[1] if len(scores.shape) > 1 else scores.shape[0]
+
+            for i in range(num_detections):
+                score = float(scores[0, i, 0]) if len(scores.shape) == 3 else float(scores[i])
+
+                # Apply confidence threshold
+                if score < self.conf["confidence"]:
+                    continue
+
+                # Extract box coordinates (format varies by BlazeFace version)
+                # Typically [ymin, xmin, ymax, xmax] in normalized coordinates
+                if len(boxes.shape) == 3:
+                    box = boxes[0, i, :4]  # First 4 values are bbox
+                else:
+                    box = boxes[i, :4]
+
+                ymin, xmin, ymax, xmax = box
+
+                # Convert to pixel coordinates
+                x1 = int(xmin * w)
+                y1 = int(ymin * h)
+                x2 = int(xmax * w)
+                y2 = int(ymax * h)
+
+                # Validate bounding box
+                if (x1 < 0 or y1 < 0 or x2 > w or y2 > h or
+                    x2 <= x1 or y2 <= y1 or
+                    (x2 - x1) < 20 or (y2 - y1) < 20):
+                    continue
+
+                # Aspect ratio check
+                width = x2 - x1
+                height = y2 - y1
+                aspect_ratio = width / height if height > 0 else 0
+                if aspect_ratio < 0.5 or aspect_ratio > 2.0:
+                    continue
+
+                rects.append((x1, y1, x2, y2))
+                labls.append(f"Face: {score:.4f}")
 
         else:
             h, w = frame.shape[:2]

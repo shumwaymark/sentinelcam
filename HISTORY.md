@@ -41,6 +41,20 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.3-alpha - 2026-01-02
+
+### Fixed
+
+- Addressed gaps in DNS configuration when adding or replacing network nodes. 
+
+### Added
+
+- Initial support for using BlazeFace from Google Mediapipe for face detection. Only the short
+  range model seems to be publicly available. This is currently more suited to a bespoke outpost 
+  deployment intended to collect selfie-style images, such as a door camera. The existing face detection
+  task on the sentinel, with Google Coral support, was modified to use this. So, more of an edge case as 
+  implemented. Categorized as forward-looking and a low-priority development item at this time. 
+
 ## 0.2.2-alpha - 2025-12-31
 
 ### Added
@@ -55,7 +69,7 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - Full support for Google Coral USB Accelerator, for both the outposts and sentinels. This includes 
   software package provisioning, application configuration, as well as model registry and deployment 
   for `mobilenet_ssd_edgetpu` and `face_detection_edgetpu`. Support for face detection on the outposts, 
-  as a supplementary lens for the `SpyGlass`, is a current To Do List item.
+  as a supplementary lens for the `SpyGlass`, is an outstanding To Do List item.
 
 ### Changed
 

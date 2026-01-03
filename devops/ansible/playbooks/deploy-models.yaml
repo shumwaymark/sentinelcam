@@ -119,6 +119,19 @@
       changed_when: face_detection_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: face_detection
 
+    - name: "Deploy BlazeFace EdgeTPU model to sentinel"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_detection_blazeface/{{ model_version_overrides.face_detection_blazeface | default(sentinelcam_models.face_detection_blazeface.current_version) }}/
+          {{ sentinel_models_path }}/face_detection_blazeface/{{ model_version_overrides.face_detection_blazeface | default(sentinelcam_models.face_detection_blazeface.current_version) }}/
+      become: false
+      register: blazeface_sync
+      changed_when: blazeface_sync.stdout is search('Number of .*files transferred.*[1-9]')
+      tags:
+        - face_detection
+        - blazeface
+
     - name: "Deploy face recognition model files to sentinel"
       ansible.builtin.command:
         cmd: >
@@ -129,6 +142,42 @@
       become: false
       register: face_recognition_sync
       changed_when: face_recognition_sync.stdout is search('Number of .*files transferred.*[1-9]')
+      tags: face_recognition
+
+    - name: "Check if facelist.csv already exists on sentinel"
+      ansible.builtin.stat:
+        path: "{{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facelist.csv"
+      register: facelist_exists
+      tags: face_recognition
+
+    - name: "Check if facedata.hdf5 already exists on sentinel"
+      ansible.builtin.stat:
+        path: "{{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facedata.hdf5"
+      register: facedata_exists
+      tags: face_recognition
+
+    - name: "Deploy initial facelist.csv to new sentinel (initial provisioning only)"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facelist.csv
+          {{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facelist.csv
+      become: false
+      when: not facelist_exists.stat.exists
+      register: facelist_initial_sync
+      changed_when: facelist_initial_sync.stdout is search('Number of .*files transferred.*[1-9]')
+      tags: face_recognition
+
+    - name: "Deploy initial facedata.hdf5 to new sentinel (initial provisioning only)"
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --update --checksum
+          {{ repo_user }}@{{ repo_ip }}:{{ sentinelcam_model_registry }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facedata.hdf5
+          {{ sentinel_models_path }}/face_recognition/{{ model_version_overrides.face_recognition | default(sentinelcam_models.face_recognition.current_version) }}/facedata.hdf5
+      become: false
+      when: not facedata_exists.stat.exists
+      register: facedata_initial_sync
+      changed_when: facedata_initial_sync.stdout is search('Number of .*files transferred.*[1-9]')
       tags: face_recognition
 
     - name: "Deploy haarcascades model to sentinel"

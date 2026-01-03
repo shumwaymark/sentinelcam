@@ -7,10 +7,15 @@ all_frames: False         # restrict face detection to images with 'person' dete
 camwatcher_update: True
 
 face_detection:
-    confidence: 0.1
+    confidence: 0.5  # Increased from 0.1 - EdgeTPU models need higher threshold
     # OpenCV DNN
     prototxt_path: /home/ops/sentinel/models/openface_dnn_face/deploy.prototxt
     model_path: /home/ops/sentinel/models/openface_dnn_face/res10_300x300_ssd_iter_140000.caffemodel
     target: cpu  # [cpu, myriad]
-    # Google Coral USB
+    # Google Coral USB - Model Options:
+    # Option 1: SSD MobileNet V2 (current default)
     edgetpu_model: /usr/share/edgetpu/examples/models/ssd_mobilenet_v2_face_quant_postprocess_edgetpu.tflite
+    # Option 2: BlazeFace Short Range (0-2m, recommended for surveillance)
+    # edgetpu_model: /home/ops/sentinel/models/face_detection_blazeface/face_detection_short_range_edgetpu.tflite
+    # Option 3: BlazeFace Full Range (0-5m)
+    # edgetpu_model: /home/ops/sentinel/models/face_detection_blazeface/face_detection_full_range_edgetpu.tflite

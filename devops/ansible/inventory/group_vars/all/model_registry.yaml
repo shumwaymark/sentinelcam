@@ -50,6 +50,18 @@ sentinelcam_models:
     current_version: "2025-12-19"
     previous_version: null
 
+  # Face Detection - BlazeFace (MediaPipe) for EdgeTPU
+  # Deployed to: sentinels
+  # Framework: TensorFlow Lite (EdgeTPU optimized)
+  # Two variants: short_range (0-2m) and full_range (0-5m)
+  # only the short_range variant is currently available
+  face_detection_blazeface:
+    current_version: "2026-01-02"
+    previous_version: null
+    variants:
+      short_range: "face_detection_short_range.tflite"
+      #full_range: "face_detection_full_range.tflite"
+
   # Face Recognition - Trained SVM Classifier
   # Deployed to: sentinels (model files), datasinks (facelist.csv)
   # Framework: Pickle (scikit-learn)

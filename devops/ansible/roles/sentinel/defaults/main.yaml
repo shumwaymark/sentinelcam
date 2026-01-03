@@ -42,6 +42,43 @@ model_version_overrides: {}
 # Packages are sourced from model registry on primary_datasink
 sentinel_install_coral_packages: "{{ sentinel_accelerator_type == 'coral' }}"
 
+# Face Detection Model Selection
+# --------------------------------
+# Supported EdgeTPU face detection models:
+#   - ssd_mobilenet: SSD MobileNet V2 (default, works with get_objects())
+#   - blazeface: BlazeFace from MediaPipe (recommended, fewer false positives)
+#     - Uses full_range variant (0-5m) - suitable for surveillance
+#     - short_range variant (0-2m) is for mobile/selfie use cases
+#
+# Model selection only applies when sentinel_accelerator_type == 'coral'
+# CPU and NCS2 modes always use OpenCV DNN (res10_300x300_ssd)
+sentinel_face_detection_model: ssd_mobilenet  # [ssd_mobilenet, blazeface]
+
+# BlazeFace variant selection (when sentinel_face_detection_model == 'blazeface')
+#   - full: Full range (0-5m) - RECOMMENDED for surveillance cameras
+#   - short: Short range (0-2m) - for mobile/selfie applications
+sentinel_blazeface_variant: full  # [full, short]
+
+# Face Detection Model Paths (versioned from registry)
+face_detection_base_path: "{{ sentinel_models_path }}/face_detection/{{ model_version_overrides.face_detection | default(sentinelcam_models.face_detection.current_version) }}"
+face_detection_edgetpu_path: "{{ sentinel_models_path }}/face_detection_edgetpu/{{ model_version_overrides.face_detection_edgetpu | default(sentinelcam_models.face_detection_edgetpu.current_version) }}"
+face_detection_blazeface_path: "{{ sentinel_models_path }}/face_detection_blazeface/{{ model_version_overrides.face_detection_blazeface | default(sentinelcam_models.face_detection_blazeface.current_version) }}"
+
+# Face Detection Model Files
+face_detection_prototxt: "{{ face_detection_base_path }}/deploy.prototxt"
+face_detection_caffemodel: "{{ face_detection_base_path }}/res10_300x300_ssd_iter_140000.caffemodel"
+face_detection_ssd_mobilenet_model: "{{ face_detection_edgetpu_path }}/ssd_mobilenet_v2_face_quant_postprocess_edgetpu.tflite"
+face_detection_blazeface_short_model: "{{ face_detection_blazeface_path }}/face_detection_short_range_edgetpu.tflite"
+face_detection_blazeface_full_model: "{{ face_detection_blazeface_path }}/face_detection_full_range_edgetpu.tflite"
+
+# Face Detection Confidence Thresholds (model-specific defaults)
+# Can be overridden in host_vars per-host
+face_detection_confidence:
+  cpu: 0.5
+  ncs2: 0.5
+  ssd_mobilenet: 0.5
+  blazeface: 0.5  # Full range works well at 0.5
+
 # Debug mode flag
 debug_mode: false
 
