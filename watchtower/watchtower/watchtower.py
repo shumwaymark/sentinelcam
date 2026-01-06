@@ -35,7 +35,7 @@ SOCKDIR = CFG["socket_dir"]
 class UserPage(enum.IntEnum):
     """User interface page types"""
     PLAYER = 0  # Main page, outpost and event viewer
-    OUTPOSTS = 1  # List of outpost views to choose from  
+    OUTPOSTS = 1  # List of outpost views to choose from
     SETTINGS = 2  # To be determined: settings, controls, and tools cafe
 
 class PlayerCommand(enum.Enum):
@@ -72,7 +72,7 @@ LOG_FORMAT = '%(asctime)s - %(levelname)s - %(processName)s - %(threadName)s - %
 LOG_FILE = CFG.get("log_file", os.path.join(os.path.expanduser("~"), "watchtower.log"))
 
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL), 
+    level=getattr(logging, LOG_LEVEL),
     format=LOG_FORMAT,
     handlers=[
         logging.FileHandler(LOG_FILE)
@@ -118,8 +118,8 @@ class RingWire:
         if self._wire in events:
             return events[self._wire] == zmq.POLLIN
         else:
-            return False    
-    
+            return False
+
     def recv(self) -> tuple:
         return msgpack.unpackb(self._wire.recv(), use_list=False)
 
@@ -137,7 +137,7 @@ class RingBuffer:
         self._buffers = [sharedctypes.RawArray('c', shape[0]*shape[1]*shape[2]) for i in range(length)]
         self._frames = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in self._buffers]
         self.reset()
-    
+
     def reset(self) -> None:
         self._count = 0
         self._start = 0
@@ -168,22 +168,22 @@ class RingBuffer:
             return self._start
 
     def frame_complete(self) -> None:
-        # Advance the start pointer only when the consuming process is done with it. 
-        # This avoids an inter-process race condition. After initially reading from 
-        # the buffer, invoking this just prior to subsequent get() operations prevents 
-        # the provider from overlaying the current frame in use. 
+        # Advance the start pointer only when the consuming process is done with it.
+        # This avoids an inter-process race condition. After initially reading from
+        # the buffer, invoking this just prior to subsequent get() operations prevents
+        # the provider from overlaying the current frame in use.
         self._count -= 1
         self._start += 1
         self._start %= self._length
 
-# multiprocessing class implementing a child subprocess for populating a ring buffer of images 
+# multiprocessing class implementing a child subprocess for populating a ring buffer of images
 class PlayerDaemon:
     def __init__(self, wirename, ringbuffers):
         self.wirename = wirename
         self.ringbuffers = ringbuffers
         self.datafeeds = {}
         self.commandQueue = multiprocessing.Queue()
-        self.stateQueue = multiprocessing.Queue() 
+        self.stateQueue = multiprocessing.Queue()
         self.runswitch = multiprocessing.Value('i', 0)
         self.process = multiprocessing.Process(target=self._data_monster, args=(
             self.commandQueue, self.stateQueue, self.runswitch, self.wirename, self.ringbuffers))
@@ -193,13 +193,13 @@ class PlayerDaemon:
         if not pump in self.datafeeds:
             self.datafeeds[pump] = DataFeed(pump, timeout=7.0)
         return self.datafeeds[pump]
-        
+
     def _data_monster(self, commandQueue, stateQueue, keepgoing, wirename, ringbuffers):
         daemon_logger = logging.getLogger("watchtower.daemon")
         daemon_logger.info("PlayerDaemon subprocess started")
         ringwire = RingWire(wirename)
         # Wait here for handshake from player thread in parent process
-        handshake = ringwire.recv()  
+        handshake = ringwire.recv()
         ringwire.send(handshake)  # acknowledge and get started
         daemon_logger.debug("Ring wire handshake completed")
         frametimes = []
@@ -207,7 +207,7 @@ class PlayerDaemon:
         date, event, ring, receiver = None, None, None, None
         while True:
             cmd = commandQueue.get()
-            # Connect to image source: outpost/view or datapump. 
+            # Connect to image source: outpost/view or datapump.
             # Establish ringbuffer selection by image size.
             # Reset the buffer, then recv, send, read, and iterate.
             # Keep ring buffer populated until stopped or out of data.
@@ -215,7 +215,7 @@ class PlayerDaemon:
                 (datapump, publisher, view) = cmd[1:]
                 # This taps into a live image publication stream. There is
                 # no end to this; it always represents current data capture.
-                # Just keep going here forever until explicitly stopped. 
+                # Just keep going here forever until explicitly stopped.
                 if not receiver:
                     receiver = ImageSubscriber(publisher, view)
                 receiver.subscribe(publisher, view)
@@ -223,7 +223,7 @@ class PlayerDaemon:
                 try:
                     frame = simplejpeg.decode_jpeg(receiver.receive(timeout=7.0)[1], colorspace='BGR')
                     wh = (frame.shape[1], frame.shape[0])
-                    if ring != wh:  
+                    if ring != wh:
                         ring = wh
                         ringbuffer = ringbuffers[ring]
                 except TimeoutError as e:
@@ -263,12 +263,12 @@ class PlayerDaemon:
                             except Exception as e:
                                 daemon_logger.exception(f"VIEWER mode: trapped exception reading from {publisher}: {str(e)}")
                                 error_occurred = True
-                    stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped 
+                    stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped
                     receiver.stop()
-            else:  
-                (datapump, viewname, eventdate, eventid, imgsize) = cmd[1:]   
+            else:
+                (datapump, viewname, eventdate, eventid, imgsize) = cmd[1:]
                 # Unlike a live outpost viewer, datapump events have a definite end. Maintain state and keep
-                # the ring buffer populated. An exhausted ring buffer is considered EOF when reading in either 
+                # the ring buffer populated. An exhausted ring buffer is considered EOF when reading in either
                 # direction. Send an EOF response to the Player and reset to the beginning in either case.
                 feed = self._setPump(datapump)
                 try:
@@ -298,7 +298,7 @@ class PlayerDaemon:
                             if not started:
                                 started = True
                             else:
-                                ringbuffer.frame_complete() 
+                                ringbuffer.frame_complete()
                             if ringbuffer.isEmpty() or error_occurred:
                                 ringwire.send(-1)
                                 forward = True
@@ -316,7 +316,7 @@ class PlayerDaemon:
                                 except Exception as e:
                                     daemon_logger.exception(f"EVENT mode: trapped exception {str(e)} reading from datapump ({datapump},{eventdate},{eventid})")
                                     error_occurred = True
-                    stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped 
+                    stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped
 
     def start(self, command_block):
         self.runswitch.value = 1
@@ -336,7 +336,7 @@ class TextHelper:
         self._textSize = 0.5
         self._thickness = 1
         self._textColors = {}
-        self._bboxColors = {}        
+        self._bboxColors = {}
         self.setColors(['Unknown'])
     def setTextColor(self, bgr) -> tuple:
         luminance = ((bgr[0]*.114)+(bgr[1]*.587)+(bgr[2]*.299))/255
@@ -365,7 +365,7 @@ class Player:
         self.current_pump = None
         self.outpost_views = views
         self.state_manager = state_manager
-        
+
         self._thread = threading.Thread(daemon=True, target=self._playerThread, args=(dataReady, source_queue))
         self._thread.start()
 
@@ -402,15 +402,15 @@ class Player:
         if not pump in self.datafeeds:
             self.datafeeds[pump] = DataFeed(pump, timeout=7.0)
         return self.datafeeds[pump]
-    
+
     def _gatherEventResults(self, date, event, datapump) -> tuple:
         if datapump != self.current_pump:
             self.datafeed = self._setPump(datapump)
             self.current_pump = datapump
-        cwIndx = self.datafeed.get_date_index(date)  
+        cwIndx = self.datafeed.get_date_index(date)
         evtSets = cwIndx.loc[cwIndx['event'] == event]
         evtData = pd.DataFrame(columns=TRKCOLS)
-        refsort = {'trk': 0, 'obj': 1, 'fd1': 2, 'fr1': 3}  # z-ordering for tracking result labels
+        refsort = {'trk': 0, 'obj': 1, 'vsp': 2, 'fd1': 3, 'fr1': 4}  # z-ordering for tracking result labels
         if len(evtSets.index) > 0:
             trkTypes = [t for t in evtSets['type']]
             # Process each tracking type individually to handle missing data gracefully
@@ -423,12 +423,12 @@ class Player:
                     logger.debug(f"No tracking data for {e.date},{e.evt},{e.trk}")
                 except Exception as e:
                     logger.error(f"Failure retrieving tracking data for {e.date},{e.evt},{e.trk}: {str(e)}")
-            
+
             # Only proceed with concatenation if we have any data
             if all_tracking_data:
                 try:
-                    evtData = pd.concat([data for _, data in all_tracking_data], 
-                                      keys=[t for t, _ in all_tracking_data], 
+                    evtData = pd.concat([data for _, data in all_tracking_data],
+                                      keys=[t for t, _ in all_tracking_data],
                                       names=['ref'])
                     evtData['name'] = evtData.apply(lambda x: str(x['classname']).split(':')[0], axis=1)
                     self.texthelper.setColors(evtData['name'].unique())
@@ -441,14 +441,14 @@ class Player:
             frametimes = self.datafeed.get_image_list(date, event)
         except DataFeed.ImageSetEmpty as e:
             logger.error(f"No image data for {e.date},{e.evt}")
-        except Exception as e: 
+        except Exception as e:
             logger.error(f"Failure retrieving image list for {e.date},{e.evt}: {str(e)}")
         refresults = tuple(
-            tuple(  
-                (rec.name, rec.classname, rec.rect_x1, rec.rect_y1, rec.rect_x2, rec.rect_y2) 
+            tuple(
+                (rec.name, rec.classname, rec.rect_x1, rec.rect_y1, rec.rect_x2, rec.rect_y2)
                     for rec in evtData.loc[evtData['timestamp'] == frametime].sort_values(
-                        by=['ref'], key=lambda x: x.map(refsort)).itertuples() 
-            ) 
+                        by=['ref'], key=lambda x: x.map(refsort)).itertuples()
+            )
             for frametime in frametimes
         )
         return (frametimes, refresults)
@@ -456,11 +456,11 @@ class Player:
     def _set_cache(self, view, evtkey, frametimes, refresults) -> None:
         with dataLock:
             self.outpost_views[view].eventCache[evtkey] = (frametimes, refresults)
-    
+
     def _get_cache(self, view, evtkey) -> tuple:
         with dataLock:
             return self.outpost_views[view].eventCache.get(evtkey, ([], ()))
-    
+
     def _playerThread(self, dataReady, source_queue) -> None:
         self.paused.set()
         image = blank_image(1,1)
@@ -476,11 +476,11 @@ class Player:
             frametimes = []
             frameidx = 0
             forward = True
-            if cmd[0] == PlayerCommand.EVENT:  
+            if cmd[0] == PlayerCommand.EVENT:
                 (view, date, event, size) = cmd[2:]
-                # For events, retrieve all tracking data and the list of image timestamps. First, 
+                # For events, retrieve all tracking data and the list of image timestamps. First,
                 # apply a blur effect to the player display as visible feedback to the button press.
-                self.set_imgdata(cv2.blur(image, (15, 15))) 
+                self.set_imgdata(cv2.blur(image, (15, 15)))
                 dataReady.set()
                 evtkey = (date, event)
                 if evtkey in self.outpost_views[view].eventCache:
@@ -515,7 +515,7 @@ class Player:
 
                                 if CFG['viewfps']:
                                     self.fps.update()
-                                    text = "FPS: {:.2f}".format(self.fps.fps()) 
+                                    text = "FPS: {:.2f}".format(self.fps.fps())
                                     cv2.putText(image, text, (10, image.shape[0]-10),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
 
@@ -553,7 +553,7 @@ class Player:
                             logger.error(f"IndexError cmd={cmd[0]} frameidx={frameidx} of {len(frametimes)}")
                         except Exception as ex:
                             logger.exception(f'Unhandled exception caught in Player thread: {str(ex)}')
-    
+
     def stop(self) -> None:
         logger.debug("Player thread paused.")
         self.paused.set()
@@ -572,14 +572,14 @@ class PlayerStateManager:
         self.message_queue = queue.Queue()
         self.current_state = PlayerState.STARTING
         self.player_command = None
-        
+
     def request_transition(self, reason, component, details=None):
         logger.debug(f"Requesting transition from {self.current_state}: {reason}, {component}")
         if reason == StateChange.LOAD:
             if self.current_state == PlayerState.PLAYING:
                 self.message_queue.put((StateChange.TOGGLE, component, None))
         self.message_queue.put((reason, component, details))
-        
+
     def process_transitions(self):
         try:
             while not self.message_queue.empty():
@@ -591,7 +591,7 @@ class PlayerStateManager:
                     self.app.sourceCmds.put(details)
                     self.player_command = details[0]
                     new_state = PlayerState.LOADING
-                
+
                 elif reason == StateChange.READY:
                     new_state = PlayerState.READY
                     if self.app.auto_play:
@@ -601,7 +601,7 @@ class PlayerStateManager:
                         else:
                             self.app.viewer.start()
                             new_state = PlayerState.PLAYING
-                
+
                 elif reason == StateChange.TOGGLE:
                     if self.current_state == PlayerState.ERROR:
                         new_state = PlayerState.ERROR
@@ -616,7 +616,7 @@ class PlayerStateManager:
                         else:
                             self.app.viewer.start()
                             new_state = PlayerState.PLAYING
-                
+
                 elif reason == StateChange.EOF:
                     self.app.player_daemon.stop()
                     new_state = PlayerState.IDLE
@@ -635,7 +635,7 @@ class PlayerStateManager:
 
         except queue.Empty:
             pass
-            
+
 class SentinelSubscriber:
     def __init__(self, sentinel) -> None:
         self.eventQueue = multiprocessing.Queue()
@@ -644,13 +644,14 @@ class SentinelSubscriber:
         self.process.start()
 
     def _sentinel_reader(self, sentinel, eventQueue):
+        daemon_logger = logging.getLogger("watchtower.SentinelSubscriber")
         # subscribe to Sentinel result publication
         sentinel_log = zmq.Context.instance().socket(zmq.SUB)
         sentinel_log.subscribe(b'')
         sentinel_log.connect(sentinel)
         event_lists = {}
         # consume every logging record published from the sentinel, watching for new events
-        print("SentinelSubscriber started.")
+        daemon_logger.info("SentinelSubscriber started.")
         while True:
             topic, msg = sentinel_log.recv_multipart()
             topics = topic.decode('utf8').strip().split('.')
@@ -670,10 +671,17 @@ class SentinelSubscriber:
                             else:
                                 event_lists[viewkey] = [evtkey]
                                 eventQueue.put((viewkey, evtkey))
+                        elif logdata['flag'] == 'DEL':
+                            # Event deleted from datasink, purge from all view event lists
+                            evtkey = (logdata['date'], logdata['event'], logdata['pump'])
+                            for view_events in event_lists.values():
+                                if evtkey in view_events:
+                                    view_events.remove(evtkey)
+                            daemon_logger.debug(f"Purged deleted event {logdata['event']}")
                 except (KeyError, ValueError):
                     pass
-                except Exception:  
-                    print(f"WatchTower exception parsing sentinel log '{message}'")
+                except Exception as e:
+                    daemon_logger.exception(f"Exception parsing sentinel log '{message}': {str(e)}")
 
 class EventListUpdater:
     def __init__(self, eventQ, newEvent, outpost_views):
@@ -690,8 +698,8 @@ class EventListUpdater:
         datafeeds = {}
         sink_events = {}
         day = str(date.today())
-        # populate an initial event list for each view 
-        for (sink, pump) in CFG['datapumps'].items():                
+        # populate an initial event list for each view
+        for (sink, pump) in CFG['datapumps'].items():
             if not pump in datafeeds:
                 datafeeds[pump] = DataFeed(pump)
             feed = datafeeds[pump]
@@ -713,13 +721,27 @@ class EventListUpdater:
                     day = evtlist[-1][1]
                     event = evtlist[-1][2]
                     trkdata = feed.get_tracking_data(day, event)
-                    persons = trkdata.loc[trkdata['classname'].str.startswith('person')]
-                    sample_frame = len(persons.index) // 2
-                    self._image = simplejpeg.decode_jpeg(
-                        feed.get_image_jpg(day, event, persons.iloc[sample_frame]['timestamp']), 
-                        colorspace='BGR')
+
+                    # Priority fallback: person > vehicle > anything detected
+                    for classfilter in ['person', 'car|truck|bus', '.']:  # '.' matches anything
+                        candidates = trkdata.loc[trkdata['classname'].str.contains(classfilter, case=False, regex=True)]
+                        if len(candidates.index) > 0:
+                            sample_frame = len(candidates.index) // 2
+                            self._image = simplejpeg.decode_jpeg(
+                                feed.get_image_jpg(day, event, candidates.iloc[sample_frame]['timestamp']),
+                                colorspace='BGR')
+                            break
+                    else:
+                        # No tracking data at all - use blank thumbnail
+                        self._image = blank_image(213, 160)
+
+                except (DataFeed.TrackingSetEmpty, DataFeed.ImageSetEmpty):
+                    # Event deleted or incomplete - use blank thumbnail
+                    logger.info(f"Event {event} unavailable (deleted or incomplete)")
+                    self._image = blank_image(213, 160)
                 except Exception:
                     logger.exception(f"EventListUpdater gather thumbnail for [{v.view}]")
+                    self._image = blank_image(213, 160)
                 newEvent.set()
                 while newEvent.is_set():
                     sleep(0.01)
@@ -735,18 +757,25 @@ class EventListUpdater:
                 cwIndx = feed.get_date_index(evtDate)
                 trkevt = cwIndx.loc[(cwIndx['event'] == event) & (cwIndx['type'] == 'trk')]
                 if len(trkevt.index) > 0:
-                    evtRec = trkevt.iloc[0] 
+                    evtRec = trkevt.iloc[0]
                     trkdata = feed.get_tracking_data(evtDate, event)
-                    persons = trkdata.loc[trkdata['classname'].str.startswith('person')]
-                    sample_frame = len(persons.index) // 2
-                    evtRef = (evtRec.timestamp, evtDate, event, (evtRec.width, evtRec.height))
-                    self._eventData = (view, evtRef)
-                    self._image = simplejpeg.decode_jpeg(
-                        feed.get_image_jpg(evtDate, event, persons.iloc[sample_frame]['timestamp']), 
-                        colorspace='BGR')
-                    newEvent.set()
-                    while newEvent.is_set():
-                        sleep(0.1)
+
+                    # Priority fallback: person > vehicle > anything detected
+                    for classfilter in ['person', 'car|truck|bus', '.']:  # '.' matches anything
+                        candidates = trkdata.loc[trkdata['classname'].str.contains(classfilter, case=False, regex=True)]
+                        if len(candidates.index) > 0:
+                            sample_frame = len(candidates.index) // 2
+                            evtRef = (evtRec.timestamp, evtDate, event, (evtRec.width, evtRec.height))
+                            self._eventData = (view, evtRef)
+                            self._image = simplejpeg.decode_jpeg(
+                                feed.get_image_jpg(evtDate, event, candidates.iloc[sample_frame]['timestamp']),
+                                colorspace='BGR')
+                            newEvent.set()
+                            while newEvent.is_set():
+                                sleep(0.1)
+                            break
+            except (DataFeed.TrackingSetEmpty, DataFeed.ImageSetEmpty):
+                logger.info(f"Event {event} unavailable (deleted or incomplete)")
             except Exception:
                 logger.exception("EventListUpdater trapped exception")
 
@@ -782,7 +811,7 @@ class OutpostView:
             if len(self.eventlist) >= self.max_events:
                 # Remove cached data for the oldest event before removing it
                 old_event = self.eventlist[0]
-                event_key = (old_event[1], old_event[2]) 
+                event_key = (old_event[1], old_event[2])
                 if event_key in self.eventCache:
                     del self.eventCache[event_key]
                 self.eventlist.pop(0)
@@ -796,12 +825,12 @@ class OutpostView:
     def update_thumbnail(self, image):
         self.thumbnail = imutils.resize(image, width=213)
 
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - # 
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - #
 #                                 All user interface logic follows below                                              #
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - # 
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - #
 
 class MenuPanel(ttk.Frame):
-    ''' A button-press vertically scrolled frame; with credit due to a couple of posts on Stack Overflow. 
+    ''' A button-press vertically scrolled frame; with credit due to a couple of posts on Stack Overflow.
 
            https://stackoverflow.com/questions/16188420/tkinter-scrollbar-for-frame/
            https://stackoverflow.com/questions/56165257/touchscreen-scrolling-tkinter-python
@@ -831,7 +860,7 @@ class MenuPanel(ttk.Frame):
         # update the scrollbars to match the size of the inner frame
         size = (width, height) # visible scrolling region
         canvas.config(scrollregion="0 0 %s %s" % size)
-        # update the canvass width 
+        # update the canvass width
         canvas.config(width=self.canvaswidth)
         # update the inner frame width to fill the canvas
         canvas.itemconfigure(interior_id, width=self.canvaswidth)
@@ -873,7 +902,7 @@ class OutpostMenuitem(ttk.Frame):
         self.image = convert_tkImage(v.thumbnail)
         self.label = tk.StringVar(value=v.menulabel)
         self.v = tk.Label(self, image=self.image, borderwidth=0, highlightthickness=0)
-        self.t = ttk.Label(self, textvariable=self.label, font=('TkCaptionFont', 12), 
+        self.t = ttk.Label(self, textvariable=self.label, font=('TkCaptionFont', 12),
                            background="black", foreground="chartreuse", justify="center")
         self.v.grid(column=0, row=0)
         self.t.grid(column=0, row=1)
@@ -919,10 +948,10 @@ class SettingsPage(tk.Canvas):
         self.tag_bind(id, "<Button-1>", quit)
 
 class OutpostPage(tk.Canvas):
-    # Provide room on the right for a non-scrolling region. This is a 3-across 
-    # presentation, allowing for padding in all directions around each item. 
-    # That plus an optional scrollbar should leave enough space on the far 
-    # right for a vertical button panel. 
+    # Provide room on the right for a non-scrolling region. This is a 3-across
+    # presentation, allowing for padding in all directions around each item.
+    # That plus an optional scrollbar should leave enough space on the far
+    # right for a vertical button panel.
     # Currently assumes a (213, 160) sized thumbnail.
     def __init__(self, outpost_views):
         tk.Canvas.__init__(self, width=800, height=480, borderwidth=0, highlightthickness=0, background="black")
@@ -1007,7 +1036,7 @@ class PlayerPage(tk.Canvas):
     def pause(self):
         if not self.paused:
             self.play_pause()
-   
+
     def play(self):
         if self.paused:
             self.play_pause()
@@ -1052,30 +1081,30 @@ class Application(ttk.Frame):
         self.alloc_ring_buffers()
         self.gather_view_definitions()
         self._current_view = None
-        
+
         # Create the state management system
         self.state_manager = PlayerStateManager(self)
 
         # Thread data synchronization
         self.dataReady = threading.Event()
-        self.newEvent = threading.Event()        
+        self.newEvent = threading.Event()
         self.sourceCmds = queue.Queue()
-        
+
         self.wirename = f"{SOCKDIR}/PlayerDaemon"
         self.player_daemon = PlayerDaemon(self.wirename, self._ringbuffers)
         self.sentinel_subscriber = SentinelSubscriber(CFG['sentinel'])
         self.eventList_updater = EventListUpdater(self.sentinel_subscriber.eventQueue, self.newEvent, self.outpost_views)
-        self.pages = [PlayerPage(), 
-                      OutpostPage(self.outpost_views), 
+        self.pages = [PlayerPage(),
+                      OutpostPage(self.outpost_views),
                       SettingsPage()]
         self.auto_play = False
         self.auto_pause = None
         self.player_panel = self.pages[UserPage.PLAYER]
         self.player_panel.grid(row=0, column=0)
         self.current_page = UserPage.PLAYER
-        
+
         self.viewer = Player(self.dataReady, self.sourceCmds, self.wirename, self._rawBuffers, self.outpost_views, self.state_manager)
-        
+
         self.master.bind_all('<Any-ButtonPress>', self.reset_inactivity)
         self.select_outpost_view(CFG['default_view'])
         self.update()
@@ -1109,7 +1138,7 @@ class Application(ttk.Frame):
     def set_styling(self):
         style = ttk.Style()
         style.configure("TFrame", background="black")
-    
+
     def show_page(self, page):
         if page != self.current_page:
             self.pages[self.current_page].grid_remove()
@@ -1118,7 +1147,7 @@ class Application(ttk.Frame):
 
     def select_outpost_view(self, viewname=None, auto_play=False):
         """Select a live outpost view"""
-        if not viewname: 
+        if not viewname:
             viewname = self._current_view
         if viewname != self._current_view:
             self._current_view = viewname
@@ -1126,7 +1155,7 @@ class Application(ttk.Frame):
         source_cmd = ((PlayerCommand.VIEWER, view.datapump, view.publisher, viewname), view.imgsize)
         self.state_manager.request_transition(StateChange.LOAD, "app.select_outpost_view()", source_cmd)
         self.auto_play = auto_play
-        self.eventIdx = view.event_count() 
+        self.eventIdx = view.event_count()
         self.show_page(UserPage.PLAYER)
         self.view = view
 
@@ -1161,7 +1190,7 @@ class Application(ttk.Frame):
     def update(self):
         _delay = 1
 
-        # Process state machine transitions 
+        # Process state machine transitions
         self.state_manager.process_transitions()
 
         # New image data is available from the player thread
@@ -1179,7 +1208,7 @@ class Application(ttk.Frame):
                 v.update_thumbnail(image)
                 v.add_event(evtref)
                 v.menuref.update()
-                if viewname == self._current_view: 
+                if viewname == self._current_view:
                     self.eventIdx = self.view.event_count()
             self.newEvent.clear()
 

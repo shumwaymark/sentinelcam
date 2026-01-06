@@ -1,4 +1,4 @@
-"""camwatcher: A component of the SentinelCam data layer. 
+"""camwatcher: A component of the SentinelCam data layer.
 Proivides subscriber services for log and image publishing from
 outpost nodes. Drives a dispatcher to trigger other functionality.
 
@@ -28,8 +28,9 @@ CFG = readConfig(os.path.join(os.path.expanduser("~"), "camwatcher.yaml"))
 
 outposts = {}                        # outpost image subscribers by (node,view)
 threadLock = threading.Lock()        # coordinate updates to list of outpost subscribers
-dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer 
-dateIndxQ = multiprocessing.Queue()  # for creating new camwatcher index entries 
+dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer
+dateIndxQ = multiprocessing.Queue()  # for creating new camwatcher index entries
+sentinel_alertQ = multiprocessing.Queue()  # for sending alerts to sentinel
 
 # multiprocessing class implementing a subprocess image writer
 class ImageStreamWriter:
@@ -42,7 +43,7 @@ class ImageStreamWriter:
             self._writeImages, self._eventQueue, publisher, node_view[1], imagedir))
         self.process.start()
         logging.debug(f"ImageStreamWriter started for {node_view} pid {self.process.pid} in {imagedir}")
-    
+
     def _set_datedir(self, dir, ymd):
         path = os.path.join(dir, ymd)
         try:
@@ -93,9 +94,9 @@ class ImageStreamWriter:
         self._writeImages.value = 0
 
 # Child subprocess for managing the camwatcher index. There will be one instance of this daemon subprocess
-# per camwatcher. It provides a single point of control for all updates to the camwatcher event index files. 
-# Rather than update the index directly, all CSV writers pass new index entries through a queue for update 
-# here. The datapump also passes any event delete commands it receives into this same gauntlet via the 
+# per camwatcher. It provides a single point of control for all updates to the camwatcher event index files.
+# Rather than update the index directly, all CSV writers pass new index entries through a queue for update
+# here. The datapump also passes any event delete commands it receives into this same gauntlet via the
 # control socket. Allowing multiple processes to update the same filesystem object in an uncontrolled fashion
 # is a direct path to chaos, destruction, and despair.
 class CSVindex:
@@ -103,32 +104,33 @@ class CSVindex:
     CSV_new = 1
     CSV_delete = 2
 
-    def __init__(self, indxQ):
-        self.process = multiprocessing.Process(target=self._run, args=(indxQ,))
+    def __init__(self, indxQ, alertQ):
+        self.process = multiprocessing.Process(target=self._run, args=(indxQ, alertQ))
         self.process.start()
         logging.debug(f"CSVindex subprocess started, pid {self.process.pid}")
-    
-    def _run(self, indxQ):
+
+    def _run(self, indxQ, alertQ):
         _csvdir = CFG['data']['csvfiles']
         _imgdir = CFG['data']['images']
         _delQ = queue.Queue()
         _thread = threading.Thread(target=self._purge_loop, args=(_delQ,))
         _thread.daemon = True
         _thread.start()
+        _sentinel_alert = alertQ
         while True:
             (cmd, msg) = indxQ.get()
 
             if cmd == CSVindex.CSV_new:
                 # Write a new entry into the camwatcher event index
                 (date_directory, node, view, evt, timestamp, camsize, type) = msg
-                try: 
+                try:
                     with open(os.path.join(date_directory, 'camwatcher.csv'), mode='at') as index:
                         index.write(','.join([node, view, timestamp, evt, str(camsize[0]), str(camsize[1]), type]) + "\n")
                 except Exception as e:
                     logging.error(f"CSVindex failure updating index, event {evt}, [{date_directory}]: {str(e)}")
 
             elif cmd == CSVindex.CSV_delete:
-                # This is an event delete command, remove all data. First, just the index entries. Then a 
+                # This is an event delete command, remove all data. First, just the index entries. Then a
                 # background thread is tasked with cleaning up any image data and CSV tracking datasets.
                 (_date, _event) = msg
                 _sh = ["sed", "-i", f"/{_event}/d", os.path.join(_csvdir, _date, 'camwatcher.csv')]
@@ -137,7 +139,19 @@ class CSVindex:
                     logging.error(f"CSVindex index delete error {result.returncode} for {_date}/{_event}")
                 _delQ.put(f"rm {os.path.join(_csvdir, _date, ''.join([_event,'*']))}")
                 _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} | xargs rm")
-   
+                # Send deletion alert to sentinel for re-broadcast to subscribers
+                alert = {
+                    'task': 'ALERT',
+                    'payload': {
+                        'flag': 'DEL',
+                        'date': _date,
+                        'event': _event,
+                        'sink': CFG['sentinel']['datasink'],
+                        'pump': CFG['sentinel']['datapump']
+                    }
+                }
+                _sentinel_alert.put(alert)
+
     def _purge_loop(self, delQ):
         while True:
             cmd = delQ.get()
@@ -146,7 +160,7 @@ class CSVindex:
                 logging.warning(f"CSVindex data deletion failure {result.returncode} from '{cmd}'")
             delQ.task_done()
             sleep(2)
- 
+
 # Disk I/O CSV writer thread
 class CSVwriter:
     def __init__(self, dir, dateIdx, dataQ):
@@ -159,15 +173,15 @@ class CSVwriter:
         self._thread = threading.Thread(target=self._run, args=())
         self._thread.daemon = True
         self._thread.start()
-    
+
     def _set_index(self, node, view, evt, timestamp, camsize, type, is_new_event) -> str:
-        _today = timestamp[:10] 
+        _today = timestamp[:10]
         logging.debug("CSVwriter index setup " + evt)
         date_directory = os.path.join(self._folder, _today)
         if _today != self._today:
             try:
-                # if date value changes, insure folder exists 
-                os.mkdir(date_directory) 
+                # if date value changes, insure folder exists
+                os.mkdir(date_directory)
             except FileExistsError:
                 pass
         self._today = _today
@@ -193,14 +207,14 @@ class CSVwriter:
                             _data['timestamp'],
                             str(_data['obj']),
                             str(_data['clas']),
-                            str(_data['rect'][0]), 
-                            str(_data['rect'][1]), 
-                            str(_data['rect'][2]), 
+                            str(_data['rect'][0]),
+                            str(_data['rect'][1]),
+                            str(_data['rect'][2]),
                             str(_data['rect'][3])
                             ]) + "\n" )
-                    elif _recType == 'start': 
+                    elif _recType == 'start':
                         f = open(os.path.join(self._set_index(
-                            _node, _view, _data['id'], _data['timestamp'], _data['camsize'], _tag, _data['new']), 
+                            _node, _view, _data['id'], _data['timestamp'], _data['camsize'], _tag, _data['new']),
                             _data['id'] + '_' + _tag + '.csv'), mode='wt')
                         f.write("timestamp,objid,classname,rect_x1,rect_y1,rect_x2,rect_y2\n") # write column headers
                         self._openfiles[_ref] = f # add to list
@@ -245,10 +259,10 @@ class SentinelTaskData:
         logging.debug(f"New job [{self.jobID}] from {self.sourceNode}, date={self.eventDate} event={self.eventID} task={self.jobTask}")
 
     # TODO: Tasks running on the Sentinel can produce multiple result types,
-    # and should be allowed to provide results from multiple events. Need support 
-    # for multiple open CSV files in simultaneous use per job. New CSV files are 
+    # and should be allowed to provide results from multiple events. Need support
+    # for multiple open CSV files in simultaneous use per job. New CSV files are
     # opened as additional tracking types are introduced for the current event.
-    # If the eventID changes, close all open CSV files for the current event. 
+    # If the eventID changes, close all open CSV files for the current event.
 
     def set_view(self, node, view) -> None:
         self.node = node
@@ -256,7 +270,7 @@ class SentinelTaskData:
 
     def get_taskref(self) -> tuple:
         return (self.node, self.view, self.eventID, self.trkType)
-    
+
     def done(self, status, elapsed) -> None:
         self.status = status
         self.elapsed = elapsed
@@ -270,10 +284,10 @@ class SentinelTaskData:
             for frametime in self.framelist:
                 self._startidx += 1
                 if frametime >= self._framestart: break
-    
+
     def get_frame_start(self) -> datetime:
         return self._framestart
-    
+
     def get_frame_byoffset(self, offset) -> datetime:
         frameidx = self._startidx + offset
         if frameidx < 0:
@@ -289,14 +303,14 @@ class SentinelAgent:
         self._cfg = config
         self._name = name
         self.process = multiprocessing.Process(
-            target=self._agent_tasks, 
-            args=(config, 
-                  CFG['data'], 
-                  CFG['logconfigs']['sentinel_agent'], 
+            target=self._agent_tasks,
+            args=(config,
+                  CFG['data'],
+                  CFG['logconfigs']['sentinel_agent'],
                   dateIdxQ))
         self.process.start()
         logging.debug(f"Sentinel agent started, pid {self.process.pid}")
-    
+
     def _agent_tasks(self, config, data, logcfg, dateIdxQ):
         runningJobs = {}
         # subscribe to Sentinel result publication
@@ -321,9 +335,12 @@ class SentinelAgent:
                 try:
                     logdata = json.loads(message)
                     if 'flag' in logdata:
-                        # This is a SUBMIT, START, or EOJ
                         _flag = logdata['flag']
-                        _jobid = logdata['jobid']
+                        if _flag in ['SUBMIT', 'START','EOJ']:
+                            _jobid = logdata['jobid']
+                        else:
+                            logging.debug(f"Sentinel alert received: {message}")
+                            continue
                         if _flag == 'START' and logdata['sink'] == config['datasink']:
                             # Event data belongs here, it is managed by this camwatcher instance.
                             runningJobs[_jobid] = SentinelTaskData(logdata)
@@ -339,21 +356,21 @@ class SentinelAgent:
                                 del runningJobs[_jobid]
 
                             logging.info("EOJ ({}, {}), elapsed time: {} {}, event: {}, source: {}/{}".format(
-                                logdata['task'], logdata['status'], logdata['elapsed'], logdata['taskstats'], 
+                                logdata['task'], logdata['status'], logdata['elapsed'], logdata['taskstats'],
                                 logdata['event'], logdata['from'][0], logdata['from'][1]))
-                            
+
                     elif 'jobid' in logdata:
                         _jobid = logdata['jobid']
                         if _jobid in runningJobs:
                             task_data = runningJobs[_jobid]
                             if task_data.trkType is None:
-                                # Was not yet assigned, must be a new result set just arriving from the sentinel 
+                                # Was not yet assigned, must be a new result set just arriving from the sentinel
                                 task_data.trkType = logdata['refkey']
                                 cwData.set_date(task_data.eventDate)
                                 cwData.set_event(task_data.eventID)
                                 task_data.set_view(cwData.get_event_node(), cwData.get_event_view())
                                 if logdata['ringctrl'] == 'full':
-                                    task_data.framelist = [datetime.strptime(_jpgfile[-30:-4],"%Y-%m-%d_%H.%M.%S.%f") 
+                                    task_data.framelist = [datetime.strptime(_jpgfile[-30:-4],"%Y-%m-%d_%H.%M.%S.%f")
                                         for _jpgfile in cwData.get_event_images()]
                                 else:
                                     trkdata = cwData.get_event_data(logdata['trktype'])
@@ -363,7 +380,7 @@ class SentinelAgent:
                                     if task_data.trkType not in cwData.get_event_types():
                                         _newResult = True
                                     else:
-                                        _newResult = False  # must be an update to an existing tracking set                                
+                                        _newResult = False  # must be an update to an existing tracking set
                                     _csvData = {
                                         "view": cwData.get_event_view(),
                                         "id": task_data.eventID,
@@ -377,20 +394,20 @@ class SentinelAgent:
                                     task_data.csvOpened = True
                                 else:
                                     # TODO: More graceful handling, recovery, prevention needed here.
-                                    # Most likely the result of a race condition between the sentinel 
-                                    # and CSVwriter, where an image analysis task was started before 
-                                    # the trk-specific CSV dataset was ready. 
+                                    # Most likely the result of a race condition between the sentinel
+                                    # and CSVwriter, where an image analysis task was started before
+                                    # the trk-specific CSV dataset was ready.
                                     logging.error(f"No images loaded, task {task_data.get_taskref()} ignored")
                                     del runningJobs[_jobid]
                                     continue
-                            # map frame start point and offset to the correct timetamp 
+                            # map frame start point and offset to the correct timetamp
                             _framestart = logdata['start']
                             _frameoffset = logdata['offset']
                             if task_data.get_frame_start() != datetime.fromisoformat(_framestart):
                                 logging.debug(f"Sentinel agent adjust framestart={_framestart} for sentinel task {task_data.get_taskref()}")
                                 task_data.set_frame_start(_framestart)
                             _frametime = task_data.get_frame_byoffset(_frameoffset)
-                            # write result data to CSV fie 
+                            # write result data to CSV fie
                             _csvData = {
                                 "timestamp": _frametime.isoformat(),
                                 "type": task_data.trkType,
@@ -407,7 +424,7 @@ class SentinelAgent:
                     logging.error(f"JSON exception {str(e)}, reading from log: {message}")
                 except KeyError as keyval:
                     logging.error(f"Invalid logging record, '{keyval}' missing: {message}")
-                except Exception:  
+                except Exception:
                     logging.exception(f"Exception parsing sentinel log: {message}")
 
             elif message[:4] == 'Pump':
@@ -427,14 +444,14 @@ class SentinelAgent:
     # ----------------------------------------------------------------------
     async def submit_post_event_tasks(self, node_view, event, tasklist) -> None:
         with AsyncContext.instance().socket(zmq.REQ) as sock:
-            sock.connect(self._cfg['requests']) 
+            sock.connect(self._cfg['requests'])
             for task in tasklist:
                 request = {
                     'task': task[0],
                     'node': node_view,
                     'date': str(date.today()),
                     'event': event,
-                    'sink': self._cfg['datasink'], 
+                    'sink': self._cfg['datasink'],
                     'pump': self._cfg['datapump'],
                     'priority': task[1]
                 }
@@ -444,13 +461,13 @@ class SentinelAgent:
     # ----------------------------------------------------------------------
 
 async def dispatch_logger(topics, msg):
-    if topics[1]   == 'ERROR'   : logging.error(f"[{topics[0]}] {msg}") 
-    elif topics[1] == 'WARNING' : logging.warning(f"[{topics[0]}] {msg}") 
-    elif topics[1] == 'CRITICAL': logging.critical(f"[{topics[0]}] {msg}") 
-    elif topics[1] == 'INFO'    : logging.info(f"[{topics[0]}] {msg}") 
-    elif topics[1] == 'DEBUG'   : logging.debug(f"[{topics[0]}] {msg}") 
+    if topics[1]   == 'ERROR'   : logging.error(f"[{topics[0]}] {msg}")
+    elif topics[1] == 'WARNING' : logging.warning(f"[{topics[0]}] {msg}")
+    elif topics[1] == 'CRITICAL': logging.critical(f"[{topics[0]}] {msg}")
+    elif topics[1] == 'INFO'    : logging.info(f"[{topics[0]}] {msg}")
+    elif topics[1] == 'DEBUG'   : logging.debug(f"[{topics[0]}] {msg}")
     else:
-        logging.critical(f"Outpost logging disruption [{'.'.join(topics)}] {msg}") 
+        logging.critical(f"Outpost logging disruption [{'.'.join(topics)}] {msg}")
 
 async def dispatch_ote(node, ote_data, sentinel_agent):
     try:
@@ -472,7 +489,7 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
             dbLogMsgQ.put(ote2db)
             if node_view in outposts:
                  # Stop image subscriber
-                outposts[node_view].stop() 
+                outposts[node_view].stop()
                 # Submit post_event task request(s) to sentinel
                 tasklist = ote['tasks']
                 logging.debug(f"post event {eventID} tasklist: {tasklist}")
@@ -495,8 +512,8 @@ async def process_logs(loggers, sentinel_agent):
         if len(topics) < 2:
             logging.error(f"Malformed logging topic {topics}, {message}")
         elif topics[1] == 'INFO': # node name is in topics[0]
-            category = message[:3] 
-            if category == 'ote':   # object tracking event 
+            category = message[:3]
+            if category == 'ote':   # object tracking event
                 await dispatch_ote(topics[0], message[3:], sentinel_agent)
                 logging.debug(message)
             elif category == 'fps':  # Outpost image publishing heartbeat
@@ -508,7 +525,7 @@ async def process_logs(loggers, sentinel_agent):
 
 async def control_loop(control_socket, log_socket):
     logging.info("camwatcher control loop started")
-    _agents = {}  # list of dynamically requested ad hoc agents 
+    _agents = {}  # list of dynamically requested ad hoc agents
     while True:
         result = 'OK'
         msg = await control_socket.recv()
@@ -528,12 +545,12 @@ async def control_loop(control_socket, log_socket):
                             log_socket.connect(request['logger'])
                             logging.info(f"New outpost registered {_new_outpost}.")
                 elif request['cmd'] == 'Agent':
-                    # Used to dynamically spawn ad hoc Sentinel Agents within a running camwatcher. 
+                    # Used to dynamically spawn ad hoc Sentinel Agents within a running camwatcher.
                     name = request['name']
                     if name not in _agents:
                         new_agent = {}
                         new_agent['name'] = name
-                        new_agent['requests'] = request['requests'] 
+                        new_agent['requests'] = request['requests']
                         new_agent['publisher'] = request['publisher']
                         new_agent['datapump'] = request['datapump']
                         new_agent['datasink'] = request['datasink']
@@ -553,21 +570,40 @@ async def control_loop(control_socket, log_socket):
         except KeyError as keyval:
             result = 'Error'
             logging.error(f"Invalid control message, missing '{keyval}' in message: '{msg}'")
-        except Exception as e:  
+        except Exception as e:
             result = 'Error'
             logging.error(f"CamWatcher control message failure, '{msg}': {str(e)}")
         logging.debug(f"CamWatcher control port reply {result}")
         await control_socket.send(result.encode("ascii"))
 
+async def alert_sender():
+    """Send alerts to sentinel for system-wide re-broadcast"""
+    logging.info("Alert sender started")
+    asyncCtx = AsyncContext.instance()
+    while True:
+        await asyncio.sleep(0.1)  # Async-friendly polling
+        try:
+            alert = sentinel_alertQ.get_nowait()
+            with asyncCtx.socket(zmq.REQ) as sock:
+                sock.connect(CFG['sentinel']['requests'])
+                await sock.send(json.dumps(alert).encode('ascii'))
+                reply = await sock.recv()
+                if reply != b'OK':
+                    logging.warning(f"Alert send failed: {reply}")
+        except queue.Empty:
+            pass
+        except Exception:
+            logging.exception("Alert sender trapped exception")
+
 async def main():
     _data = CFG['data']
     logging.config.dictConfig(CFG['logconfigs']['camwatcher_internal'])
     log = logging.getLogger()
-    _csvidx = CSVindex(dateIndxQ)
+    _csvidx = CSVindex(dateIndxQ, sentinel_alertQ)
     csv = CSVwriter(_data['csvfiles'], dateIndxQ, dbLogMsgQ)
     agent = SentinelAgent(CFG['sentinel'], dateIndxQ)
     asyncCtx = AsyncContext.instance()
-    asyncREP = asyncCtx.socket(zmq.REP)  # 0MQ async socket for control loop 
+    asyncREP = asyncCtx.socket(zmq.REP)  # 0MQ async socket for control loop
     asyncSUB = asyncCtx.socket(zmq.SUB)  # 0MQ async socket for camwatcher log subscriptions
     asyncREP.bind(f"tcp://*:{CFG['control_port']}")
     asyncSUB.subscribe(b'')
@@ -579,11 +615,12 @@ async def main():
             outposts[node_view] = ImageStreamWriter(node_view, _nodecfg['images'], _data["images"])
             asyncSUB.connect(_nodecfg['logger'])
     try:
-        await asyncio.gather(control_loop(asyncREP, asyncSUB), 
-                             process_logs(asyncSUB, agent))
+        await asyncio.gather(control_loop(asyncREP, asyncSUB),
+                             process_logs(asyncSUB, agent),
+                             alert_sender())
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
-    except Exception:  # traceback will appear in log 
+    except Exception:  # traceback will appear in log
         log.exception('Unanticipated error with no Exception handler.')
     finally:
         asyncREP.close()
