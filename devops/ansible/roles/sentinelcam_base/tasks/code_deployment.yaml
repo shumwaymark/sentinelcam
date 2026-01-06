@@ -5,9 +5,10 @@
 
 - name: "Determine deployment source strategy"
   ansible.builtin.set_fact:
-    is_datasink_node: "{{ inventory_hostname in groups['datasinks'] }}"
     is_primary_datasink: "{{ inventory_hostname == primary_datasink }}"
     deployment_source_node: "{{ primary_datasink }}"
+    repo_user: "{{ hostvars[primary_datasink]['ansible_user'] }}"
+    repo_ip: "{{ hostvars[primary_datasink]['ansible_host'] }}"
   tags:
     - code_deployment
     - deploy
@@ -33,7 +34,6 @@
     msg:
       - "Target node: {{ inventory_hostname }}"
       - "Groups: {{ group_names | join(', ') }}"
-      - "Is data sink: {{ is_datasink_node }}"
       - "Is primary data sink: {{ is_primary_datasink }}"
       - "Source node: {{ deployment_source_node }}"
       - "Source path: {{ code_source_path }}"

@@ -48,6 +48,9 @@ cameras:
             detectobjects: {{ camera.detector.detectobjects | default('none') }}
             accelerator: {{ camera.detector.accelerator | default('none') }}
             tracker: none
+{% if camera.detector.interesting_objects is defined %}
+            interesting_objects: {{ camera.detector.interesting_objects | list }}
+{% endif %}
 {% if camera.detector.depthai is defined %}
             depthai:
                pipeline: {{ camera.detector.depthai.pipeline }}

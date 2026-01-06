@@ -5,3 +5,6 @@
 # Override the standard user for legacy nodes
 sentinelcam_user: pi
 sentinelcam_group: pi
+
+# howeverm need ops user for this repository reference
+sentinelcam_deployment_source: "/home/ops/sentinelcam/current_deployment"
