@@ -13,6 +13,7 @@ import time
 import imutils
 #import simplejpeg
 from collections import namedtuple
+from scipy.spatial import distance as dist
 from sentinelcam.utils import readConfig
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.facedata import FaceBaselines, FaceList, FaceStats
@@ -367,7 +368,10 @@ class DailyCleanup(Task):
         types = cwIndx['type'].value_counts()
         trk_cnt = types.get('trk', 0)  # event count
         faces_cnt = types.get('fd1', 0)
-        if trk_cnt:
+        vsp_cnt = types.get('vsp', 0)  # vehicle speed events
+
+        # Handle face-based cleanup if faces were processed
+        if trk_cnt and faces_cnt > 0:
             face_ratio = faces_cnt / trk_cnt
             if face_ratio > self.face_ratio_cutoff:
                 trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
@@ -399,7 +403,346 @@ class DailyCleanup(Task):
             else:
                 stats = f"DailyCleanup, face detection ratio of {round(face_ratio,2)} below cutoff threshold, (trk: {trk_cnt}, fd1: {faces_cnt}), no action taken"
             self.publish(stats)
+
+        # Handle vehicle speed-based cleanup if speed data was processed
+        elif trk_cnt and vsp_cnt > 0:
+            trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
+            vsp_evts = cwIndx.loc[cwIndx['type'] == 'vsp']['event'].to_list()
+            # Keep events that have speed measurements, delete those that don't
+            delete_evts = [e for e in trk_evts if not e in vsp_evts]
+            if self.performing_deletes:
+                for event in delete_evts: self.dataFeed.delete_event(self.event_date, event)
+            else:
+                for event in delete_evts:
+                    trkrs = cwIndx.loc[cwIndx['event'] == event]['type'].to_list()
+                    started = cwIndx.loc[cwIndx['event'] == event]['timestamp'].min()
+                    imgs = self.dataFeed.get_image_list(self.event_date, event)
+                    setlen = {trk: len(self.dataFeed.get_tracking_data(self.event_date, event, trk).index) for trk in trkrs}
+                    self.publish(f"DailyCleanup, [{event}] {started}, imgs: {len(imgs):3} trkrs: {setlen}")
+            stats = f"DailyCleanup {self.event_date}, trk: {trk_cnt}, vsp: {vsp_cnt}, to delete: {len(delete_evts)} ({self.performing_deletes})"
+            self.publish(stats)
+
         return False
+
+class VehicleTracker:
+    """Tracks a single vehicle across frames"""
+    def __init__(self, track_id, centroid, bbox):
+        self.track_id = track_id
+        self.centroid = centroid
+        self.bbox = bbox
+        self.marker_crossings = []  # List of {marker, direction, timestamp}
+        self.current_speed = None  # Current speed estimate
+        self.direction = None  # Overall direction (LR or RL)
+
+    def update(self, centroid, bbox):
+        self.centroid = centroid
+        self.bbox = bbox
+
+    def add_marker_crossing(self, marker_index, direction, timestamp):
+        # Avoid duplicate crossings
+        if len(self.marker_crossings) > 0:
+            last = self.marker_crossings[-1]
+            if last['marker'] == marker_index and last['direction'] == direction:
+                return
+
+        self.marker_crossings.append({
+            'marker': marker_index,
+            'direction': direction,
+            'timestamp': timestamp
+        })
+
+        # Set direction from first crossing
+        if self.direction is None:
+            self.direction = direction
+
+    def recalculate_speed(self, marker_street_positions, min_markers, calibration_factor=1.0):
+        """Recalculate speed after each marker crossing using perspective-corrected positions"""
+        if len(self.marker_crossings) < min_markers:
+            return None
+
+        # Get first and last crossing
+        first = self.marker_crossings[0]
+        last = self.marker_crossings[-1]
+
+        # Ensure consistent direction
+        if first['direction'] != last['direction']:
+            return None
+
+        # Calculate distance using perspective-corrected marker positions
+        distance_meters = abs(
+            marker_street_positions[last['marker']] -
+            marker_street_positions[first['marker']]
+        )
+
+        # Calculate time (seconds)
+        time_delta = (last['timestamp'] - first['timestamp']).total_seconds()
+        if time_delta <= 0:
+            return None
+
+        # Calculate speed (mph) and apply calibration factor
+        speed_mps = distance_meters / time_delta
+        speed_mph = speed_mps * 2.23694 * calibration_factor  # meters/sec to mph with calibration
+
+        self.current_speed = round(speed_mph, 1)
+        return self.current_speed
+
+class VehicleSpeed(Task):
+    def __init__(self, jobreq, trkdata, feed, cfg, accelerator, image_timestamps=None) -> None:
+        self.cwUpd = cfg['camwatcher_update']
+        self.refkey = cfg['refkey']
+        self.event_id = jobreq.eventID
+        self.event_date = jobreq.eventDate
+
+        # Create timestamp-to-offset mapping for batch publishing
+        self.timestamp_to_offset = {}
+        if image_timestamps is not None:
+            for offset, timestamp in enumerate(image_timestamps):
+                self.timestamp_to_offset[timestamp] = offset
+
+        # Filter tracking data for vehicles only
+        # Note: classname includes confidence like "car: 0.96", so check prefix
+        vehicle_classes = cfg['vehicle_classes']
+        mask = trkdata['classname'].str.startswith(tuple(f"{v}:" for v in vehicle_classes))
+        self.vehicles = trkdata.loc[mask]
+
+        # Marker configuration
+        self.markers_x = cfg['markers_x']
+        self.marker_y = cfg['marker_y']
+        self.marker_y_tolerance = cfg['marker_y_tolerance']
+
+        # Distance and speed configuration
+        self.street_length = cfg['street_length_meters']
+        self.camera_distance = cfg['camera_distance_meters']
+        self.viewport_width = cfg['viewport_width_meters']
+        self.speed_limit = cfg['speed_limit_mph']
+        self.speed_tolerance = cfg['speed_tolerance_mph']
+        self.min_markers = cfg['min_markers']
+        self.speed_calibration_factor = cfg.get('speed_calibration_factor', 1.0)
+
+        # Tracking parameters
+        self.centroid_max_distance = cfg['centroid_max_distance']
+
+        # Active vehicle trackers: dict[track_id] = VehicleTracker
+        self.trackers = {}
+        self.next_track_id = 1
+        self.violation_count = 0
+        self.tracking_records_published = 0
+        self.vehicles_with_speed = 0
+
+        # Frame dimensions (will be set from first frame in pipeline)
+        self.frame_width = None
+        self.frame_height = None
+        self.marker_pixels = []
+        self.marker_street_positions = []  # Perspective-corrected street positions
+        self.marker_y_min = None
+        self.marker_y_max = None
+
+    def _initialize_markers(self, frame_shape):
+        """Convert marker percentages to pixel coordinates and calculate perspective-corrected positions"""
+        self.frame_height, self.frame_width = frame_shape[:2]
+        self.marker_pixels = [int(x * self.frame_width) for x in self.markers_x]
+
+        # Calculate perspective-corrected street positions for each marker
+        self.marker_street_positions = self._pixel_to_street_position(
+            np.array(self.marker_pixels)
+        )
+
+        # Y-range for vehicle detection at marker lines
+        marker_y_center = int(self.marker_y * self.frame_height)
+        tolerance_pixels = int(self.marker_y_tolerance * self.frame_height)
+        self.marker_y_min = marker_y_center - tolerance_pixels
+        self.marker_y_max = marker_y_center + tolerance_pixels
+
+    def _pixel_to_street_position(self, pixel_x):
+        """Convert pixel X coordinate to actual street position in meters using perspective correction
+
+        Args:
+            pixel_x: X coordinate(s) in pixels (can be array or scalar)
+
+        Returns:
+            Street position(s) in meters from camera centerline
+        """
+        # Normalize to -0.5 to +0.5 (center = 0)
+        normalized_x = (pixel_x / self.frame_width) - 0.5
+
+        # Calculate angle from camera centerline
+        angle = np.arctan(normalized_x * self.viewport_width / self.camera_distance)
+
+        # Calculate physical position along street
+        street_position = self.camera_distance * np.tan(angle)
+
+        return street_position
+
+    def _get_centroid(self, x1, y1, x2, y2):
+        """Calculate centroid of bounding box"""
+        cx = int((x1 + x2) / 2)
+        cy = int((y1 + y2) / 2)
+        return (cx, cy)
+
+    def _in_marker_zone(self, cy):
+        """Check if centroid Y is within acceptable marker zone"""
+        return self.marker_y_min <= cy <= self.marker_y_max
+
+    def _check_marker_crossing(self, prev_cx, curr_cx, marker_x):
+        """Detect if vehicle crossed marker line between frames"""
+        # Left-to-right crossing
+        if prev_cx < marker_x <= curr_cx:
+            return 'LR'
+        # Right-to-left crossing
+        elif prev_cx > marker_x >= curr_cx:
+            return 'RL'
+        return None
+
+    def _publish_tracking_record(self, tracker, timestamp):
+        """Publish per-frame tracking records"""
+        x1, y1, x2, y2, classname = tracker.bbox
+
+        # Format direction for display
+        direction_str = None
+        if tracker.direction == 'LR':
+            direction_str = 'L-to-R'
+        elif tracker.direction == 'RL':
+            direction_str = 'R-to-L'
+
+        # Publish to vsp tracking type with classname field containing speed info
+        if tracker.current_speed is not None:
+            speed_label = f"{tracker.current_speed} mph: {direction_str}" if direction_str else f"{tracker.current_speed} mph"
+        else:
+            speed_label = f"{direction_str}" if direction_str else ""
+
+        if speed_label != "":
+            # Build a standard tracking type data record
+            result = (
+                speed_label,               # Vehicle speed and direction
+                tracker.track_id,          # Track ID
+                int(x1), int(y1),          # Bounding box
+                int(x2), int(y2)
+            )
+
+            # Look up frame offset from timestamp for proper camwatcher correlation
+            offset = self.timestamp_to_offset.get(timestamp, 0)
+            self.publish(result, self.refkey, self.cwUpd, offset_override=offset)
+            self.tracking_records_published += 1
+
+    def _update_trackers(self, detections, timestamp):
+        """Update vehicle trackers with new detections"""
+        # Extract centroids from current detections
+        current_centroids = []
+        current_boxes = []
+        for det in detections:
+            cx, cy = self._get_centroid(det.rect_x1, det.rect_y1, det.rect_x2, det.rect_y2)
+            if self._in_marker_zone(cy):
+                current_centroids.append((cx, cy))
+                current_boxes.append((det.rect_x1, det.rect_y1, det.rect_x2, det.rect_y2, det.classname))
+
+        # If no detections in marker zone this timestamp, skip
+        if len(current_centroids) == 0:
+            return
+
+        # Match detections to existing trackers
+        if len(self.trackers) == 0:
+            # No existing trackers, register all as new
+            for i, (cx, cy) in enumerate(current_centroids):
+                tracker = VehicleTracker(self.next_track_id, (cx, cy), current_boxes[i])
+                self.trackers[self.next_track_id] = tracker
+                self.next_track_id += 1
+                # Publish tracking record for this frame
+                self._publish_tracking_record(tracker, timestamp)
+        else:
+            # Match current detections to existing trackers
+            tracker_ids = list(self.trackers.keys())
+            tracker_centroids = [self.trackers[tid].centroid for tid in tracker_ids]
+
+            # Compute distance matrix
+            D = dist.cdist(np.array(tracker_centroids), np.array(current_centroids))
+
+            # Find minimum distance matches
+            rows = D.min(axis=1).argsort()
+            cols = D.argmin(axis=1)[rows]
+
+            used_rows = set()
+            used_cols = set()
+
+            for (row, col) in zip(rows, cols):
+                if row in used_rows or col in used_cols:
+                    continue
+                if D[row, col] > self.centroid_max_distance:
+                    continue
+
+                # Update existing tracker
+                track_id = tracker_ids[row]
+                prev_cx = self.trackers[track_id].centroid[0]
+                curr_cx = current_centroids[col][0]
+
+                self.trackers[track_id].update(current_centroids[col], current_boxes[col])
+
+                # Check for marker crossings
+                for i, marker_x in enumerate(self.marker_pixels):
+                    direction = self._check_marker_crossing(prev_cx, curr_cx, marker_x)
+                    if direction:
+                        self.trackers[track_id].add_marker_crossing(i, direction, timestamp)
+                        # Recalculate speed after crossing marker
+                        self.trackers[track_id].recalculate_speed(
+                            self.marker_street_positions, self.min_markers, self.speed_calibration_factor
+                        )
+
+                # Publish tracking record for this frame
+                self._publish_tracking_record(self.trackers[track_id], timestamp)
+
+                used_rows.add(row)
+                used_cols.add(col)
+
+            # Register new trackers for unused detections (new vehicles entering scene)
+            unused_cols = set(range(len(current_centroids))) - used_cols
+            for col in unused_cols:
+                tracker = VehicleTracker(self.next_track_id, current_centroids[col], current_boxes[col])
+                self.trackers[self.next_track_id] = tracker
+                self.next_track_id += 1
+                # Publish tracking record for this frame
+                self._publish_tracking_record(tracker, timestamp)
+
+    def pipeline(self, frame) -> bool:
+        # One-shot pipeline: process all tracking data in single call
+        if len(self.vehicles.index) == 0:
+            return False
+
+        # Initialize markers from first frame
+        self._initialize_markers(frame.shape)
+
+        # Process all vehicle detections chronologically
+        frames_with_vehicles = self.vehicles.groupby('timestamp')
+        for timestamp in sorted(frames_with_vehicles.groups.keys()):
+            frame_vehicles = frames_with_vehicles.get_group(timestamp)
+            detections = list(frame_vehicles.itertuples())
+            self._update_trackers(detections, timestamp)
+
+        # Process any remaining trackers at end
+        for track_id in list(self.trackers.keys()):
+            tracker = self.trackers[track_id]
+            if tracker.current_speed is not None:
+                self.vehicles_with_speed += 1
+            if tracker.current_speed and tracker.current_speed > (self.speed_limit + self.speed_tolerance):
+                self.violation_count += 1
+                direction = 'L-to-R' if tracker.direction == 'LR' else 'R-to-L'
+                self.publish(
+                    f"SPEED VIOLATION: {tracker.current_speed} mph {direction} "
+                    f"(limit {self.speed_limit} mph) - "
+                    f"Event {self.event_date}/{self.event_id}"
+                )
+
+        return False  # Done in one shot
+
+    def finalize(self) -> bool:
+        # Summary: VehicleSpeed, date, event, vehicle_detections, unique_vehicles, vehicles_with_speed, vsp_records, violations
+        results = (
+            'VehicleSpeed', self.event_date, self.event_id,
+            len(self.vehicles.index), self.next_track_id - 1,
+            self.vehicles_with_speed, self.tracking_records_published,
+            self.violation_count
+        )
+        self.publish(results)
+
+        return self.tracking_records_published > 0
 
 class MeasureRingLatency(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
@@ -440,16 +783,21 @@ class MeasureRingLatency(Task):
                 self.publish(result)
         return False
 
-def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator) -> Task:
+def TaskFactory(jobreq, trkdata, feed, cfgfile, accelerator, image_timestamps=None) -> Task:
     menu = {
         'GetFaces'               : GetFaces,
         'FaceRecon'              : FaceRecon,
         'FaceSweep'              : FaceSweep,
         'FaceDataUpdate'         : FaceDataUpdate,
         'MobileNetSSD_allFrames' : MobileNetSSD_allFrames,
+        'VehicleSpeed'           : VehicleSpeed,
         'DailyCleanup'           : DailyCleanup,
         'MeasureRingLatency'     : MeasureRingLatency
     }
     cfg = readConfig(cfgfile)
-    task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg, accelerator)
+    # Pass image_timestamps to tasks that need timestamp-to-offset mapping
+    if jobreq.jobTask == 'VehicleSpeed' and image_timestamps is not None:
+        task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg, accelerator, image_timestamps)
+    else:
+        task = menu[jobreq.jobTask](jobreq, trkdata, feed, cfg, accelerator)
     return task

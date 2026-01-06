@@ -3,20 +3,20 @@
 # DailyCleanup.yaml.j2
 # Review every event for the eventDate, optionally purge events as described below.
 # Template for daily cleanup task configuration
-# 
+#
 # This task has no model dependencies but is templated for consistency.
 
-# Set this to True to delete the data. 
+# Set this to True to delete the data.
 # If False, take no action and only produce a report of each event to be deleted.
-run_deletes: True  
+run_deletes: False
 
 # Current policy, delete any event with no faces. This setting defines a failsafe, requiring a minimum
 # face detection ratio across all events be met before continuing with the task. Given the possibility
-# that an operational failure may have occured, take no action at all where face detection may not yet 
+# that an operational failure may have occured, take no action at all where face detection may not yet
 # have been run for all events.
-face_ratio: 0.15  
+face_ratio: 0.15
 
-# Events with high-quality faces are always kept by default. All events with only low-quality 
+# Events with high-quality faces are always kept by default. All events with only low-quality
 # images are purged. However, if any face had a high-level of recognition, keep it anyway.
 # Events which include a facial recognition confidence above this cutoff, are kept.
 confidence: 0.975

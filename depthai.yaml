@@ -43,5 +43,7 @@ cameras:
                jpegs: jpegs               # queue name for JPEG encoding messages from OAK camera
                neural_nets:
                   Q1:  nn                 # queue for neural net results
+            interesting_objects: ['person', 'vehicle', 'dog', 'motorcycle', 'car', 'truck', 'cat']
             sentinel_tasks:
-               person: GetFaces2          # sentinel task submission for "person" detections
+                person: GetFaces2                # Priority 1 sentinel task submission for "person" detections
+                default: MobileNetSSD_allFrames  # optional catch-all task, submitted with priority 2

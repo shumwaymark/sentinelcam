@@ -1,4 +1,4 @@
-"""sentinel: The heart of the SentinelCam distributed vision engine. 
+"""sentinel: The heart of the SentinelCam distributed vision engine.
 
 Copyright (c) 2023 by Mark K Shumway, mark.shumway@swanriver.dev
 License: MIT, see the sentinelcam LICENSE for more details.
@@ -39,12 +39,12 @@ taskFeed = queue.Queue()
 
 taskList = {}  # All JobRequest objects by JobID
 jobList = {}   # Those task requests which should currently be running
- 
+
 class JobRequest:
-    
+
     Status_UNDEFINED = 0
     Status_QUEUED = 1
-    Status_RUNNING = 2 
+    Status_RUNNING = 2
     Status_DONE = 3
     Status_FAILED = 4
     Status_CHAINED = 5
@@ -101,7 +101,7 @@ class JobRequest:
             if self.jobEndTime is not None:
                 end_time = self.jobEndTime.isoformat()
                 elapsed_time = str(self.jobEndTime - self.jobStartTime)
-        return (start_time, end_time, elapsed_time)  
+        return (start_time, end_time, elapsed_time)
 
     def start_Message(self, stage) -> str:
         return json.dumps({
@@ -151,7 +151,7 @@ class JobRequest:
             'images': self.image_cnt,
             'rate': self.image_rate
         })
-    
+
     def full_history_report() -> None:
         with jobLock:
             logging.info("Start of history.")
@@ -171,8 +171,8 @@ class RingWire:
         if self._wire in events:
             return events[self._wire] == zmq.POLLIN
         else:
-            return False    
-    
+            return False
+
     def recv(self) -> tuple:
         return msgpack.unpackb(self._wire.recv(), use_list=False)
 
@@ -190,7 +190,7 @@ class RingBuffer:
         self._buffers = [sharedctypes.RawArray('c', shape[0]*shape[1]*shape[2]) for i in range(length)]
         self._frames = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in self._buffers]
         self.reset()
-    
+
     def reset(self) -> None:
         self._count = 0
         self._start = 0
@@ -222,25 +222,25 @@ class RingBuffer:
             return self._start
 
     def frame_complete(self) -> None:
-        # Advance the start pointer only when the child process is done with it. 
-        # This avoids a race condition between the parent and child. After initial 
-        # read from buffer, invoking this just prior to subsequent get() operations 
-        # prevents overlaying the current frame in use. 
+        # Advance the start pointer only when the child process is done with it.
+        # This avoids a race condition between the parent and child. After initial
+        # read from buffer, invoking this just prior to subsequent get() operations
+        # prevents overlaying the current frame in use.
         self._count -= 1
         self._start += 1
         self._start %= self._length
 
 class JobTasking:
-    """ Implements a TaskEngine for the JobManager. Encapsulates a forked child 
+    """ Implements a TaskEngine for the JobManager. Encapsulates a forked child
     subprocess to execute job logic on a task engine.
-    
+
     Parameters
     ----------
     engineName : str
         Identifying name for this engine.
 
     pump : str
-        Connection string for the default datapump. Each task engine will need 
+        Connection string for the default datapump. Each task engine will need
         a DataFeed. Establishes the 0MQ context for other control sockets.
 
     taskCFG : dict
@@ -249,14 +249,14 @@ class JobTasking:
     accelerator : str
         The co-processor configured for this task engine.
 
-    taskQ : multiprocessing.Queue 
+    taskQ : multiprocessing.Queue
         Used for sending job requests to the task engine.
 
     rawRingbuff : dict
-        The image frame ring buffers for this task engine keyed by image size. 
+        The image frame ring buffers for this task engine keyed by image size.
         The items are a list of shared memory blocks. These are references to
-        a multiprocessing.sharedctypes.RawArray. Each will be redefined as an 
-        appropriate NumPy array by the child process. 
+        a multiprocessing.sharedctypes.RawArray. Each will be redefined as an
+        appropriate NumPy array by the child process.
     """
 
     def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff) -> None:
@@ -307,7 +307,7 @@ class JobTasking:
                 ringWire.send(msgpack.packb(_start_command))
                 if newEvent:
                     # wait here for confirmation of ring buffer assignment
-                    self.jobreq = taskQ.get()  
+                    self.jobreq = taskQ.get()
                     if self.jobreq.camsize != self.imagesize and self.jobreq.camsize != (0,0):
                         self.imagesize = self.jobreq.camsize
                         self.ringbuff = ringbuffers[self.imagesize]
@@ -319,13 +319,15 @@ class JobTasking:
                 ringWire.send(msgpack.packb((JobManager.ReadNEXT, None)))
                 bucket = msgpack.unpackb(ringWire.recv())
                 return bucket
-            
+
             def getRing() -> list:
                 return self.ringbuff
 
-            def publish(msg, frameref=None, cwUpd=False) -> None:
+            def publish(msg, frameref=None, cwUpd=False, offset_override=None) -> None:
                 if frameref is not None:
-                    frame = (self.jobreq.jobID, frameref, self.ringctrl, self.frame_start, self.frame_offset)
+                    # Use offset_override if provided (for batch tasks with timestamp mapping)
+                    offset = offset_override if offset_override is not None else self.frame_offset
+                    frame = (self.jobreq.jobID, frameref, self.ringctrl, self.frame_start, offset)
                     msg = frame + msg
                     if cwUpd:
                         cwUpdate = {
@@ -365,22 +367,25 @@ class JobTasking:
                         taskcfg = taskCFG[self.jobreq.jobTask]
                         if not self.jobreq.eventID:
                             trackingData = None
+                            image_timestamps = None
                         else:
                             # preload desired tracking set and retrieve starting image
                             self.trktype = taskcfg.get('trk_type', 'trk')
                             self.ringctrl = taskcfg.get('ringctrl', 'full')
                             trackingData = feed.get_tracking_data(self.jobreq.eventDate, self.jobreq.eventID, self.trktype)
+                            # Get full image timestamp list for batch tasks to map timestamps to offsets
+                            image_timestamps = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)
                             if self.ringctrl == 'trk':
-                                startframe = trackingData.iloc[0]['timestamp'] 
+                                startframe = trackingData.iloc[0]['timestamp']
                             else:
-                                startframe = feed.get_image_list(self.jobreq.eventDate, self.jobreq.eventID)[0]
+                                startframe = image_timestamps[0]
 
                         if 'alias' in taskcfg:
                             self.jobreq.jobTask = taskcfg['alias']
                         if 'chain' in taskcfg:
                             nextTask = taskcfg['chain']
 
-                        task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator)
+                        task = TaskFactory(self.jobreq, trackingData, feed, taskcfg["config"], accelerator, image_timestamps)
                         # Hang hooks for task references to ring buffer and publisher
                         task.ringStart = ringStart
                         task.ringNext = ringNext
@@ -394,7 +399,7 @@ class JobTasking:
                         # ----------------------------------------------------------------------
                         if not self.jobreq.eventID:
                             # ------------------------------------------------------------------------
-                            #   No starting event? No pipeline() loop supported. Have no tracking data, 
+                            #   No starting event? No pipeline() loop supported. Have no tracking data,
                             #   and no starting frame. Will call the pipeline() once for this task.
                             # ------------------------------------------------------------------------
                             task.pipeline(None)
@@ -415,7 +420,7 @@ class JobTasking:
                                     bucket = JobManager.ReadEOF
 
                         # ----------------------------------------------------------------------
-                        #   Publish final results 
+                        #   Publish final results
                         # ----------------------------------------------------------------------
                         if task.finalize():
                             if nextTask and eoj_status == TaskEngine.TaskDONE:
@@ -446,7 +451,7 @@ class JobTasking:
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
                     except Exception as e:
-                        traceback.print_exc()  # see syslog for traceback  
+                        traceback.print_exc()  # see syslog for traceback
                         msg = (TaskEngine.TaskERROR, f"taskHost({self.jobreq.eventDate}, {self.jobreq.eventID}), {str(e)}")
                         publisher.send(msgpack.packb(msg))
                         eoj_status = TaskEngine.TaskFAIL
@@ -455,7 +460,7 @@ class JobTasking:
                         failCnt = 0
                     finally:
                         publisher.send(msgpack.packb((eoj_status, self.jobreq.jobID)))
-            
+
             # Limit on successive failures exceeded
             msg = (TaskEngine.TaskBOMB, f"{engineName}: JobTasking failure limit exceeded.")
             publisher.send(msgpack.packb(msg))
@@ -502,8 +507,8 @@ class TaskEngine:
         self.rawBuffers = {wh: self.ringbuffers[wh].bufferList() for wh in self.ringbuffers}
         self.jobreq = None
         self.cursor = None
-        self.imagesize = (0,0)  # current image size 
-        self.ringBuffer = None  # current RingBuffer 
+        self.imagesize = (0,0)  # current image size
+        self.ringBuffer = None  # current RingBuffer
         self.dataFeed = None    # current DataFeed
         # Ready to fork() the child subprocess for this task engine:
         self._engine = JobTasking(engineName, pump, taskCFG, self.accelerator, self.taskQ, self.rawBuffers)
@@ -514,16 +519,16 @@ class TaskEngine:
 
     def getName(self) -> str:
         return self.name
-    
+
     def getClasses(self) -> list:
         return self.job_classes
 
     def getJobID(self) -> str:
         return self.jobreq.jobID if self.jobreq else None
-        
+
     def getJobRequest(self) -> JobRequest:
         return self.jobreq
- 
+
     def newEvent(self, date, evt, wh) -> None:
         self.jobreq.eventDate = date
         self.jobreq.eventID = evt
@@ -559,7 +564,7 @@ class TaskEngine:
         self.wire.send(resp)
 
     def get_image_cnt(self) -> int:
-        return self.image_cnt 
+        return self.image_cnt
 
     def get_image_rate(self) -> float:
         return round((self.get_image_cnt() / (time.time() - self.task_start)), 2)
@@ -619,11 +624,11 @@ class JobManager:
         logging.debug(f"Job {jobid} requested chain to {task}")
         jreq = taskList[jobid]
         engine = self.engines[jreq.engine]
-        chained = JobRequest(jreq.dataSink, 
-                             jreq.sourceNode, 
-                             jreq.eventDate, 
-                             jreq.eventID, 
-                             jreq.datapump, 
+        chained = JobRequest(jreq.dataSink,
+                             jreq.sourceNode,
+                             jreq.eventDate,
+                             jreq.eventID,
+                             jreq.datapump,
                              task,
                              jreq.priority)
         chained.camsize = jreq.camsize
@@ -652,7 +657,7 @@ class JobManager:
         (startframe, _newEvent, _ringctrl, _trktype) = key
         if startframe:
             _valid = True
-        if _newEvent:  
+        if _newEvent:
             # When changing events, potentially assign a different ring buffer
             jreq.eventDate = _newEvent[0]
             jreq.eventID = _newEvent[1]
@@ -666,7 +671,7 @@ class JobManager:
                     _camsize = jreq.camsize
                     _valid = False
             taskEngine.newEvent(jreq.eventDate, jreq.eventID, _camsize)
-            taskEngine.taskQ.put(taskEngine.getJobRequest())  # confirm event change readiness with task engine 
+            taskEngine.taskQ.put(taskEngine.getJobRequest())  # confirm event change readiness with task engine
         if not _valid:
             taskEngine.ringBuffer.reset()
             taskEngine.cursor = None
@@ -731,8 +736,8 @@ class JobManager:
                         # New task request received
                         jobreq = taskList[msg]
                         jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
-                        if jobreq.jobClass in self.ondeck: 
-                            if self.ondeck[jobreq.jobClass] is None: 
+                        if jobreq.jobClass in self.ondeck:
+                            if self.ondeck[jobreq.jobClass] is None:
                                 self.ondeck[jobreq.jobClass] = jobreq
 
                     elif tag == TaskEngine.TaskSTARTED:
@@ -759,7 +764,7 @@ class JobManager:
 
                     elif tag == TaskEngine.TaskBOMB:
                         # Handle engine failure
-                        logging.critical(f"TaskEngine '{msg}' failed catastrophically.") 
+                        logging.critical(f"TaskEngine '{msg}' failed catastrophically.")
                         if msg in self.engines:
                             del self.engines[msg]
 
@@ -771,7 +776,7 @@ class JobManager:
                     logging.exception("JobManager unexpected exception")
                 taskFeed.task_done()
                 logging.debug(f"Now ondeck {str(self._ondeck_status())}")
-            
+
             # Service the ring buffers for running tasks.
             runningTasks = 0
             for engineName in self.engines:
@@ -789,10 +794,10 @@ class JobManager:
                                 engine.send_response(engine.ringBuffer.get())
                         elif engine.cursor:
                             self._feedNext(engine)
-                        # TODO: Need a mechanism to cleanly shutdown a 
+                        # TODO: Need a mechanism to cleanly shutdown a
                         # running task in the event of DataFeed timeouts.
                 else:
-                    # TODO: Need an engine restart here 
+                    # TODO: Need an engine restart here
                     logging.error(f"TaskEngine '{engineName}' found dead.")
                     del self.engines[engineName]
 
@@ -816,9 +821,9 @@ class JobManager:
                             pending = []
                             # Try each priority level in order
                             for priority in [1, 2, 3]:
-                                pending = [r.jobID for r in taskList.values() 
-                                    if r.jobStatus == JobRequest.Status_QUEUED 
-                                    and r.jobClass == jobclass 
+                                pending = [r.jobID for r in taskList.values()
+                                    if r.jobStatus == JobRequest.Status_QUEUED
+                                    and r.jobClass == jobclass
                                     and r.priority == priority]
                                 if pending:
                                     break
@@ -846,12 +851,19 @@ async def task_loop(asyncREP, taskCFG):
                 if task == 'HISTORY':
                     #  TODO:  put this on a background thread
                     JobRequest.full_history_report()
-                elif task == 'STATUS':  
+                elif task == 'STATUS':
                     pass
                     #   Stats:  Job Count, Failures, average run time
                     #   Pending jobs,  Running, Queued, Failures?
                     #       Task, Status, start time, elapsed, sink, date, event
-                    #       stats grouped by task?  sink? 
+                    #       stats grouped by task?  sink?
+                elif task == 'ALERT':
+                    # Re-broadcast alert payload as lifecycle event for all subscribers
+                    if 'payload' in request:
+                        logging.info(json.dumps(request['payload']))
+                    else:
+                        logging.error(f"ALERT request missing payload: {request}")
+                        reply = 'Error'
                 else:
                     if task in taskCFG:
                         job = JobRequest(
@@ -889,7 +901,7 @@ async def task_feedback(asyncSUB):
         (msgTag, taskMsg) = msgpack.unpackb(payload, use_list=False)
         if msgTag == TaskEngine.TaskSTATUS:
             logging.info(str(taskMsg))
-        else: 
+        else:
             # These TaskEngine conditions have an equivalent mapping to JobRequest status flags
             if msgTag in [TaskEngine.TaskSTARTED,
                           TaskEngine.TaskDONE,
@@ -915,18 +927,18 @@ async def main():
     asyncSUB = ctxAsync.socket(zmq.SUB)  # subscriptions for job result publishers
     asyncREP.bind(f"tcp://*:{CFG['control_port']}")
     asyncSUB.subscribe(b'')
-    manager = JobManager(CFG["task_engines"], 
+    manager = JobManager(CFG["task_engines"],
                          CFG["ring_buffer_models"],
                          CFG["task_list"],
                          CFG["default_pump"],
                          asyncSUB)
     try:
         log.info("Sentinel started")
-        await asyncio.gather(task_loop(asyncREP, CFG["task_list"]), 
+        await asyncio.gather(task_loop(asyncREP, CFG["task_list"]),
                              task_feedback(asyncSUB))
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
-    except Exception as e:  # traceback will appear in log 
+    except Exception as e:  # traceback will appear in log
         log.exception('Unanticipated error with no exception handler')
     finally:
         manager.close()
@@ -937,7 +949,7 @@ async def main():
 def start_logging(publish):
     logconfig = CFG['logconfig']
     socket = ctxBlocking.socket(zmq.PUB)
-    socket.bind(f"tcp://*:{publish}") 
+    socket.bind(f"tcp://*:{publish}")
     logconfig['handlers']['zmq']['interface_or_socket'] = socket
     logging.config.dictConfig(logconfig)
     log = logging.getLogger()

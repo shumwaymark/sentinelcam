@@ -135,6 +135,9 @@ sentinel_tasks:
     config_file: GetFaces.yaml
     chain: FaceRecon
     class: 1
+  VehicleSpeed:
+    config_file: VehicleSpeed.yaml
+    class: 2
   DailyCleanup:
     config_file: DailyCleanup.yaml
     class: 3

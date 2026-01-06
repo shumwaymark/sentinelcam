@@ -1,0 +1,61 @@
+%YAML 1.0
+---
+# VehicleSpeed.yaml - VASCAR speed estimation for vehicle traffic
+#
+# This task processes existing vehicle detections from outpost tracking data
+# and estimates speeds using Virtual Average Speed Computer And Recorder (VASCAR) method.
+
+refkey: vsp
+camwatcher_update: True
+
+# Vehicle classes to track (from MobileNetSSD)
+vehicle_classes: ['car', 'bus', 'truck', 'motorcycle']
+
+# Marker configuration
+# markers_x: horizontal positions as % of frame width (left to right)
+# marker_y: vertical position as % of frame height (defines road level)
+# marker_y_tolerance: +/- % of frame height to accept detections at marker line
+markers_x: [0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90]
+marker_y: 0.50              # Road centerline (% of frame height)
+marker_y_tolerance: 0.15    # Accept vehicles within +/- 15% of frame height
+
+# Distance calibration
+street_length_meters: 21.6    # Distance between first and last marker (80% of 27m viewport width)
+camera_distance_meters: 17.5  # Distance from camera to street
+viewport_width_meters: 27.0   # Full visible street width (100% of frame)
+
+# Speed calculation parameters
+min_markers: 2                # Minimum marker crossings required to calculate speed
+speed_limit_mph: 25           # Speed limit for violation alerts
+speed_tolerance_mph: 5        # Don't alert unless speed > limit + tolerance
+
+# Vehicle tracking parameters
+centroid_max_distance: 50     # Max pixel distance to associate detections across frames
+min_detection_confidence: 0.5 # Minimum MobileNetSSD confidence to consider detection
+
+# Direction detection
+# Vehicles moving left-to-right have positive velocity
+# Vehicles moving right-to-left have negative velocity
+# Both directions are tracked and logged
+track_both_directions: true
+
+# ---------------------------------------------------------------------------
+# Calibration procedure:
+# ---------------------------------------------------------------------------
+# 1. Drive a vehicle at a known speed through the camera view (e.g., 25 mph)
+# 2. Record the speed measured by VASCAR (e.g., 21.5 mph)
+# 3. Calculate speed calibration factor:
+#    speed_calibration_factor = actual_speed / measured_speed
+# 1. Test drives at 25 mph, VASCAR averages 21.5 mph
+# 2. Calculate: 25 / 21.5 = 1.16
+# 3. Uncomment and set speed_calibration_factor below, default is 1.0:
+#speed_calibration_factor: 1.16
+
+# Alternatively, adjust viewport_width_meters:
+# If VASCAR reads LOW → increase viewport_width (distances underestimated)
+# If VASCAR reads HIGH → decrease viewport_width (distances overestimated)
+# Formula: new_width = current_width x (actual_speed / measured_speed)
+#
+# Example: If measuring 21.5 mph when actual is 25 mph:
+#
+#  27.0 x (25 / 21.5) = 31.4 meters

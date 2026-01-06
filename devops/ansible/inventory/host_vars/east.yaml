@@ -23,5 +23,7 @@ imagenode_config:
           jpegs: jpegs           # JPEG queue name
           neural_nets:
             Q1: nn               # Neural network output queue
+        interesting_objects: [person, vehicle, dog, motorcycle, car, truck, bird, cat]
         sentinel_tasks:
           person: GetFaces2
+          default: VehicleSpeed
