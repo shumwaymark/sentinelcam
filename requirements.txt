@@ -1,5 +1,7 @@
 # requirements.txt for SentinelCam
+# see devops/ansible/roles/sentinelcam_base/files/requirements.txt
 # Only directly imported dependencies with pinned current versions
+# picamera2 library imported at system levelgit
 opencv-contrib-python-headless==4.11.0.86
 imagezmq==1.2.0
 imutils==0.5.4
