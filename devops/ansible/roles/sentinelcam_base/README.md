@@ -10,7 +10,7 @@ This role is designed to be included as a dependency by all component-specific r
 
 - **User Management**: Creates the SentinelCam service user and group
 - **Python Environment**: Sets up a virtual environment with `--system-site-packages` for hardware access (e.g., picamera2)
-- **Dependency Management**: Installs Python requirements from either local repository (datasinks) or syncs from primary datasink (other nodes)
+- **Dependency Management**: Deploys and installs Python requirements from version-controlled requirements.txt in role files/
 - **Directory Structure**: Creates base data and log directories
 - **Code Deployment**: Optional synchronization of source code from the primary datasink to all nodes
 - **Service Handlers**: Provides handlers to restart SentinelCam services after code updates
@@ -46,7 +46,7 @@ deploy_source_code: false                # Enable code deployment
 
 ```yaml
 skip_base_provisioning: false            # Skip user/venv creation if already done
-sentinelcam_requirements_file: /path/to/requirements.txt  # Custom requirements file
+sentinelcam_requirements_file: requirements.txt  # Override with alternate requirements file name from files/
 ```
 
 ### Component-Specific Variables
@@ -135,10 +135,10 @@ The role expects the following inventory groups:
 
 3. **Python Environment**
    - Creates virtual environment with `--system-site-packages`
-   - Installs Python dependencies:
-     - Datasinks: from local `requirements.txt`
-     - Other nodes: syncs from primary datasink, then installs
+   - Deploys requirements.txt from Ansible control host (role files/)
+   - Installs Python dependencies on all nodes uniformly
    - Creates activation helper script
+   - Supports host-specific requirements via file naming (e.g., requirements_coral.txt)
 
 4. **Directory Structure**
    - Base data directory
@@ -218,9 +218,15 @@ vars:
 
 ### Python Dependency Updates
 
-Update only Python packages:
+Update requirements.txt in the role files/ directory, commit to Git, then deploy:
 
 ```bash
+# Update only Python packages across all nodes
+ansible-playbook playbooks/deploy-outpost.yaml --tags python_deps
+ansible-playbook playbooks/deploy-sentinel.yaml --tags python_deps
+ansible-playbook playbooks/deploy-datasink.yaml --tags python_deps
+
+# Or update all nodes at once
 ansible-playbook site.yml --tags python_deps
 ```
 
@@ -252,7 +258,10 @@ Uses `--system-site-packages` to provide:
 
 **Symptom**: pip install fails or wrong packages installed
 
-**Solution**: Ensure `sentinelcam_requirements_file` points to correct path on datasink
+**Solution**: 
+- Verify requirements.txt exists in role files/ directory
+- Check requirements.txt syntax (package==version format)
+- For host-specific requirements, use `sentinelcam_requirements_file` variable to override default
 
 ### Code Not Syncing
 

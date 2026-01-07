@@ -5,7 +5,6 @@
 - name: "Ensure critical variables are defined in role context"
   ansible.builtin.set_fact:
     primary_datasink: "{{ primary_datasink }}"
-    sentinelcam_requirements_file: "{{ sentinelcam_requirements_file }}"
     sentinelcam_venv_opencv: "{{ sentinelcam_venv_opencv }}"
   tags: always
 
@@ -29,55 +28,28 @@
     - inventory_hostname in groups['modern_nodes']
   tags: venv
 
+- name: "Deploy requirements.txt from Ansible control host"
+  ansible.builtin.copy:
+    src: "{{ sentinelcam_requirements_file | default('requirements.txt') }}"
+    dest: "/tmp/sentinelcam_requirements.txt"
+    mode: '0644'
+  when: skip_base_provisioning | default(false) == false
+  tags: python_deps
+
 - name: "Install Python dependencies into virtual environment"
-  block:
-    # For datasinks: install from local repository
-    - name: "Install Python dependencies from local repository (datasinks)"
-      ansible.builtin.pip:
-        requirements: "{{ sentinelcam_requirements_file }}"
-        virtualenv: "{{ sentinelcam_venv_opencv }}"
-        virtualenv_command: "python3 -m venv"
-        state: present
-      become_user: "{{ sentinelcam_user }}"
-      when: inventory_hostname in groups['datasinks']
-      tags:
-        - python_deps
-        - local_install
+  ansible.builtin.pip:
+    requirements: "/tmp/sentinelcam_requirements.txt"
+    virtualenv: "{{ sentinelcam_venv_opencv }}"
+    virtualenv_command: "python3 -m venv"
+    state: present
+  become_user: "{{ sentinelcam_user }}"
+  when: skip_base_provisioning | default(false) == false
+  tags: python_deps
 
-    # For other nodes: sync requirements.txt from primary datasink, then install
-    - name: "Sync requirements.txt from primary datasink"
-      ansible.builtin.command:
-        cmd: >
-          rsync -avz --chmod=644
-          {{ primary_datasink }}:{{ sentinelcam_requirements_file }}
-          "/tmp/sentinelcam_requirements.txt"
-      become: false
-      when: inventory_hostname not in groups['datasinks']
-      tags:
-        - python_deps
-        - remote_install
-
-    - name: "Install Python dependencies from synced requirements (non-datasinks)"
-      ansible.builtin.pip:
-        requirements: "/tmp/sentinelcam_requirements.txt"
-        virtualenv: "{{ sentinelcam_venv_opencv }}"
-        virtualenv_command: "python3 -m venv"
-        state: present
-      become_user: "{{ sentinelcam_user }}"
-      when: inventory_hostname not in groups['datasinks']
-      tags:
-        - python_deps
-        - remote_install
-
-    - name: "Clean up synced requirements file"
-      ansible.builtin.file:
-        path: "/tmp/sentinelcam_requirements.txt"
-        state: absent
-      when: inventory_hostname not in groups['datasinks']
-      tags:
-        - python_deps
-        - cleanup
-
+- name: "Clean up temporary requirements file"
+  ansible.builtin.file:
+    path: "/tmp/sentinelcam_requirements.txt"
+    state: absent
   when: skip_base_provisioning | default(false) == false
   tags: python_deps
 
