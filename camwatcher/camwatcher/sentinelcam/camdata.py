@@ -12,22 +12,22 @@ class CamData:
     """ A library of access methods to camwatcher CSV and image data.
 
     Always operates within the context of a specific date. Any call
-    to `set_event()` should reference an event within the current date 
-    index. Use `set_date()` as necessary to change context to another 
-    date or to refresh the data. Designed for data retrieval, the 
-    library maintains internal state with basic information regarding 
-    the set of CSV data currently available for the date.  
+    to `set_event()` should reference an event within the current date
+    index. Use `set_date()` as necessary to change context to another
+    date or to refresh the data. Designed for data retrieval, the
+    library maintains internal state with basic information regarding
+    the set of CSV data currently available for the date.
 
     Parameters
     ----------
-    csvdir : str  
+    csvdir : str
         High-level folder name for camwatcher CSV date folders
-    imgdir : str  
+    imgdir : str
         High-level folder name for camwatcher image folders
     date : str, optional
-        Target date in "YYYY-MM-DD" format. This defaults to 
+        Target date in "YYYY-MM-DD" format. This defaults to
         current date if not specified.
-    
+
     Methods
     -------
     set_date(date() -> None
@@ -41,7 +41,7 @@ class CamData:
     get_index() -> pandas.DataFrame
         Returns reference to the current camwatcher index data
     get_last_event() -> str
-        Returns most recent event id 
+        Returns most recent event id
     set_event(event) -> None
         Set index to specifed event id
     get_event_node() -> str
@@ -66,11 +66,11 @@ class CamData:
     TRKCOLS = ["timestamp", "elapsed", "objid", "classname", "rect_x1", "rect_x2", "rect_y1", "rect_y2"]
 
     def set_date(self, date) -> None:
-        """ Initialize CamData objet to the given date 
+        """ Initialize CamData objet to the given date
 
         Loads the camwatcher index data for the given date. Clears any existing
         references to event and camera data. This is a clean reset to an entirely
-        new date, or used as a refresh of the current date.   
+        new date, or used as a refresh of the current date.
 
         Parameters
         ----------
@@ -92,8 +92,8 @@ class CamData:
             try:
                 # read camwatcher index into pandas DataFrame
                 self._index = pandas.read_csv(
-                                self._indexfile, 
-                                names=CamData.IDXCOLS, 
+                                self._indexfile,
+                                names=CamData.IDXCOLS,
                                 parse_dates=["timestamp"]
                             ).sort_values(
                                 by="timestamp", ascending=False)
@@ -101,13 +101,13 @@ class CamData:
                 if len(self._index.index) > 0:
                     self._lastEvent = self._index.iloc[0].event
             except pandas.errors.EmptyDataError:
-                self._index = pandas.DataFrame(columns=CamData.IDXCOLS)    
+                self._index = pandas.DataFrame(columns=CamData.IDXCOLS)
         else:
             self._index = pandas.DataFrame(columns=CamData.IDXCOLS)
 
     def get_date(self) -> str:
         """ Return current index date
-        
+
         Returns
         -------
         str
@@ -119,20 +119,20 @@ class CamData:
     def get_index_name(self, date) -> str:
         """ Return filename reference to camwatcher index
 
-        Based on the supplied date parameter, return the pathname to 
-        the camwatcher index if it exsits. Otherwise return None. This 
-        function can be used to quickly determine whether any data is 
-        available for the specified date. 
+        Based on the supplied date parameter, return the pathname to
+        the camwatcher index if it exsits. Otherwise return None. This
+        function can be used to quickly determine whether any data is
+        available for the specified date.
 
         Parameters
         ----------
         date : str
             Target date in "YYYY-MM-DD" format
-        
+
         Returns
         -------
         str
-            Pathname to camwatcher index for supplied date, or None 
+            Pathname to camwatcher index for supplied date, or None
         """
 
         indexname = os.path.join(self._index_path, date, CamData.IDXFILE)
@@ -141,8 +141,8 @@ class CamData:
         return indexname
 
     def get_index(self) -> pandas.DataFrame:
-        """ Return reference to the current camwatcher index as a pandas DataFrame 
-        
+        """ Return reference to the current camwatcher index as a pandas DataFrame
+
         Returns
         -------
         pandas.DataFrame
@@ -152,8 +152,8 @@ class CamData:
         return self._index
 
     def get_last_event(self) -> str:
-        """ Return most recent Event ID 
-        
+        """ Return most recent Event ID
+
         Returns
         -------
         str
@@ -165,9 +165,9 @@ class CamData:
     def set_event(self, event) -> None:
         """ Set camwatcher index to the specified Event ID
 
-        Sets index to the specified event. Establishes references to event detail 
+        Sets index to the specified event. Establishes references to event detail
         files. Loads camera detail data for default event type. A prerequisite
-        to establishing valid references to event and camera data. 
+        to establishing valid references to event and camera data.
 
         Parameters
         ----------
@@ -192,9 +192,9 @@ class CamData:
 
     def get_event_node(self) -> str:
         """ Return node name from event
-            
+
         Must have first invoked `set_event()` to load camera detail for the event.
-        
+
         Returns
         -------
         str
@@ -205,9 +205,9 @@ class CamData:
 
     def get_event_view(self) -> str:
         """ Return view name from the event
-            
+
         Must have first invoked `set_event()` to load camera detail for the event.
-        
+
         Returns
         -------
         str
@@ -215,12 +215,12 @@ class CamData:
         """
 
         return self._event_view
-    
+
     def get_event_camsize(self) -> tuple:
         """ Return camera image size (width, height) from the event
-            
+
         Must have first invoked `set_event()` to load camera detail for the event.
-        
+
         Returns
         -------
         tuple
@@ -231,9 +231,9 @@ class CamData:
 
     def get_event_start(self) -> datetime.timestamp:
         """ Return view name from the event
-            
+
         Must have first invoked `set_event()` to load camera detail for the event.
-        
+
         Returns
         -------
         datetime
@@ -243,28 +243,28 @@ class CamData:
         return self._event_start
 
     def get_event_types(self) -> list:
-        """ Return list of event types for the selected event. 
-        
+        """ Return list of event types for the selected event.
+
         Must have first invoked `set_event()` to load camera detail for the event.
-        
+
         Returns
         -------
-        List 
+        List
             A list of the available event types for the current event.
         """
-        
+
         return self._event_types
-    
+
     def get_event_pathname(self, event, type='trk') -> str:
         """ Return pathname to the camera event detail file
-                
+
         Parameters
         ----------
         event : str
             Event ID
         type : str, optional
             Event type
-        
+
         Returns
         -------
         str
@@ -277,14 +277,14 @@ class CamData:
         return indexname
 
     def get_event_data(self, type='trk') -> pandas.DataFrame:
-        """ Return reference to selected event tracking data as a pandas DataFrame 
-        
+        """ Return reference to selected event tracking data as a pandas DataFrame
+
         Must have first invoked `set_event()` to load camera detail for the event.
 
         Parameters
         ----------
         type : str, optional
-            Event type 
+            Event type
 
         Returns
         -------
@@ -295,12 +295,10 @@ class CamData:
         csvFile = self.get_event_pathname(self._event_id, type)
         if csvFile is not None:
             try:
-                # For pandas 1.2.2 compatibility - use error_bad_lines=False instead of on_bad_lines='skip'
                 self._event_data = pandas.read_csv(
-                    csvFile, 
+                    csvFile,
                     parse_dates=['timestamp'],
-                    error_bad_lines=False,  # Skip bad lines (pandas 1.2.2 compatible)
-                    warn_bad_lines=False,   # Suppress warnings about bad lines
+                    on_bad_lines='skip',
                     dtype={
                         'objid': str,
                         'classname': str,
@@ -310,16 +308,16 @@ class CamData:
                         'rect_y2': 'Int64'
                     }
                 )
-                
+
                 # Ensure timestamp column is properly parsed
                 self._event_data['timestamp'] = pandas.to_datetime(
-                    self._event_data['timestamp'], 
+                    self._event_data['timestamp'],
                     errors='coerce'  # Convert invalid timestamps to NaT
                 )
-                
+
                 # Drop rows with invalid timestamps
                 self._event_data = self._event_data.dropna(subset=['timestamp'])
-                
+
                 # Sort by timestamp and add elapsed time
                 if len(self._event_data) > 0:
                     self._event_data = self._event_data.sort_values(by="timestamp")
@@ -342,17 +340,17 @@ class CamData:
 
     def get_date_list(self) -> list:
         """ Returns list of available YYYY-MM-DD date folders from most recent to oldest
-        
+
         Returns
         -------
         List
             The list of available date folders
         """
         return sorted([d[-10:] for d in list(self._list_date_folders())], reverse=True)
-            
+
     def get_event_images(self) -> list:
         """ Returns list of pathnames to individual image frame files in chronological order
-        
+
         Returns
         -------
         List
@@ -385,16 +383,16 @@ class CamData:
         self.set_date(date)
 
 # ----------------------------------------------------------------------------------------
-#   See below for usaage 
+#   See below for usaage
 # ----------------------------------------------------------------------------------------
 if __name__ == '__main__' :
 
     cfg = {'csvdir': '/mnt/usb1/sentinelcam/camwatcher',
-           'imgdir': '/mnt/usb1/sentinelcam/images'} 
+           'imgdir': '/mnt/usb1/sentinelcam/images'}
 
     cdata = CamData(cfg["csvdir"], cfg["imgdir"])  # Initializer defaults to current date
     cindx = cdata.get_index()                      # Get reference to index DataFrame
-    
+
     # most recent 5 events
     trkevts = cindx.loc[cindx['type'] == 'trk']
     for row in trkevts[:5].itertuples():
@@ -402,16 +400,16 @@ if __name__ == '__main__' :
 
     event_id = cdata.get_last_event()      # grab the most recent event id
     if event_id:
-        cdata.set_event(event_id)          # load event data 
-        evt_data = cdata.get_event_data()  # get reference to tracking dataset from event 
-    
+        cdata.set_event(event_id)          # load event data
+        evt_data = cdata.get_event_data()  # get reference to tracking dataset from event
+
         print(f"Event from ID [{event_id}] started at {str(cdata.get_event_start())}")
         for row in evt_data[:10].itertuples():
-            print(str(row.timestamp) + " " + 
-                  str(row.elapsed) + " " + 
-                  str(row.objid) + " " + 
+            print(str(row.timestamp) + " " +
+                  str(row.elapsed) + " " +
+                  str(row.objid) + " " +
                   str(row.classname) + " " +
-                  str(row.rect_x1) + " " + 
+                  str(row.rect_x1) + " " +
                   str(row.rect_x2) + " " +
                   str(row.rect_y1) + " " +
                   str(row.rect_y2))
