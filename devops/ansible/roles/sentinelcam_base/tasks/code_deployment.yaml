@@ -29,6 +29,19 @@
     - code_deployment
     - deploy
 
+# Ensure nodes can connect to primary datasink for rsync
+- name: "Accept SSH host key from primary datasink"
+  ansible.builtin.shell: |
+    ssh-keyscan -H {{ deployment_source_node }} >> ~/.ssh/known_hosts
+  args:
+    creates: ~/.ssh/known_hosts
+  become: yes
+  become_user: "{{ sentinelcam_user }}"
+  when: not is_primary_datasink
+  tags:
+    - code_deployment
+    - deploy
+
 - name: "Display deployment strategy"
   ansible.builtin.debug:
     msg:

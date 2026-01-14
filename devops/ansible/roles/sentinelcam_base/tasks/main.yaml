@@ -12,6 +12,7 @@
   ansible.builtin.package:
     name:
       - python3-picamera2  # Pi Camera support for --system-site-packages (Bookworm+)
+      - python3-tk  # Tkinter support for PIL.ImageTk (watchtower GUI)
     state: present
   when:
     - skip_base_provisioning | default(false) == false
@@ -28,9 +29,9 @@
     - inventory_hostname in groups['modern_nodes']
   tags: venv
 
-- name: "Deploy requirements.txt from Ansible control host"
+- name: "Deploy requirements.txt from role files to temporary location"
   ansible.builtin.copy:
-    src: "{{ sentinelcam_requirements_file | default('requirements.txt') }}"
+    src: "requirements.txt"
     dest: "/tmp/sentinelcam_requirements.txt"
     mode: '0644'
   when: skip_base_provisioning | default(false) == false
@@ -68,6 +69,18 @@
       echo "Pip: $(which pip)"
   when: skip_base_provisioning | default(false) == false
   tags: venv
+
+- name: "Deploy tmpfiles.d configuration for automatic /tmp cleanup"
+  ansible.builtin.template:
+    src: sentinelcam-tmpfiles.conf.j2
+    dest: /etc/tmpfiles.d/sentinelcam.conf
+    mode: '0644'
+    owner: root
+    group: root
+  become: yes
+  tags:
+    - tmpfiles
+    - system_config
 
 - name: "Disable unnecessary system services"
   ansible.builtin.systemd:

@@ -16,43 +16,68 @@
 
   vars:
     # These should be provided via extra-vars or inventory
-    target_hostname: "{{ target_hostname | default(inventory_hostname) }}"
-    target_timezone: "{{ target_timezone | default('America/Chicago') }}"
-    target_locale: "{{ target_locale | default('en_US.UTF-8') }}"
-    target_role: "{{ target_role | default('outpost') }}"
+    node_hostname: "{{ target_hostname | default(inventory_hostname) }}"
+    node_timezone: "{{ target_timezone | default('America/Chicago') }}"
+    node_locale: "{{ target_locale | default('en_US.UTF-8') }}"
+    node_role: "{{ target_role | default('outpost') }}"
 
   tasks:
     # System Configuration
     - name: Set hostname
       hostname:
-        name: "{{ target_hostname }}"
+        name: "{{ node_hostname }}"
 
     - name: Update /etc/hosts with new hostname
       lineinfile:
         path: /etc/hosts
         regexp: '^127\.0\.1\.1'
-        line: "127.0.1.1       {{ target_hostname }}"
+        line: "127.0.1.1       {{ node_hostname }}"
 
     - name: Set timezone
       timezone:
-        name: "{{ target_timezone }}"
+        name: "{{ node_timezone }}"
 
     - name: Generate and set locale
       locale_gen:
-        name: "{{ target_locale }}"
+        name: "{{ node_locale }}"
         state: present
 
     # System Updates
+    - name: Stop PackageKit service (prevents apt lock conflicts)
+      systemd:
+        name: packagekit
+        state: stopped
+      ignore_errors: yes
+
+    - name: Disable PackageKit service (not needed for kiosk nodes)
+      systemd:
+        name: packagekit
+        enabled: no
+      ignore_errors: yes
+      when: node_role in ['watchtower']
+
+    - name: Wait for any remaining dpkg locks to clear
+      shell: while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
+      changed_when: false
+      timeout: 300
+
     - name: Update apt cache
       apt:
         update_cache: yes
         cache_valid_time: 3600
+      retries: 5
+      delay: 10
+      register: apt_update_result
+      until: apt_update_result is succeeded
 
     - name: Upgrade all packages
       apt:
         upgrade: dist
         autoremove: yes
+      retries: 3
+      delay: 10
       register: upgrade_result
+      until: upgrade_result is succeeded
 
     - name: Display upgrade summary
       debug:
@@ -77,7 +102,7 @@
           - python3-picamera2
         state: present
       when:
-        - target_role in ['outpost']
+        - node_role in ['outpost']
         - ansible_distribution_version is version('11', '>=')
 
     # User and Group Management
@@ -146,7 +171,7 @@
     - name: Display bootstrap completion summary
       debug:
         msg:
-          - "=== Bootstrap completed for {{ target_hostname }} ==="
+          - "=== Bootstrap completed for {{ node_hostname }} ==="
           - ""
           - "Configuration Summary:"
           - "  Hostname: {{ ansible_hostname }}"
@@ -156,7 +181,7 @@
           - "Next Steps:"
           - "  1. Run static IP configuration playbook:"
           - "     ansible-playbook -i inventory/bootstrap.yaml playbooks/configure_static_network.yaml \\"
-          - "       --extra-vars 'target_hostname={{ target_hostname }} target_ip={{ target_ip }}'"
+          - "       --extra-vars 'target_hostname={{ node_hostname }} target_ip={{ target_ip }}'"
           - ""
           - "  2. Add node to production inventory (inventory/production.yaml)"
           - ""
