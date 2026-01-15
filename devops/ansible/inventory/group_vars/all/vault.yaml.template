@@ -9,7 +9,7 @@ vault_wireguard_endpoint_ip: "208.217.112.65"
 vault_wireguard_port: "54321"
 
 # Sudo password for rocky user on bastion (if not using passwordless sudo)
-# vault_rocky_become_password: "YOUR_ROCKY_SUDO_PASSWORD_HERE"
+vault_rocky_become_password: "YOUR_ROCKY_SUDO_PASSWORD_HERE"
 
 # ssh key pair for operations and deployment
 vault_ssh_private_key: |
@@ -18,3 +18,25 @@ vault_ssh_private_key: |
   -----END OPENSSH PRIVATE KEY-----
 
 vault_ssh_public_key: "SSH_PUBLIC_KEY_HERE"
+
+# VPS Video Export Configuration (for watchtower video sharing)
+vault_vps_ssh_host: "YOUR_VPS_HOST"
+vault_vps_ssh_user: "YOUR_VPS_USERNAME"
+vault_vps_ssh_port: "22"
+
+# VPS SSH private key for watchtower uploads
+vault_vps_ssh_private_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  ...
+  -----END OPENSSH PRIVATE KEY-----
+
+# Nginx secure_link secret key (generate with: openssl rand -base64 32)
+vault_vps_secure_link_secret: "GENERATE_RANDOM_SECRET_HERE"
+
+# Telegram Bot Token for notifications (create bot with BotFather)
+vault_telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+
+# Telegram chat IDs for video export notifications
+vault_telegram_chat_ids:
+  - "+15559876543"  # Primary contact
+  # - "+15551112222"  # Additional recipients

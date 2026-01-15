@@ -38,6 +38,7 @@
   loop:
     - "{{ sentinelcam_directories.csvfiles }}"
     - "{{ sentinelcam_directories.images }}"
+    - "{{ sentinelcam_directories.video_archives }}"
   tags: directories
 
 - name: "Deploy CamWatcher systemd service file"

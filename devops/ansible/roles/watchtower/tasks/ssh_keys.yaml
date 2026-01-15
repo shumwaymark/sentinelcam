@@ -1,0 +1,36 @@
+---
+# VPS SSH key deployment for video export uploads
+
+- name: "Ensure SSH directory exists"
+  ansible.builtin.file:
+    path: "/home/{{ sentinelcam_user }}/.ssh"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0700'
+  tags: [ssh_keys, vps]
+
+- name: "Deploy VPS SSH key for video uploads"
+  ansible.builtin.copy:
+    content: "{{ vault_vps_ssh_private_key }}"
+    dest: "/home/{{ sentinelcam_user }}/.ssh/sentinelcam_vps"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0600'
+  when: vault_vps_ssh_private_key is defined
+  tags: [ssh_keys, vps]
+
+- name: "Configure SSH to use VPS key"
+  ansible.builtin.blockinfile:
+    path: "/home/{{ sentinelcam_user }}/.ssh/config"
+    create: yes
+    mode: '0644'
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    block: |
+      Host {{ vault_vps_ssh_host }}
+        IdentityFile ~/.ssh/sentinelcam_vps
+        User {{ vault_vps_ssh_user | default('rocky') }}
+        Port {{ vault_vps_ssh_port | default(22) }}
+  when: vault_vps_ssh_host is defined
+  tags: [ssh_keys, vps]
