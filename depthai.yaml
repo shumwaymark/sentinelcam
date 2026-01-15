@@ -1,4 +1,4 @@
-# Settings file imagenode.yaml -- sentinalcam settings version 7, with OAK-1 integration
+# Settings file imagenode.yaml -- sentinalcam settings version 8, with OAK-1 integration
 ---
 node:
   name: east

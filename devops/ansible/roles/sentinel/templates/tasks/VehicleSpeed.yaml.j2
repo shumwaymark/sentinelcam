@@ -50,11 +50,12 @@ track_both_directions: true
 # 1. Test drives at 25 mph, VASCAR averages 21.5 mph
 # 2. Calculate: 25 / 21.5 = 1.16
 # 3. Uncomment and set speed_calibration_factor below, default is 1.0:
-#speed_calibration_factor: 1.16
+
+speed_calibration_factor: 0.89
 
 # Alternatively, adjust viewport_width_meters:
-# If VASCAR reads LOW → increase viewport_width (distances underestimated)
-# If VASCAR reads HIGH → decrease viewport_width (distances overestimated)
+# If VASCAR reads LOW, increase viewport_width (distances underestimated)
+# If VASCAR reads HIGH, decrease viewport_width (distances overestimated)
 # Formula: new_width = current_width x (actual_speed / measured_speed)
 #
 # Example: If measuring 21.5 mph when actual is 25 mph:
