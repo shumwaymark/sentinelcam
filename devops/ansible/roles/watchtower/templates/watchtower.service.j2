@@ -12,6 +12,7 @@ Type=simple
 User={{ sentinelcam_user }}
 WorkingDirectory={{ watchtower_install_path }}/watchtower
 Environment=DISPLAY={{ watchtower_display }}
+Environment=XAUTHORITY=/home/{{ sentinelcam_user }}/.Xauthority
 Restart=always
 RestartSec=5
 ExecStart={{ sentinelcam_venv_opencv }}/bin/python -u {{ watchtower_install_path }}/watchtower/watchtower.py

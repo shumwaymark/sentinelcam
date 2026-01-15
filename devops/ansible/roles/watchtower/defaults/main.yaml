@@ -13,21 +13,26 @@ watchtower_config_path: "/home/{{ sentinelcam_user }}/watchtower.yaml"
 # Sentinel logging publisher endpoint
 watchtower_sentinel: "tcp://{{ sentinelcam_sentinel }}:{{ sentinelcam_ports.sentinel_logging }}"
 
-# IPC socket directory 
+# IPC socket directory
 watchtower_socket_dir: "{{ watchtower_install_path }}/sockets"
 
 # Watchtower runs in graphical environment
 watchtower_display: ":0"
+# Touchscreen configuration (run xinput_calibrator to get these values)
+touchscreen_product_name: "FT5406 memory based driver"
+# Example values - replace with actual calibration after running xinput_calibrator
+# touchscreen_calibration_values: "3919 61 3884 101"
+# touchscreen_swap_axes: "0"
 
 # Debug mode flag
 debug_mode: false
 
 # Default view settings
 # NOTE: This should match a view name from sentinelcam_outposts registry
-watchtower_default_view: "PiCamera"
+watchtower_default_view: "Front"
 watchtower_viewfps: true
 
-# NOTE: The following configurations are now auto-generated from group_vars/all/site.yaml:
+# NOTE: The following configurations are auto-generated from group_vars/all/site.yaml:
 #   - watchtower_ring_buffers  (derived from unique resolutions in sentinelcam_outposts)
 #   - watchtower_datapumps     (derived from unique datasinks in sentinelcam_outposts)
 #   - watchtower_outposts      (derived from sentinelcam_outposts registry)
@@ -37,3 +42,19 @@ watchtower_viewfps: true
 #   watchtower_monitored_outposts:
 #     - east
 #     - lab1
+
+# Video export configuration
+# Current: Single datasink destination via SCP
+# Future extensibility: Can be expanded to support:
+#   - Multiple destinations (datasink + cloud/NAS via rclone/aws-cli)
+#   - Notification hooks (SMS/email after successful upload)
+#   - Per-destination credentials from vault
+watchtower_video_export:
+  enabled: true
+  # output_dir defaults to {{ primary_datasink }}:{{ sentinelcam_directories.video_archives }}
+
+  # VPS configuration for external sharing
+  link_expiry_hours: 72  # Secure link expiry time in hours
+  vps_export_path: "/var/www/sentinelcam_exports"
+  vps_base_url: "https://www.swanriversystems.com/sentinelcam_exports"
+

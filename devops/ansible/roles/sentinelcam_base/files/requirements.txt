@@ -12,3 +12,4 @@ pyyaml==6.0.2
 msgpack==1.1.0
 numpy==1.24.4
 simplejpeg==1.6.6
+pillow==11.0.0

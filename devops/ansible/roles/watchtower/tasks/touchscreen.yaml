@@ -1,0 +1,45 @@
+---
+# Touchscreen calibration tasks for Raspberry Pi official touchscreen
+
+- name: "Install xinput-calibrator for touchscreen setup"
+  become: yes
+  ansible.builtin.apt:
+    name: xinput-calibrator
+    state: present
+  tags: touchscreen
+
+- name: "Create xorg.conf.d directory"
+  become: yes
+  ansible.builtin.file:
+    path: /etc/X11/xorg.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: touchscreen
+
+- name: "Deploy touchscreen calibration config"
+  become: yes
+  ansible.builtin.template:
+    src: 99-calibration.conf.j2
+    dest: /etc/X11/xorg.conf.d/99-calibration.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: touchscreen_calibration_values is defined
+  notify: restart lightdm
+  tags: touchscreen
+
+- name: "Display calibration instructions"
+  ansible.builtin.debug:
+    msg: |
+      Touchscreen calibration not configured.
+      To calibrate:
+      1. SSH to {{ inventory_hostname }}
+      2. Run: DISPLAY=:0 xinput_calibrator
+      3. Touch the crosshairs as instructed
+      4. Add output values to host_vars/{{ inventory_hostname }}.yaml:
+         touchscreen_calibration_values: "3919 61 3884 101"
+      5. Re-run deployment playbook with --tags touchscreen
+  when: touchscreen_calibration_values is not defined
+  tags: touchscreen

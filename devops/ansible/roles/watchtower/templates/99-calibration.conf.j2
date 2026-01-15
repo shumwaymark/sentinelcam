@@ -1,0 +1,6 @@
+Section "InputClass"
+    Identifier "calibration"
+    MatchProduct "{{ touchscreen_product_name | default('FT5406 memory based driver') }}"
+    Option "Calibration" "{{ touchscreen_calibration_values }}"
+    Option "SwapAxes" "{{ touchscreen_swap_axes | default('0') }}"
+EndSection

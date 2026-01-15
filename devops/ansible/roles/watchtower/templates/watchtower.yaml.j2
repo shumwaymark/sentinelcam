@@ -67,3 +67,51 @@ outpost_views:
 {%     endfor %}
 {%   endif %}
 {% endfor %}
+
+# Video export configuration (optional - if not present, share button will not appear)
+# Exports events with tracking overlays as MP4 video files
+{% if watchtower_video_export is defined and watchtower_video_export.enabled | default(false) %}
+video_export:
+  # Output directory on datasink node (requires SSH access configured via ansible)
+  output_dir: {{ watchtower_video_export.output_dir | default(primary_datasink ~ ':' ~ sentinelcam_directories.video_archives) }}
+
+  # Maximum gap in seconds between events to consider them sequential for auto-merge
+  max_event_gap_seconds: {{ watchtower_video_export.max_event_gap_seconds | default(30) }}
+
+  # Maximum number of events to merge into a single video
+  max_merged_events: {{ watchtower_video_export.max_merged_events | default(10) }}
+
+  # Include tracking overlays (bounding boxes, class names) in exported video
+  include_overlays: {{ watchtower_video_export.include_overlays | default(true) | lower }}
+
+  # Number of frames to display event header at start of each sub-event
+  header_duration_frames: {{ watchtower_video_export.header_duration_frames | default(60) }}
+
+  # Calculate text color based on frame brightness for better readability
+  #adaptive_text_color: {{ watchtower_video_export.adaptive_text_color | default(true) | lower }}
+
+  # Local temporary directory for rendering before transfer (must have sufficient space)
+  local_temp_dir: {{ watchtower_video_export.local_temp_dir | default('/tmp/watchtower_exports') }}
+
+  # VPS upload configuration (optional - if defined, exports will be uploaded for external sharing)
+{% if vault_vps_ssh_host is defined and vault_telegram_bot_token is defined %}
+  vps_upload:
+    enabled: true
+    host: {{ vault_vps_ssh_host }}
+    user: {{ vault_vps_ssh_user | default('rocky') }}
+    port: {{ vault_vps_ssh_port | default(22) }}
+    path: {{ watchtower_video_export.vps_export_path | default('/var/www/sentinelcam_exports') }}
+    base_url: {{ watchtower_video_export.vps_base_url | default('https://' ~ vault_vps_ssh_host ~ '/exports') }}
+    secure_link_secret: {{ vault_vps_secure_link_secret }}
+    link_expiry_hours: {{ watchtower_video_export.link_expiry_hours | default(24) }}
+
+  # site name for labeling uploads
+  site_description: {{ sentinelcam_site_location | default('SentinelCam') }}
+
+  # Notification configuration via Telegram
+  notifications:
+    telegram:
+      bot_token: {{ vault_telegram_bot_token }}
+      chat_id: {{ vault_telegram_chat_id }}
+{% endif %}
+{% endif %}

@@ -9,6 +9,23 @@
     - status
     - health
 
+- name: "Include desktop/kiosk configuration tasks"
+  ansible.builtin.include_tasks: desktop.yaml
+  tags:
+    - desktop
+    - kiosk
+
+- name: "Include touchscreen calibration tasks"
+  ansible.builtin.include_tasks: touchscreen.yaml
+  tags:
+    - touchscreen
+
+- name: "Include VPS SSH key deployment"
+  ansible.builtin.include_tasks: ssh_keys.yaml
+  tags:
+    - ssh_keys
+    - vps
+
 - name: "Create Watchtower installation directory"
   ansible.builtin.file:
     path: "{{ watchtower_install_path }}"

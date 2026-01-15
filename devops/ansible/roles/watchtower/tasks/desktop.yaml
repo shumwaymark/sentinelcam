@@ -1,0 +1,66 @@
+---
+# Desktop and kiosk mode configuration for Raspberry Pi watchtower
+
+- name: "Enable auto-login for GUI"
+  become: yes
+  ansible.builtin.command:
+    cmd: raspi-config nonint do_boot_behaviour B4
+  args:
+    creates: /etc/systemd/system/getty@tty1.service.d/autologin.conf
+  tags: desktop
+
+- name: "Disable screen blanking in raspi-config"
+  become: yes
+  ansible.builtin.command:
+    cmd: raspi-config nonint do_blanking 1
+  tags: desktop
+
+- name: "Set auto-login user (ensures correct user is configured)"
+  become: yes
+  ansible.builtin.lineinfile:
+    path: /etc/lightdm/lightdm.conf
+    regexp: '^#?autologin-user='
+    line: "autologin-user={{ sentinelcam_user }}"
+    create: yes
+    mode: '0644'
+  when: ansible_facts['os_family'] == "Debian"
+  notify: restart lightdm
+  tags: desktop
+
+- name: "Disable screen blanking in X11 config"
+  become: yes
+  ansible.builtin.copy:
+    dest: /etc/X11/xorg.conf.d/10-monitor.conf
+    content: |
+      Section "ServerFlags"
+          Option "BlankTime" "0"
+          Option "StandbyTime" "0"
+          Option "SuspendTime" "0"
+          Option "OffTime" "0"
+      EndSection
+    owner: root
+    group: root
+    mode: '0644'
+  tags: desktop
+
+- name: "Create LXDE autostart directory"
+  ansible.builtin.file:
+    path: "/home/{{ sentinelcam_user }}/.config/lxsession/LXDE-pi"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: desktop
+
+- name: "Disable LXDE screensaver"
+  ansible.builtin.copy:
+    dest: "/home/{{ sentinelcam_user }}/.config/lxsession/LXDE-pi/autostart"
+    content: |
+      @xset s off
+      @xset -dpms
+      @xset s noblank
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+  tags: desktop
+

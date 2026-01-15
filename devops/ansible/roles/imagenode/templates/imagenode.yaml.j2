@@ -51,6 +51,19 @@ cameras:
 {% if camera.detector.interesting_objects is defined %}
             interesting_objects: {{ camera.detector.interesting_objects | list }}
 {% endif %}
+{% if camera.detector.motion_params is defined %}
+            motion_params:
+                varThreshold: {{ camera.detector.motion_params.varThreshold }}
+                detectShadows: {{ camera.detector.motion_params.detectShadows | lower }}
+                history: {{ camera.detector.motion_params.history }}
+                minContourW: {{ camera.detector.motion_params.minContourW }}
+                minContourH: {{ camera.detector.motion_params.minContourH }}
+                gaussianBlur: {{ camera.detector.motion_params.gaussianBlur }}
+                noMotionThreshold: {{ camera.detector.motion_params.noMotionThreshold }}
+{% endif %}
+{% if camera.detector.roi is defined %}
+            ROI: {{ camera.detector.roi }}
+{% endif %}
 {% if camera.detector.depthai is defined %}
             depthai:
                pipeline: {{ camera.detector.depthai.pipeline }}
