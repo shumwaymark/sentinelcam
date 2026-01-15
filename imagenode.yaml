@@ -1,4 +1,4 @@
-# Settings file imagenode.yaml -- version 7 for sentinelcam testing
+# Settings file imagenode.yaml -- version 8 for sentinelcam
 ---
 node:
   name: alpha5
@@ -21,7 +21,7 @@ cameras:
         outpost:
             publish_cam: 5567        # ZMQ port for image frame publishing
             publish_log: 5565        # ZMQ port for log publishing, must match logconfig below
-            logconfig:               # logging configuration dictionary 
+            logconfig:               # logging configuration dictionary
                 version: 1
                 handlers:
                     zmq:
@@ -32,11 +32,10 @@ cameras:
                 root:
                     handlers: [zmq]
                     level: INFO
-            camwatcher: tcp://data1:5566         # optional self-introduction to a running camwatcher 
+            camwatcher: tcp://data1:5566         # optional self-introduction to a running camwatcher
             spyglass: (640, 480)                 # must match camera "resolution" above
             detectobjects: mobilenetssd          # [mobilenetssd, yolov3]
             accelerator: none                    # [none, ncs2, coral]
-            tracker: none                        # [none, dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
             sentinel_tasks:
                 person: GetFaces2                # Priority 1 sentinel task submission for "person" detections
                 default: MobileNetSSD_allFrames  # optional catch-all task, submitted with priority 2
@@ -45,3 +44,12 @@ cameras:
                 model_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.caffemodel
                 confidence: 0.5
                 target: cpu     # [cpu, myriad]
+            interesting_objects: ['person', 'vehicle', 'dog', 'motorcycle', 'car', 'truck', 'cat']
+            motion_params:           # Motion detection configuration
+                varThreshold:  128   # MOG2 sensitivity threshold. Lower = more sensitive to changes
+                detectShadows: False # Detect and mark shadows (usually false for performance)
+                history: 500         # Number of frames for background model learning
+                minContourW: 50      # Minimum width (pixels) for valid motion contour
+                minContourH: 50      # Minimum height (pixels) for valid motion contour
+                gaussianBlur: 5      # Gaussian kernel size for noise reduction
+                noMotionThreshold: 5 # Frames without motion before ending event
