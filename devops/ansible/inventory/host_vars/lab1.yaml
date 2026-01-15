@@ -10,10 +10,10 @@ imagenode_config:
       framerate: 32
       vflip: false
       detector:
+        ROI: (10,20),(70,80)
         detectobjects: mobilenetssd
         accelerator: none
         sentinel_tasks:
           person: GetFaces2
 
-# Legacy pi user
 imagenode_venv_path: "{{ sentinelcam_venv_py3cv4 }}"
