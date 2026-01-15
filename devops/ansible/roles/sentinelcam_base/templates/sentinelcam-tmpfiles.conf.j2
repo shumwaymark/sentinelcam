@@ -1,0 +1,13 @@
+# SentinelCam temporary file cleanup configuration
+# Managed by Ansible - Do not edit manually
+# Generated for node: {{ inventory_hostname }}
+#
+# See tmpfiles.d(5) for format documentation
+
+# Clean watchtower video export temp directory daily
+# Remove files older than 1 day
+d /tmp/watchtower_exports 0755 {{ sentinelcam_user }} {{ sentinelcam_group }} 1d
+
+# Clean coral provisioning temp directory
+# Remove files older than 7 days (packages may be needed for reinstall)
+d /tmp/coral_packages 0755 {{ sentinelcam_user }} {{ sentinelcam_group }} 7d
