@@ -356,73 +356,221 @@ class FaceDataUpdate(Task):
 class DailyCleanup(Task):
     def __init__(self, jobreq, trkdata, feed, cfg, accelerator) -> None:
         self.dataFeed = feed
-        self.event_date = jobreq.eventDate
+        self.run_date = jobreq.eventDate  # Date when cleanup task is running
         self.performing_deletes = cfg["run_deletes"]
-        self.face_ratio_cutoff = cfg['face_ratio']
-        self.face_confidence = cfg['confidence']
+        self.max_scan_days = cfg.get('max_scan_days', 30)
+        self.retention_profiles = cfg.get('retention_profiles', {})
+
+        # Build node-to-profile mapping for fast lookup
+        self.node_profiles = {}
+        for profile_name, profile_config in self.retention_profiles.items():
+            for node in profile_config.get('nodes', []):
+                self.node_profiles[node] = (profile_name, profile_config)
+
+        # Get default profile for nodes not explicitly assigned
+        self.default_profile = self.retention_profiles.get('default', {
+            'strategy': 'minimal_retention',
+            'retention_days': 7
+        })
 
     def pipeline(self, frame) -> bool:
-        # This is a one-shot pipeline to process all events within the eventDate
-        cwIndx = self.dataFeed.get_date_index(self.event_date)
-        facestats = FaceStats(None,None,None,None)
-        types = cwIndx['type'].value_counts()
-        trk_cnt = types.get('trk', 0)  # event count
-        faces_cnt = types.get('fd1', 0)
-        vsp_cnt = types.get('vsp', 0)  # vehicle speed events
+        """Scan backwards through dates and apply retention policies per node"""
+        from datetime import datetime
+        from collections import defaultdict
 
-        # Handle face-based cleanup if faces were processed
-        if trk_cnt and faces_cnt > 0:
-            face_ratio = faces_cnt / trk_cnt
-            if face_ratio > self.face_ratio_cutoff:
-                trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
-                face_evts = cwIndx.loc[cwIndx['type'] == 'fd1']['event'].to_list()
-                recon_evts = cwIndx.loc[cwIndx['type'] == 'fr1']['event'].to_list()
-                # Purge any events with no detected faces.
-                delete_evts = [e for e in trk_evts if not e in face_evts]
-                # Also include any face events with no recon result.
-                delete_evts.extend([e for e in face_evts if not e in recon_evts])
-                for event in recon_evts:
-                    try:
-                        recon = facestats.df_apply(self.dataFeed.get_tracking_data(self.event_date, event, 'fr1'))
-                        if len(recon.loc[recon['usable'] == 1].index): continue
-                        if len(recon.loc[recon['proba'] > self.face_confidence].index): continue
-                    except DataFeed.TrackingSetEmpty:
-                        pass
-                    # Purge any event where face recon found only poor quality face images and low confidence recognitions.
-                    delete_evts.append(event)
-                if self.performing_deletes:
-                    for event in delete_evts: self.dataFeed.delete_event(self.event_date, event)
-                else:
-                    for event in delete_evts:
-                        trkrs = cwIndx.loc[cwIndx['event'] == event]['type'].to_list()
-                        started = cwIndx.loc[cwIndx['event'] == event]['timestamp'].min()
-                        imgs = self.dataFeed.get_image_list(self.event_date, event)
-                        setlen = {trk: len(self.dataFeed.get_tracking_data(self.event_date, event, trk).index) for trk in trkrs}
-                        self.publish(f"DailyCleanup, [{event}] {started}, imgs: {len(imgs):3} trkrs: {setlen}")
-                stats = f"DailyCleanup {self.event_date}, trk: {trk_cnt}, fd1: {faces_cnt}, fr1: {len(recon_evts)}, to delete: {len(delete_evts)} ({self.performing_deletes})"
-            else:
-                stats = f"DailyCleanup, face detection ratio of {round(face_ratio,2)} below cutoff threshold, (trk: {trk_cnt}, fd1: {faces_cnt}), no action taken"
-            self.publish(stats)
+        total_deleted = 0
+        total_scanned = 0
+        dates_processed = 0
 
-        # Handle vehicle speed-based cleanup if speed data was processed
-        elif trk_cnt and vsp_cnt > 0:
-            trk_evts = cwIndx.loc[cwIndx['type'] == 'trk']['event'].to_list()
-            vsp_evts = cwIndx.loc[cwIndx['type'] == 'vsp']['event'].to_list()
-            # Keep events that have speed measurements, delete those that don't
-            delete_evts = [e for e in trk_evts if not e in vsp_evts]
-            if self.performing_deletes:
-                for event in delete_evts: self.dataFeed.delete_event(self.event_date, event)
-            else:
-                for event in delete_evts:
-                    trkrs = cwIndx.loc[cwIndx['event'] == event]['type'].to_list()
-                    started = cwIndx.loc[cwIndx['event'] == event]['timestamp'].min()
-                    imgs = self.dataFeed.get_image_list(self.event_date, event)
-                    setlen = {trk: len(self.dataFeed.get_tracking_data(self.event_date, event, trk).index) for trk in trkrs}
-                    self.publish(f"DailyCleanup, [{event}] {started}, imgs: {len(imgs):3} trkrs: {setlen}")
-            stats = f"DailyCleanup {self.event_date}, trk: {trk_cnt}, vsp: {vsp_cnt}, to delete: {len(delete_evts)} ({self.performing_deletes})"
-            self.publish(stats)
+        # Use input date as the reference point (run_date is in YYYY-MM-DD format)
+        run_date = datetime.fromisoformat(self.run_date)
 
+        # Get list of dates that actually have data
+        available_dates = self.dataFeed.get_date_list()
+
+        self.publish(f"DailyCleanup starting from {self.run_date}: found {len(available_dates)} dates with data")
+
+        # Process each date that is on or before the run_date
+        for scan_date_str in available_dates:
+            scan_date = datetime.fromisoformat(scan_date_str)
+
+            # Only process dates on or before the run_date
+            if scan_date > run_date:
+                continue
+
+            # Calculate how many days old this date's events are
+            event_age_days = (run_date - scan_date).days
+
+            # Only process dates within our scan window
+            if event_age_days > self.max_scan_days:
+                continue
+
+            try:
+                cwIndx = self.dataFeed.get_date_index(scan_date_str)
+                if len(cwIndx) == 0:
+                    continue  # No data for this date
+
+                total_scanned += len(cwIndx)
+                dates_processed += 1
+
+                # Track stats per strategy for this date
+                date_stats = defaultdict(lambda: {'total': 0, 'deleted': 0})
+
+                # Group events by node for profile-specific processing
+                for node in cwIndx['node'].unique():
+                    node_events = cwIndx[cwIndx['node'] == node]
+                    profile_name, deleted_count, event_count = self._process_node_events(
+                        node, node_events, scan_date_str, event_age_days
+                    )
+                    date_stats[profile_name]['total'] += event_count
+                    date_stats[profile_name]['deleted'] += deleted_count
+                    total_deleted += deleted_count
+
+                # Generate daily summary if any deletions occurred
+                date_total_deleted = sum(s['deleted'] for s in date_stats.values())
+                if date_total_deleted > 0:
+                    summary_parts = [
+                        f"{strategy}[{stats['total']},{stats['deleted']}]"
+                        for strategy, stats in sorted(date_stats.items())
+                        if stats['deleted'] > 0
+                    ]
+                    self.publish(f"DailyCleanup {scan_date_str} age:{event_age_days}d: {' '.join(summary_parts)}")
+
+            except Exception as e:
+                self.publish(f"DailyCleanup error processing {scan_date_str}: {str(e)}")
+                continue
+
+        stats = f"DailyCleanup completed: processed {dates_processed} dates, scanned {total_scanned} events, deleted {total_deleted} ({self.performing_deletes})"
+        self.publish(stats)
         return False
+
+    def _process_node_events(self, node, node_events, date_str, event_age_days):
+        """Apply retention policy for a specific node's events on a given date
+
+        Evaluates EACH event based on ALL data types it contains.
+        Keeps event if ANY data type has value (quality faces, speed data, etc.)
+
+        Returns:
+            tuple: (profile_name, deleted_count, total_event_count)
+        """
+        # Get retention profile for this node
+        profile_name, profile = self.node_profiles.get(node, ('default', self.default_profile))
+        strategy = profile.get('strategy', 'minimal_retention')
+
+        # Get unique events for this node
+        all_events = node_events.loc[node_events['type'] == 'trk']['event'].unique()
+        total_events = len(all_events)
+
+        if strategy == 'never_delete':
+            return (profile_name, 0, total_events)
+
+        # Build event-to-datatypes mapping for efficient lookup
+        events_by_type = {}
+        for evt_type in node_events['type'].unique():
+            events_with_type = set(node_events.loc[node_events['type'] == evt_type]['event'].unique())
+            events_by_type[evt_type] = events_with_type
+
+        # Evaluate each event individually based on ALL its data types
+        delete_evts = []
+        for event in all_events:
+            # What data types does this event have?
+            event_data_types = [dt for dt, events in events_by_type.items() if event in events]
+
+            # Should we delete this event? (only if ALL data is non-valuable)
+            should_delete = self._evaluate_event_retention(
+                event, event_data_types, node_events, date_str,
+                event_age_days, profile, strategy
+            )
+
+            if should_delete:
+                delete_evts.append(event)
+
+        # Execute deletions
+        if delete_evts and self.performing_deletes:
+            for event in delete_evts:
+                self.dataFeed.delete_event(date_str, event)
+
+        return (profile_name, len(delete_evts), total_events)
+
+    def _extract_speed(self, classname):
+        try:
+            # Split and try to parse the first part as float
+            return float(str(classname).split()[0])
+        except (ValueError, IndexError):
+            return np.nan
+
+    def _evaluate_event_retention(self, event, data_types, node_events,
+                                  date_str, event_age_days, profile, strategy):
+        """Evaluate whether a single event should be deleted
+
+        Returns True only if ALL data types in the event are past retention or low-value.
+        If ANY data type has value, returns False (keep the event).
+        """
+        retention_days = profile.get('retention_days', 7)
+
+        # Not old enough for base retention yet
+        if event_age_days <= retention_days:
+            return False
+
+        has_valuable_data = False
+
+        # Check vehicle speed data (valuable high speeds within extended retention)
+        if 'vsp' in data_types:
+            speed_cutoff = profile.get('speed_cutoff', 30.0)  # mph
+            extended_days = profile.get('extended_days', 30)
+            try:
+                speed_data = self.dataFeed.get_tracking_data(date_str, event, 'vsp')
+                if len(speed_data.index) > 0:
+                    speed_data['mph'] = speed_data['classname'].apply(self._extract_speed)
+                    has_valuable_data = any(speed_data['mph'] > speed_cutoff)
+                    if event_age_days <= extended_days:
+                        has_valuable_data = True
+            except DataFeed.TrackingSetEmpty:
+                pass
+
+        # Check face recognition quality
+        if 'fr1' in data_types and not has_valuable_data:
+            try:
+                facestats = FaceStats(None, None, None, None)
+                recon = facestats.df_apply(
+                    self.dataFeed.get_tracking_data(date_str, event, 'fr1')
+                )
+                confidence_threshold = profile.get('confidence_threshold', 0.975)
+
+                # Keep if has usable faces OR high confidence recognition
+                if len(recon.loc[recon['usable'] == 1].index) > 0:
+                    has_valuable_data = True
+                elif len(recon.loc[recon['proba'] > confidence_threshold].index) > 0:
+                    has_valuable_data = True
+            except DataFeed.TrackingSetEmpty:
+                pass
+
+        # Check for face detection without recognition (fd1 but no fr1)
+        # These are less valuable, only count if within retention period
+        if 'fd1' in data_types and 'fr1' not in data_types and not has_valuable_data:
+            # Has faces but no recognition attempted - borderline valuable
+            # Apply face detection ratio safety check
+            if strategy == 'face_quality':
+                types = node_events['type'].value_counts()
+                trk_cnt = types.get('trk', 0)
+                faces_cnt = types.get('fd1', 0)
+                if trk_cnt > 0:
+                    face_ratio = faces_cnt / trk_cnt
+                    min_face_ratio = profile.get('min_face_ratio', 0.15)
+                    if face_ratio > min_face_ratio:
+                        # Face detection appears operational, but no recognition
+                        # Only valuable if very recent
+                        if event_age_days <= (retention_days * 0.5):
+                            has_valuable_data = True
+
+        # Future: Add checks for other data types here
+        # if 'pet' in data_types:
+        #     has_valuable_data = True  # Always keep pet detections
+        # if 'lpr' in data_types:  # license plate recognition
+        #     has_valuable_data = True
+
+        # Delete only if NO valuable data found
+        return not has_valuable_data
 
 class VehicleTracker:
     """Tracks a single vehicle across frames"""

@@ -1,22 +1,50 @@
 %YAML 1.0
 ---
 # DailyCleanup.yaml.j2
-# Review every event for the eventDate, optionally purge events as described below.
+# Multi-date cleanup task with data-aware retention policies
 # Template for daily cleanup task configuration
 #
-# This task has no model dependencies but is templated for consistency.
+# RETENTION LOGIC: Each event is evaluated based on ALL data types it contains.
+# An event is KEPT if ANY data type has value (quality faces, speed data, etc.)
+# An event is DELETED only if ALL its data is past retention or low-value.
 
 # Set this to True to delete the data.
 # If False, take no action and only produce a report of each event to be deleted.
-run_deletes: False
+run_deletes: True
 
-# Current policy, delete any event with no faces. This setting defines a failsafe, requiring a minimum
-# face detection ratio across all events be met before continuing with the task. Given the possibility
-# that an operational failure may have occured, take no action at all where face detection may not yet
-# have been run for all events.
-face_ratio: 0.15
+# Maximum number of days to scan backwards from run date
+max_scan_days: 14
 
-# Events with high-quality faces are always kept by default. All events with only low-quality
-# images are purged. However, if any face had a high-level of recognition, keep it anyway.
-# Events which include a facial recognition confidence above this cutoff, are kept.
-confidence: 0.975
+# Retention profiles define cleanup strategies per outpost node
+# Each profile evaluates ALL data types present in each event
+retention_profiles:
+
+  # Person-focused outposts (backyard, side yard cameras)
+  # Evaluates: face quality (fd1/fr1) - keeps high-quality/recognized faces
+  # If event also has other valuable data (pets, etc.), keeps that too
+  person_tracking:
+    strategy: face_quality
+    retention_days: 2               # Base retention period
+    min_face_ratio: 0.15            # Safety: minimum face detection ratio
+    confidence_threshold: 0.975     # Keep if recognition confidence above this
+    nodes: [lab1, alpha5]
+
+  # Vehicle-focused outposts (driveway, street cameras)
+  # Evaluates: vehicle speed data (vsp) - keeps speed measurements longer
+  # If event also has faces, evaluates those too
+  vehicle_tracking:
+    strategy: vehicle_interest
+    retention_days: 1               # Base retention for non-speed events
+    speed_cutoff: 40.0              # Speed events of interest
+    extended_days: 2                # Extended retention for high speed events
+    nodes: [east]
+
+  # Archive outposts - never auto-delete
+  archive_all:
+    strategy: never_delete
+    nodes: []                       # Add nodes to preserve all data
+
+  # Default fallback - simple time-based
+  default:
+    strategy: minimal_retention
+    retention_days: 7
