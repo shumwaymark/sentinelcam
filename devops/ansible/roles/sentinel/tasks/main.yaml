@@ -89,8 +89,6 @@
     - MobileNetSSD_allFrames.yaml
     - DailyCleanup.yaml
     - VehicleSpeed.yaml
-  notify:
-    - restart sentinel
   tags:
     - config
     - tasks
