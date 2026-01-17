@@ -2,3 +2,6 @@
 # ops@ramrod:~/sentinelcam/devops/ansible $ DISPLAY=:0 xinput_calibrator
 touchscreen_calibration_values: "492 65043 216 67299"
 touchscreen_product_name: "xwayland-touch:15"
+
+# Inactivity timeout in seconds for auto-pause
+inactivity_timeout: 90

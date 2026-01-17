@@ -7,6 +7,7 @@ socket_dir: {{ watchtower_socket_dir }}
 sentinel: {{ watchtower_sentinel }}
 default_view: {{ watchtower_default_view }}
 viewfps: {{ watchtower_viewfps | lower }}
+inactivity_timeout: {{ inactivity_timeout }}
 
 # For ring buffer allocations, any potential image size must be
 # known in advance. Parameters are ((width, height), buffer_length)

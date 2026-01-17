@@ -24,6 +24,8 @@ touchscreen_product_name: "FT5406 memory based driver"
 # touchscreen_calibration_values: "3919 61 3884 101"
 # touchscreen_swap_axes: "0"
 
+inactivity_timeout: 30  # Inactivity timeout in seconds for auto-pause
+
 # Debug mode flag
 debug_mode: false
 
