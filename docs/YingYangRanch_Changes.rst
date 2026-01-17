@@ -83,6 +83,14 @@ options are specified.
               accelerator: none              # [none, ncs2, coral]
               tracker: none                  # [none, dlib csrt, kcf, boosting, mil, tld, medianflow, mosse]
               skip_factor: 7                 # (only relevant when a tracker is also specified)
+              motion_params:                 # Motion detection configuration
+                  varThreshold:  128         # MOG2 sensitivity threshold. Lower = more sensitive to changes
+                  detectShadows: False       # Detect and mark shadows (usually false for performance)
+                  history: 500               # Number of frames for background model learning
+                  minContourW: 50            # Minimum width (pixels) for valid motion contour
+                  minContourH: 50            # Minimum height (pixels) for valid motion contour
+                  gaussianBlur: 5            # Gaussian kernel size for noise reduction
+                  noMotionThreshold: 5       # Frames without motion before ending event
               interesting_objects: ['person', 'vehicle', 'dog', 'motorcycle', 'car', 'truck', 'cat']
               mobilenetssd:
                   prototxt_path: /home/ops/imagenode/outpost/mobilenet_ssd/MobileNetSSD_deploy.prototxt
