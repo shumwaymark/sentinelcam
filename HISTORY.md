@@ -103,7 +103,7 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   based on inference results available at that time. Labeling and bounding box overlays from neural net
   outputs are drawn on the image, which is then displayed on the viewer and used as the thumbnail 
   in the list of outpost nodes. The current view selection is also automatically changed to whichever outpost
-  produced the event. Tapping on the play button at the point will provide a live camera view from the
+  produced the event. Tapping on the play button at that point will provide a live camera view from the
   outpost. Tapping on the previous button will replay the event which was shown on the viewer.
 - An event history list was added to the **watchtower**, which is tracked internally by outpost view. Due 
   to the potentially large number of events which can occur, the menu allows selection by hourly time slot.
