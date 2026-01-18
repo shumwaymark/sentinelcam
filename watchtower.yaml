@@ -1,10 +1,11 @@
 %YAML 1.0
 ---
-# Settings file watchtower.yaml 
+# Settings file watchtower.yaml
 socket_dir: /home/pi/watchtower/sockets
-sentinel: tcp://sentinel:5565  # result publisher 
-default_view: PiCamera
+sentinel: tcp://sentinel:5565
+default_view: Front
 viewfps: True
+inactivity_timeout: 90
 
 # For ring buffer allocations, any potential image size must be
 # known in advance. Parameters are ((width, height), buffer_length)
@@ -14,26 +15,73 @@ ring_buffers:
   sd: ((640, 360), 5)
 
 # The list of known datapumps
-datapumps: 
+datapumps:
   data1: tcp://data1:5556
 
 # Each outpost (node) has an image publisher and an associated datapump.
 outposts:
   east:
     image_publisher: tcp://east:5567
-    datapump: data1 
+    datapump: data1
   outpost:
     image_publisher: tcp://lab1:5567
-    datapump: data1 
-
+    datapump: data1
+  alpha5:
+    image_publisher: tcp://alpha5:5567
+    datapump: data1
 # Every camera view is provided by an outpost node. Note that
 # each outpost can potentially support multiple views.
-outpost_views: 
-  Front: 
+outpost_views:
+  Front:
     outpost: east
     description: Front Driveway
     size: (640, 360)
   PiCamera:
     outpost: outpost
-    description: Lab Workstation Desktop 
+    description: Lab Workstation Desktop
     size: (640, 480)
+  PiCam3:
+    outpost: alpha5
+    description: Raspberry Pi 5 Testbed
+    size: (640, 480)
+
+# Video export configuration (optional - if not present, share button will not appear)
+# Exports events with tracking overlays as MP4 video files
+video_export:
+  # Output directory on datasink node (requires SSH access configured via ansible)
+  output_dir: data1:/home/ops/sentinelcam/video_archives
+
+  # Maximum gap in seconds between events to consider them sequential for auto-merge
+  max_event_gap_seconds: 30
+
+  # Maximum number of events to merge into a single video
+  max_merged_events: 10
+
+  # Include tracking overlays (bounding boxes, class names) in exported video
+  include_overlays: true
+
+  # Number of frames to display event header at start of each sub-event
+  header_duration_frames: 60
+
+  # Local temporary directory for rendering before transfer (must have sufficient space)
+  local_temp_dir: /tmp/watchtower_exports
+
+  # VPS upload configuration (optional - if defined, exports will be uploaded for external sharing)
+  vps_upload:
+    enabled: true
+    host: 10.0.0.1
+    user: vpsadmin
+    port: 22
+    path: /var/www/sentinelcam_exports
+    base_url: https://www.swanriversystems.com/sentinelcam_exports
+    secure_link_secret: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+    link_expiry_hours: 72
+
+  # site name for labeling uploads
+  site_description: Sentinelcam Lab
+
+  # Notification configuration via Telegram
+  notifications:
+    telegram:
+      bot_token: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+      chat_id: XXXXXXXXXX

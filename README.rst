@@ -529,17 +529,6 @@ This ensemble approach not only bolsters classification results, it presents a s
 problem inherent to SentinelCam design goals. The distance metric is helpful in the quest to identify and remember
 newly introduced faces.
 
-Sentinel
---------
-
-Outputs from **sentinel** task results can be applied in multiple ways.
-
-  Multiple methods for addressing those event publication needs which go out to the larger
-  world will also be important.
-
-  - `MQTT` for use in applications such as Node-RED
-  - `Twilio` for SMS messaging
-
 Outpost
 -------
 

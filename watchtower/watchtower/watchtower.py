@@ -28,6 +28,8 @@ from time import sleep
 from datetime import date, datetime
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.utils import FPS, ImageSubscriber, readConfig
+from video_exporter import VideoExporter
+from motion_calibration import MotionCalibrationPage
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "watchtower.yaml"))
 SOCKDIR = CFG["socket_dir"]
@@ -36,7 +38,9 @@ class UserPage(enum.IntEnum):
     """User interface page types"""
     PLAYER = 0  # Main page, outpost and event viewer
     OUTPOSTS = 1  # List of outpost views to choose from
-    SETTINGS = 2  # To be determined: settings, controls, and tools cafe
+    EVENTS = 2  # Event list for current view
+    SETTINGS = 3  # To be determined: settings, controls, and tools cafe
+    CALIBRATE = 4  # Motion detector calibration tool
 
 class PlayerCommand(enum.Enum):
     """Source command types for the Player subsystem"""
@@ -64,7 +68,8 @@ class StateChange(enum.Enum):
     LOAD = 0
     READY = 1
     TOGGLE = 2
-    EOF = 3
+    AUTO = 3
+    EOF = 4
 
 # Configure logging
 LOG_LEVEL = CFG.get("log_level", "WARN")
@@ -352,58 +357,18 @@ class TextHelper:
         cv2.rectangle(frame, (x1, (y1 - 28)), ((x1 + tw + 10), y1), self._bboxColors[objid], cv2.FILLED)
         cv2.putText(frame, text, (x1 + 5, y1 - 10), self._textType, self._textSize, self._textColors[objid], self._thickness, self._lineType)
 
-class Player:
-    def __init__(self, dataReady, source_queue, wirename, rawbuffers, views, state_manager) -> None:
-        self.setup_ringbuffers(rawbuffers)
-        self.ringWire_connection(wirename)
-        self.idle = threading.Event()
-        self.paused = threading.Event()
-        self.texthelper = TextHelper()
-        self.fps = FPS()
+class EventAggregator:
+    def __init__(self) -> None:
         self.datafeeds = {}
-        self.datafeed = None
         self.current_pump = None
-        self.outpost_views = views
-        self.state_manager = state_manager
-
-        self._thread = threading.Thread(daemon=True, target=self._playerThread, args=(dataReady, source_queue))
-        self._thread.start()
-
-    def setup_ringbuffers(self, rawbuffers):
-        self.ringbuffers = {}
-        for wh in rawbuffers:
-            dtype = np.dtype('uint8')
-            shape = (wh[1], wh[0], 3)
-            self.ringbuffers[wh] = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in rawbuffers[wh]]
-
-    def ringWire_connection(self, wirename):
-        self.ringWire = zmq.Context.instance().socket(zmq.REQ)
-        self.ringWire.connect(f"ipc://{wirename}")
-        self.ringWire.send(msgpack.packb(0))  # send the ready handshake
-        self.ringWire.recv()                  # wait for player daemon response
-        self.poller = zmq.Poller()
-        self.poller.register(self.ringWire, zmq.POLLIN)
-
-    def get_bucket(self) -> int:
-        self.ringWire.send(msgpack.packb(0))
-        if dict(self.poller.poll(1000)):
-            bucket = msgpack.unpackb(self.ringWire.recv())
-            return bucket
-        else:
-            return -1
-
-    def set_imgdata(self, image) -> None:
-        self.image = image
-
-    def get_imgdata(self) -> np.ndarray:
-        return (self.image)
+        self.texthelper = TextHelper()
 
     def _setPump(self, pump) -> DataFeed:
         if not pump in self.datafeeds:
             self.datafeeds[pump] = DataFeed(pump, timeout=7.0)
         return self.datafeeds[pump]
 
-    def _gatherEventResults(self, date, event, datapump) -> tuple:
+    def gatherEventResults(self, date, event, datapump) -> tuple:
         if datapump != self.current_pump:
             self.datafeed = self._setPump(datapump)
             self.current_pump = datapump
@@ -453,13 +418,51 @@ class Player:
         )
         return (frametimes, refresults)
 
-    def _set_cache(self, view, evtkey, frametimes, refresults) -> None:
-        with dataLock:
-            self.outpost_views[view].eventCache[evtkey] = (frametimes, refresults)
+class Player:
+    def __init__(self, dataReady, source_queue, wirename, rawbuffers, views, state_manager) -> None:
+        self.setup_ringbuffers(rawbuffers)
+        self.ringWire_connection(wirename)
+        self.idle = threading.Event()
+        self.paused = threading.Event()
+        self.event_aggregator = EventAggregator()
+        self.fps = FPS()
+        self.datafeeds = {}
+        self.datafeed = None
+        self.current_pump = None
+        self.outpost_views = views
+        self.state_manager = state_manager
 
-    def _get_cache(self, view, evtkey) -> tuple:
-        with dataLock:
-            return self.outpost_views[view].eventCache.get(evtkey, ([], ()))
+        self._thread = threading.Thread(daemon=True, target=self._playerThread, args=(dataReady, source_queue))
+        self._thread.start()
+
+    def setup_ringbuffers(self, rawbuffers):
+        self.ringbuffers = {}
+        for wh in rawbuffers:
+            dtype = np.dtype('uint8')
+            shape = (wh[1], wh[0], 3)
+            self.ringbuffers[wh] = [np.frombuffer(buffer, dtype=dtype).reshape(shape) for buffer in rawbuffers[wh]]
+
+    def ringWire_connection(self, wirename):
+        self.ringWire = zmq.Context.instance().socket(zmq.REQ)
+        self.ringWire.connect(f"ipc://{wirename}")
+        self.ringWire.send(msgpack.packb(0))  # send the ready handshake
+        self.ringWire.recv()                  # wait for player daemon response
+        self.poller = zmq.Poller()
+        self.poller.register(self.ringWire, zmq.POLLIN)
+
+    def get_bucket(self) -> int:
+        self.ringWire.send(msgpack.packb(0))
+        if dict(self.poller.poll(1000)):
+            bucket = msgpack.unpackb(self.ringWire.recv())
+            return bucket
+        else:
+            return -1
+
+    def set_imgdata(self, image) -> None:
+        self.image = image
+
+    def get_imgdata(self) -> np.ndarray:
+        return (self.image)
 
     def _playerThread(self, dataReady, source_queue) -> None:
         self.paused.set()
@@ -485,11 +488,11 @@ class Player:
                 evtkey = (date, event)
                 if evtkey in self.outpost_views[view].eventCache:
                     logger.debug(f"Using cached event data for {evtkey}")
-                    (frametimes, refresults) = self._get_cache(view, evtkey)
+                    (frametimes, refresults) = self.outpost_views[view].get_cache(evtkey)
                 else:
                     logger.debug(f"Gathering event results for {evtkey}")
-                    (frametimes, refresults) = self._gatherEventResults(date, event, cmd[1])
-                    self._set_cache(view, evtkey, frametimes, refresults)
+                    (frametimes, refresults) = self.event_aggregator.gatherEventResults(date, event, cmd[1])
+                    self.outpost_views[view].set_cache(evtkey, frametimes, refresults)
                 when = frametimes[0].strftime('%I:%M %p - %A %B %d, %Y') if len(frametimes) > 0 else ''
             else:
                 view = cmd[3]
@@ -516,12 +519,18 @@ class Player:
                                 if CFG['viewfps']:
                                     self.fps.update()
                                     text = "FPS: {:.2f}".format(self.fps.fps())
-                                    cv2.putText(image, text, (10, image.shape[0]-10),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                                    text_color = (255,255,255)  # fixed white for fps display
+                                    # Get text size for background
+                                    (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                                    # Draw semi-transparent background
+                                    overlay = image.copy()
+                                    cv2.rectangle(overlay, (5, image.shape[0]-25), (15 + text_width, image.shape[0]-5), (0, 0, 0), -1)
+                                    cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
+                                    cv2.putText(image, text, (10, image.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1)
 
                                 if cmd[0] == PlayerCommand.EVENT:
                                     for (name, classname, x1, y1, x2, y2) in refresults[frameidx]:
-                                        self.texthelper.putText(image, name, classname, x1, y1, x2, y2)
+                                        self.event_aggregator.texthelper.putText(image, name, classname, x1, y1, x2, y2)
 
                                     if frameidx < len(frametimes) - 1:
                                         frameidx += 1
@@ -538,7 +547,14 @@ class Player:
                                     frameidx += 1
 
                                 if frameidx < 60:
-                                    cv2.putText(image, status_message, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 1)
+                                    text_color = (255,255,255)  # fixed white for status message
+                                    # Get text size for background
+                                    (text_width, text_height), baseline = cv2.getTextSize(status_message, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                                    # Draw semi-transparent background
+                                    overlay = image.copy()
+                                    cv2.rectangle(overlay, (15, 20), (25 + text_width, 50 + baseline), (0, 0, 0), -1)
+                                    cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
+                                    cv2.putText(image, status_message, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, text_color, 1)
 
                                 self.set_imgdata(image)
                                 dataReady.set()
@@ -572,12 +588,33 @@ class PlayerStateManager:
         self.message_queue = queue.Queue()
         self.current_state = PlayerState.STARTING
         self.player_command = None
+        self.cursor_event_idx = -1
 
     def request_transition(self, reason, component, details=None):
         logger.debug(f"Requesting transition from {self.current_state}: {reason}, {component}")
+
         if reason == StateChange.LOAD:
+            if self.current_state == PlayerState.LOADING:
+                logger.debug(f"Ignoring LOAD request while already in LOADING state from {component}")
+                return  # Reject rapid LOAD requests, wait for current load to complete
             if self.current_state == PlayerState.PLAYING:
-                self.message_queue.put((StateChange.TOGGLE, component, None))
+                self.message_queue.put((StateChange.TOGGLE, component, 'PlayerStateManager auto-pause before LOAD'))
+
+        elif reason == StateChange.EOF:
+            if self.app.move_next:
+                if self.cursor_event_idx < self.app.view.event_count():
+                    self.cursor_event_idx += 1
+                    logger.debug(f"Auto-advance: queueing event {self.cursor_event_idx} of {self.app.eventIdx}")
+                    (dt, date, event, size) = self.app.view.eventlist[self.cursor_event_idx]
+                    source_cmd = ((PlayerCommand.EVENT, self.player_command[1], self.player_command[2],
+                                   date, event, size), size)
+                    self.message_queue.put((StateChange.LOAD, "auto-advance", source_cmd))
+                else:
+                    self.app.move_next = False
+                    self.app.select_outpost_view(auto_play=True)
+                    logger.debug("Auto-advance: no more events, stopping playback.")
+                    return
+
         self.message_queue.put((reason, component, details))
 
     def process_transitions(self):
@@ -591,6 +628,8 @@ class PlayerStateManager:
                     self.app.sourceCmds.put(details)
                     self.player_command = details[0]
                     new_state = PlayerState.LOADING
+                    if self.player_command[0] == PlayerCommand.EVENT:
+                        self.last_event = self.player_command[2:-1]
 
                 elif reason == StateChange.READY:
                     new_state = PlayerState.READY
@@ -608,6 +647,7 @@ class PlayerStateManager:
                     elif self.current_state == PlayerState.PLAYING:
                         self.app.viewer.stop()
                         self.app.player_daemon.stop()
+                        self.app.move_next = False
                         new_state = PlayerState.PAUSED
                     else:
                         result = self.app.player_daemon.start(self.player_command)
@@ -617,14 +657,17 @@ class PlayerStateManager:
                             self.app.viewer.start()
                             new_state = PlayerState.PLAYING
 
+                elif reason == StateChange.AUTO:
+                    self.cursor_event_idx = details
+                    new_state = self.current_state
+
                 elif reason == StateChange.EOF:
                     self.app.player_daemon.stop()
                     new_state = PlayerState.IDLE
 
                 if new_state in [PlayerState.PLAYING, PlayerState.PAUSED, PlayerState.READY, PlayerState.IDLE]:
                     self.app.player_panel.update_state(is_paused=(new_state != PlayerState.PLAYING))
-                    if new_state == PlayerState.IDLE:
-                        self.app.player_panel.show_buttons()
+
                 elif new_state == PlayerState.ERROR:
                     self.app.player_panel.update_image(redx_image(800,480))
                     self.app.player_panel.update_state(is_paused=True)
@@ -667,25 +710,35 @@ class SentinelSubscriber:
                             if viewkey in event_lists:
                                 if evtkey not in event_lists[viewkey]:
                                     event_lists[viewkey].append(evtkey)
-                                    eventQueue.put((viewkey, evtkey))
+                                    eventQueue.put((EventListUpdater.EventList_NEW, viewkey, evtkey))
+                                    daemon_logger.debug(f"Sentinel subscriber appended new eventkey {evtkey} for view {viewkey} from task {task}")
                             else:
                                 event_lists[viewkey] = [evtkey]
-                                eventQueue.put((viewkey, evtkey))
+                                eventQueue.put((EventListUpdater.EventList_NEW, viewkey, evtkey))
+                                daemon_logger.debug(f"Sentinel subscriber added new eventkey {evtkey} for view {viewkey} from task {task}")
                         elif logdata['flag'] == 'DEL':
                             # Event deleted from datasink, purge from all view event lists
                             evtkey = (logdata['date'], logdata['event'], logdata['pump'])
-                            for view_events in event_lists.values():
+                            for (viewkey, view_events) in event_lists.items():
                                 if evtkey in view_events:
+                                    eventQueue.put((EventListUpdater.EventList_DELETE, viewkey, evtkey))
                                     view_events.remove(evtkey)
-                            daemon_logger.debug(f"Purged deleted event {logdata['event']}")
+                                    break
+                            daemon_logger.debug(f"Sentinel subscriber purged deleted eventkey {evtkey} from view {viewkey}")
                 except (KeyError, ValueError):
                     pass
                 except Exception as e:
                     daemon_logger.exception(f"Exception parsing sentinel log '{message}': {str(e)}")
 
 class EventListUpdater:
+
+    EventList_NEW = 1
+    EventList_DELETE = 2
+
     def __init__(self, eventQ, newEvent, outpost_views):
         self._eventData = (None, None)
+        self.outpost_views = outpost_views
+        self.event_aggregator = EventAggregator()
         self._image = blank_image(1,1)
         self._thread = threading.Thread(daemon=True, target=self._run, args=(eventQ, newEvent, outpost_views))
         self._thread.start()
@@ -693,6 +746,48 @@ class EventListUpdater:
     def getEventData(self) -> tuple:
         """Get the current event data and image"""
         return (self._eventData, self._image)
+
+    def _sample_event_image(self, feed, day, event, pump, view, imgsize):
+        try:
+            (frametimes, refresults) = self.event_aggregator.gatherEventResults(day, event, pump)
+            # Select sample image: find index with most refresults, then pick centermost if multiple
+            if frametimes and refresults:
+                # Find all indices with the max number of refresults
+                max_count = max(len(r) for r in refresults)
+                candidate_indices = [i for i, r in enumerate(refresults) if len(r) == max_count]
+                # Pick the centermost index among candidates
+                sample_frame = candidate_indices[len(candidate_indices) // 2]
+                image = simplejpeg.decode_jpeg(
+                    feed.get_image_jpg(day, event, frametimes[sample_frame]),
+                    colorspace='BGR')
+
+                header_text = f"{view} {frametimes[sample_frame].strftime('%I:%M %p - %A %B %d, %Y')}"
+                # Get text size for background rectangle
+                (text_width, text_height), baseline = cv2.getTextSize(header_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                # Draw semi-transparent background
+                overlay = image.copy()
+                cv2.rectangle(overlay, (15, 20), (30 + text_width, 50 + baseline), (0, 0, 0), -1)
+                cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
+                # Draw text on top
+                cv2.putText(image, header_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+                for (name, classname, x1, y1, x2, y2) in refresults[sample_frame]:
+                    self.event_aggregator.texthelper.putText(image, name, classname, x1, y1, x2, y2)
+
+                return (frametimes[sample_frame], image)
+            elif frametimes:
+                logger.error(f"No tracking data for event {event}, returning first image.")
+                return (frametimes[0], blank_image(imgsize[0], imgsize[1]))
+            else:
+                logger.error(f"Failed to gather images for event {event}")
+                return (datetime.now(), blank_image(imgsize[0], imgsize[1]))
+        except (DataFeed.TrackingSetEmpty, DataFeed.ImageSetEmpty):
+            # Event deleted or incomplete - use blank thumbnail
+            logger.error(f"Event {event} unavailable (deleted or incomplete)")
+            return (datetime.now(), blank_image(imgsize[0], imgsize[1]))
+        except Exception:
+            logger.exception(f"EventListUpdater gather thumbnail for [{view}]")
+            return (datetime.now(), blank_image(imgsize[0], imgsize[1]))
 
     def _run(self, eventQ, newEvent, outpost_views):
         datafeeds = {}
@@ -720,60 +815,42 @@ class EventListUpdater:
                 try:
                     day = evtlist[-1][1]
                     event = evtlist[-1][2]
-                    trkdata = feed.get_tracking_data(day, event)
-
-                    # Priority fallback: person > vehicle > anything detected
-                    for classfilter in ['person', 'car|truck|bus', '.']:  # '.' matches anything
-                        candidates = trkdata.loc[trkdata['classname'].str.contains(classfilter, case=False, regex=True)]
-                        if len(candidates.index) > 0:
-                            sample_frame = len(candidates.index) // 2
-                            self._image = simplejpeg.decode_jpeg(
-                                feed.get_image_jpg(day, event, candidates.iloc[sample_frame]['timestamp']),
-                                colorspace='BGR')
-                            break
-                    else:
-                        # No tracking data at all - use blank thumbnail
-                        self._image = blank_image(213, 160)
-
+                    _, self._image = self._sample_event_image(
+                        datafeeds[pump], day, event, pump, v.view, v.imgsize)
                 except (DataFeed.TrackingSetEmpty, DataFeed.ImageSetEmpty):
                     # Event deleted or incomplete - use blank thumbnail
                     logger.info(f"Event {event} unavailable (deleted or incomplete)")
-                    self._image = blank_image(213, 160)
+                    self._image = blank_image(v.imgsize[0], v.imgsize[1])
                 except Exception:
                     logger.exception(f"EventListUpdater gather thumbnail for [{v.view}]")
-                    self._image = blank_image(213, 160)
+                    self._image = blank_image(v.imgsize[0], v.imgsize[1])
                 newEvent.set()
                 while newEvent.is_set():
                     sleep(0.01)
+                logger.debug(f"EventListUpdater initialized view {v.view} with event list of {len(evtlist)} events.")
         logger.debug('EventListUpdater started.')
         while True:
-            (viewkey, evtkey) = eventQ.get()
+            logger.debug('EventListUpdater waiting for sentinel subscriber event...')
+            (action, viewkey, evtkey) = eventQ.get()
             try:
+                logger.debug(f"EventListUpdater received sentinel subscriber action {action} for viewkey {viewkey} evtkey {evtkey}")
                 (node, view, sink) = viewkey
-                (evtDate, event, pump) = evtkey
-                if not pump in datafeeds:
-                    datafeeds[pump] = DataFeed(pump)
-                feed = datafeeds[pump]
-                cwIndx = feed.get_date_index(evtDate)
-                trkevt = cwIndx.loc[(cwIndx['event'] == event) & (cwIndx['type'] == 'trk')]
-                if len(trkevt.index) > 0:
-                    evtRec = trkevt.iloc[0]
-                    trkdata = feed.get_tracking_data(evtDate, event)
-
-                    # Priority fallback: person > vehicle > anything detected
-                    for classfilter in ['person', 'car|truck|bus', '.']:  # '.' matches anything
-                        candidates = trkdata.loc[trkdata['classname'].str.contains(classfilter, case=False, regex=True)]
-                        if len(candidates.index) > 0:
-                            sample_frame = len(candidates.index) // 2
-                            evtRef = (evtRec.timestamp, evtDate, event, (evtRec.width, evtRec.height))
-                            self._eventData = (view, evtRef)
-                            self._image = simplejpeg.decode_jpeg(
-                                feed.get_image_jpg(evtDate, event, candidates.iloc[sample_frame]['timestamp']),
-                                colorspace='BGR')
-                            newEvent.set()
-                            while newEvent.is_set():
-                                sleep(0.1)
-                            break
+                (day, event, pump) = evtkey
+                v = self.outpost_views[view]
+                if action == EventListUpdater.EventList_NEW:
+                    if not pump in datafeeds:
+                        datafeeds[pump] = DataFeed(pump)
+                    (event_time, self._image) = self._sample_event_image(
+                        datafeeds[pump], day, event, pump, view, v.imgsize)
+                    logger.debug(f"EventListUpdater sampled image for event {event} at {event_time}")
+                    evtRef = (pd.Timestamp(event_time), day, event, v.imgsize)
+                    self._eventData = (view, evtRef)
+                    logger.debug(f"EventListUpdater signalled action {action} for view {view} eventref {evtRef}")
+                    newEvent.set()
+                    while newEvent.is_set():
+                        sleep(0.01)
+                else:  # EventList_DELETE
+                    v.delete_event((day, event))
             except (DataFeed.TrackingSetEmpty, DataFeed.ImageSetEmpty):
                 logger.info(f"Event {event} unavailable (deleted or incomplete)")
             except Exception:
@@ -793,7 +870,7 @@ class OutpostView:
         self.menuref = None
         self.eventlist = []
         self.eventCache = {}  # Map of event -> (frametimes, refresults)
-        self.max_events = CFG.get('max_events_per_view', 100)  # Default to 100 if not specified
+        self.max_events = CFG.get('max_events_per_view', 1500)  # Default to 1500 if not specified
 
     def store_menuref(self, menuitem) -> None:
         self.menuref = menuitem
@@ -807,6 +884,7 @@ class OutpostView:
             self.eventlist = newlist
 
     def add_event(self, event) -> None:
+        logger.debug(f"OutpostView {self.view} adding event {event}")
         with dataLock:
             if len(self.eventlist) >= self.max_events:
                 # Remove cached data for the oldest event before removing it
@@ -817,6 +895,24 @@ class OutpostView:
                 self.eventlist.pop(0)
             self.eventlist.append(event)
             self.update_label()
+
+    def delete_event(self, event) -> None:
+        logger.debug(f"OutpostView {self.view} deleting event {event}")
+        with dataLock:
+            for idx, evt in enumerate(self.eventlist):
+                if (evt[1], evt[2]) == event:
+                    self.eventlist.pop(idx)
+                    if event in self.eventCache:
+                        del self.eventCache[event]
+                    break
+
+    def set_cache(self, evtkey, frametimes, refresults) -> None:
+        with dataLock:
+            self.eventCache[evtkey] = (frametimes, refresults)
+
+    def get_cache(self, evtkey) -> tuple:
+        with dataLock:
+            return self.eventCache.get(evtkey, ([], ()))
 
     def update_label(self) -> None:
         evt_time = self.eventlist[-1][0].to_pydatetime().strftime('%A %b %d, %I:%M %p')
@@ -837,7 +933,7 @@ class MenuPanel(ttk.Frame):
 
         Use the 'interior' attribute to place widgets inside the scrollable frame.
     '''
-    def __init__(self, parent, width, height, show_scrollbar=False):
+    def __init__(self, parent, width, height, show_scrollbar=False, visible_height=None):
         ttk.Frame.__init__(self, parent)
         # Create a canvas object and a vertical scrollbar for scrolling it.
         vscrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL)
@@ -850,6 +946,7 @@ class MenuPanel(ttk.Frame):
 
         self.canvaswidth = width
         self.canvasheight = height
+        self.visible_height = visible_height if visible_height is not None else height
 
         # reset the view
         canvas.xview_moveto(0)
@@ -858,10 +955,10 @@ class MenuPanel(ttk.Frame):
         self.interior = interior = ttk.Frame(canvas, height=self.canvasheight, borderwidth=0)
         interior_id = canvas.create_window(0, 0, window=interior, anchor=tk.NW)
         # update the scrollbars to match the size of the inner frame
-        size = (width, height) # visible scrolling region
+        size = (width, height) # scrollable content region
         canvas.config(scrollregion="0 0 %s %s" % size)
-        # update the canvass width
-        canvas.config(width=self.canvaswidth)
+        # update the canvas width and height (visible viewport)
+        canvas.config(width=self.canvaswidth, height=self.visible_height)
         # update the inner frame width to fill the canvas
         canvas.itemconfigure(interior_id, width=self.canvaswidth)
 
@@ -895,6 +992,154 @@ class MenuPanel(ttk.Frame):
         self.scrollposition += event.delta
         self.canvas.yview_moveto(self.scrollposition / self.canvasheight)
 
+class TimeSlotItem(tk.Frame):
+    """Time slot representing an hour with event count"""
+    def __init__(self, parent, dateYMD, start_hour, event_count, first_event_idx):
+        tk.Frame.__init__(self, parent, bg='gray20', relief=tk.RAISED, borderwidth=2, highlightthickness=0, width=550)
+
+        self.first_event_idx = first_event_idx
+        self.columnconfigure(0, weight=1)
+
+        date_str = date.fromisoformat(dateYMD).strftime('%A, %B %d')
+        # ('%I:%M %p - %A %B %d, %Y') for full timestamp formatting
+
+        # Time range label
+        self.time_label = tk.Label(self,
+                                   text=f"{date_str} {start_hour:02d}:00 - {start_hour:02d}:59",
+                                   font=('TkDefaultFont', 13, 'bold'),
+                                   bg='gray20', fg='white', anchor='w',
+                                   highlightthickness=0, borderwidth=0)
+        self.time_label.grid(row=0, column=0, sticky='ew', padx=15, pady=(8, 2))
+
+        # Event count label
+        self.count_label = tk.Label(self,
+                                    text=f"{event_count} event{'s' if event_count != 1 else ''}",
+                                    font=('TkDefaultFont', 10),
+                                    bg='gray20', fg='lightgray', anchor='w',
+                                    highlightthickness=0, borderwidth=0)
+        self.count_label.grid(row=1, column=0, sticky='ew', padx=15, pady=(0, 8))
+
+        # Arrow indicator
+        self.arrow_label = tk.Label(self, text="→",
+                                    font=('TkDefaultFont', 18),
+                                    bg='gray20', fg='chartreuse',
+                                    highlightthickness=0, borderwidth=0)
+        self.arrow_label.grid(row=0, column=1, rowspan=2, padx=15)
+
+        # Bind click handlers ONLY to labels
+        for widget in [self.time_label, self.count_label, self.arrow_label]:
+            widget.bind('<Button-1>', self.on_click)
+
+    def on_click(self, event=None):
+        """Jump to first event in this time slot"""
+        logger.debug(f"TimeSlot selected, jumping to event {self.first_event_idx}")
+        app.eventIdx = self.first_event_idx
+        app.select_event(self.first_event_idx)
+        app.show_page(UserPage.PLAYER)
+
+class EventListPage(tk.Canvas):
+    """Full-screen scrollable event list organized by time slots"""
+    def __init__(self, outpost_views):
+        tk.Canvas.__init__(self, width=800, height=480, borderwidth=0,
+                          highlightthickness=0, background="black")
+
+        self.outpost_views = outpost_views
+        self.current_view = None
+        self.last_event_count = 0
+
+        # Scrollable panel for time slots - full screen width minus button area
+        list_width = 720
+        slot_height = 75  # Height per time slot
+        max_slots = 24    # 24 hours per day
+        content_height = slot_height * max_slots
+        visible_height = 480  # Full screen height
+        self.event_panel = MenuPanel(self, list_width, content_height, show_scrollbar=True, visible_height=visible_height)
+        self.event_panel.interior.columnconfigure(0, weight=1)  # Allow column to expand
+        self.create_window(0, 0, window=self.event_panel, anchor=tk.NW)
+
+        # Back button (top right)
+        self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
+        id = self.create_image(730, 10, anchor="nw", image=self.close_img)
+        self.tag_bind(id, "<Button-1>", lambda e: app.show_page(UserPage.PLAYER))
+
+        # View title at top
+        self.title_text = self.create_text(
+            365, 30, text="Event List",
+            fill='chartreuse', font=('TkDefaultFont', 14, 'bold')
+        )
+
+    def refresh_list(self, force=False):
+        """Rebuild time-slot list for current view"""
+        # Guard against no view selected
+        if not app._current_view:
+            return
+
+        view = self.outpost_views[app._current_view]
+
+        # Check if refresh needed
+        if not force and self.current_view == app._current_view:
+            if self.last_event_count == view.event_count():
+                return
+
+        self.current_view = app._current_view
+        self.last_event_count = view.event_count()
+
+        # Update title with total count
+        total = view.event_count()
+        self.itemconfig(self.title_text, text=f"{view.description} - {total} Events")
+
+        # Clear existing items
+        for child in self.event_panel.interior.winfo_children():
+            child.destroy()
+
+        # Build time slot list
+        if view.event_count() > 0:
+            # Group events by hour
+            time_slots = self._group_events_by_date_and_hour(view.eventlist)
+
+            # Build time slot list (newest first)
+            for display_idx, (time_key, slot_data) in enumerate(
+                    sorted(time_slots.items(), reverse=True)):
+                dateYMD = time_key[0]
+                start_hour = time_key[1]
+                count = slot_data['count']
+                first_idx = slot_data['first_idx']
+
+                item = TimeSlotItem(self.event_panel.interior,
+                                   dateYMD, start_hour, count, first_idx)
+                # Don't use sticky='ew' - leave right side empty for scrolling
+                item.grid(row=display_idx, column=0, sticky='w', padx=10, pady=6)
+        else:
+            no_events = tk.Label(self.event_panel.interior,
+                                text="No events recorded",
+                                font=('TkDefaultFont', 12),
+                                bg='black', fg='gray')
+            no_events.grid(row=0, column=0, padx=10, pady=50)
+
+        # Update scroll region
+        self.event_panel.interior.update_idletasks()
+        bbox = self.event_panel.canvas.bbox("all")
+        if bbox:
+            self.event_panel.canvas.config(scrollregion=bbox)
+
+    def _group_events_by_date_and_hour(self, eventlist):
+        """Group events into hourly time slots"""
+        slots = {}
+
+        for idx, (timestamp, date, event_id, size) in enumerate(eventlist):
+            # Extract hour from timestamp
+            hour = timestamp.hour
+
+            if (date, hour) not in slots:
+                slots[(date, hour)] = {
+                    'count': 0,
+                    'first_idx': idx  # Index of first event in this hour
+                }
+
+            slots[(date, hour)]['count'] += 1
+
+        return slots
+
 class OutpostMenuitem(ttk.Frame):
     def __init__(self, parent, view, outpost_views):
         ttk.Frame.__init__(self, parent, borderwidth=0)
@@ -919,8 +1164,8 @@ class OutpostMenuitem(ttk.Frame):
         self.v['image'] = self.image
 
 class OutpostList(MenuPanel):
-    def __init__(self, parent, width, height, outpost_views):
-        MenuPanel.__init__(self, parent, width, height)
+    def __init__(self, parent, width, height, outpost_views, visible_height=None):
+        MenuPanel.__init__(self, parent, width, height, visible_height=visible_height)
         col, row = 0, 0
         for v in outpost_views:
             item = OutpostMenuitem(self.interior, v, outpost_views)
@@ -934,18 +1179,65 @@ class OutpostList(MenuPanel):
 class SettingsPage(tk.Canvas):
     def __init__(self):
         tk.Canvas.__init__(self, width=800, height=480, borderwidth=0, highlightthickness=0, background="black")
-        list_width = 730
-        item_height = 50
-        item_count = 0
-        height = item_height * (item_count + 1)
-        self.settings_panel = MenuPanel(self, list_width, height)
-        self.create_window(0, 0, window=self.settings_panel, anchor=tk.NW)
+
+        # Title
+        self.create_text(400, 20, text="Settings", fill="white",
+                        font=('TkDefaultFont', 16, 'bold'))
+
+        # Menu items as large touch-friendly buttons
+        y_pos = 80
+        button_height = 60
+        button_spacing = 10
+
+        # Motion Calibration button
+        self.motion_cal_btn = tk.Button(
+            self,
+            text="Configure Motion Detector\nfor Current View",
+            command=self.configure_motion,
+            bg='#2E86AB', fg='white',
+            font=('TkDefaultFont', 14, 'bold'),
+            width=40, height=3,
+            relief=tk.RAISED, bd=3
+        )
+        self.create_window(400, y_pos, window=self.motion_cal_btn, anchor="n")
+
+        # Current view indicator (updates when views change)
+        self.view_label = self.create_text(
+            400, y_pos + button_height + 5,
+            text="No view selected",
+            fill="gray", font=('TkDefaultFont', 10, 'italic')
+        )
+
+        # Close/Back button
         self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
         id = self.create_image(730, 10, anchor="nw", image=self.close_img)
         self.tag_bind(id, "<Button-1>", lambda e: app.show_page(UserPage.PLAYER))
+
+        # Quit button
         self.quit_img = PIL.ImageTk.PhotoImage(file="images/quit.png")
         id = self.create_image(730, 80, anchor="nw", image=self.quit_img)
         self.tag_bind(id, "<Button-1>", quit)
+
+    def configure_motion(self):
+        """Start motion calibration for currently selected view"""
+        if app.current_view:
+            app.start_motion_calibration(app.current_view)
+        else:
+            # Show error message
+            self.itemconfig(self.view_label,
+                          text="Please select a view first (from Outposts page)",
+                          fill="red")
+            self.after(3000, lambda: self.update_view_label())
+
+    def update_view_label(self):
+        """Update the label showing which view is selected"""
+        if app.current_view and app.current_view in app.outpost_views:
+            view = app.outpost_views[app.current_view]
+            text = f"Currently selected: {view.description} ({view.node})"
+            self.itemconfig(self.view_label, text=text, fill="chartreuse")
+        else:
+            self.itemconfig(self.view_label,
+                          text="No view selected", fill="gray")
 
 class OutpostPage(tk.Canvas):
     # Provide room on the right for a non-scrolling region. This is a 3-across
@@ -959,7 +1251,8 @@ class OutpostPage(tk.Canvas):
         item_height = 230
         item_count = len(outpost_views)
         list_height = item_height * ((item_count // 3) + 2)
-        self.outpost_panel = OutpostList(self, list_width, list_height, outpost_views)
+        visible_height = 480  # Full screen height
+        self.outpost_panel = OutpostList(self, list_width, list_height, outpost_views, visible_height=visible_height)
         self.create_window(0, 0, window=self.outpost_panel, anchor=tk.NW)
         self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
         id = self.create_image(730, 10, anchor="nw", image=self.close_img)
@@ -970,7 +1263,7 @@ class OutpostPage(tk.Canvas):
 
 class PlayerPage(tk.Canvas):
     # Raspberry Pi 7-inch touch screen display: (800,480)
-    def __init__(self):
+    def __init__(self, enable_share=False):
         tk.Canvas.__init__(self, width=800, height=480, borderwidth=0, highlightthickness=0, background="black")
         self.current_image = convert_tkImage(redx_image(800,480))
         self.pause_img = PIL.ImageTk.PhotoImage(file="images/pausebutton.png")
@@ -993,13 +1286,28 @@ class PlayerPage(tk.Canvas):
         id = self.create_image(330, 330, anchor="nw", image=self.next_img)
         self.tag_bind(id, "<Button-1>", self.next)
         self.addtag_withtag('player_buttons', id)
-        id = self.create_image(480, 330, anchor="nw", image=self.share_img)
-        self.tag_bind(id, "<Button-1>", self.share)
-        self.addtag_withtag('player_buttons', id)
+        if enable_share:
+            id = self.create_image(480, 330, anchor="nw", image=self.share_img)
+            self.tag_bind(id, "<Button-1>", self.share)
+            self.addtag_withtag('player_buttons', id)
+
+        # Add LIST button (top right corner, larger for touch)
+        self.list_button = self.create_rectangle(720, 10, 780, 70, fill='gray30', outline='white', width=2)
+        self.list_text = self.create_text(750, 40, text='LIST', fill='white', font=('Arial', 10, 'bold'))
+        self.tag_bind(self.list_button, "<Button-1>", self.show_event_list)
+        self.tag_bind(self.list_text, "<Button-1>", self.show_event_list)
+        self.addtag_withtag('player_buttons', self.list_button)
+        self.addtag_withtag('player_buttons', self.list_text)
+
         self.toggle_pending = False
         self.auto_hide = None
         self.paused = True
-        self.show_buttons()
+        self.enable_share = enable_share
+        self.progress_overlay = None
+        self.progress_poll = None
+        self.last_viewed_event = None
+
+        self.hide_buttons()
 
     def update_image(self, image):
         #if image.shape[0] == 360: image = cv2.resize(image, (800, 450), interpolation=cv2.INTER_CUBIC)
@@ -1045,12 +1353,6 @@ class PlayerPage(tk.Canvas):
         app.state_manager.request_transition(StateChange.TOGGLE, "PlayerPage.play_pause()")
         self.toggle_pending = True
 
-    def forced_pause(self):
-        logger.debug("PlayerPage forced pause for inactivity")
-        self.itemconfig('player_buttons', state='normal')
-        app.show_page(UserPage.PLAYER)
-        app.select_outpost_view()
-
     def menu(self, event=None):
         logger.debug("PlayerPage menu button pressed")
         self.pause()
@@ -1066,9 +1368,106 @@ class PlayerPage(tk.Canvas):
         self.hide_buttons_now()
         app.next_event()
 
+    def show_progress_overlay(self):
+        """Display semi-transparent progress overlay"""
+        if self.progress_overlay is None:
+            # Create semi-transparent black overlay
+            self.progress_overlay = self.create_rectangle(
+                200, 150, 600, 330,
+                fill='black', stipple='gray50', outline='white', width=2
+            )
+            self.progress_text = self.create_text(
+                400, 200, text='Preparing export...',
+                fill='white', font=('Arial', 14, 'bold')
+            )
+            self.progress_bar_bg = self.create_rectangle(
+                220, 250, 580, 270, fill='#333333', outline='white'
+            )
+            self.progress_bar = self.create_rectangle(
+                220, 250, 220, 270, fill='#00ff00', outline=''
+            )
+            self.addtag_withtag('progress_overlay', self.progress_overlay)
+            self.addtag_withtag('progress_overlay', self.progress_text)
+            self.addtag_withtag('progress_overlay', self.progress_bar_bg)
+            self.addtag_withtag('progress_overlay', self.progress_bar)
+        else:
+            self.itemconfig('progress_overlay', state='normal')
+            self.itemconfig(self.progress_text, text='Preparing export...')
+            self.coords(self.progress_bar, 220, 250, 220, 270)
+
+    def hide_progress_overlay(self):
+        """Hide progress overlay"""
+        if self.progress_overlay is not None:
+            self.itemconfig('progress_overlay', state='hidden')
+
+    def update_progress(self, phase, current, total):
+        """Update progress overlay with current status"""
+        if self.progress_overlay is not None:
+            # Update text
+            if total > 0:
+                percent = int(100 * current / total)
+                text = f"{phase}: {current}/{total} ({percent}%)"
+            else:
+                text = f"{phase}..."
+            self.itemconfig(self.progress_text, text=text)
+
+            # Update progress bar
+            if total > 0:
+                bar_width = 360 * (current / total)
+                self.coords(self.progress_bar, 220, 250, 220 + bar_width, 270)
+
+    def poll_export_progress(self):
+        """Poll for export progress updates"""
+        if app.video_exporter is None:
+            self.hide_progress_overlay()
+            return
+
+        try:
+            # Check for progress updates (non-blocking)
+            while not app.video_exporter.progress_queue.empty():
+                msg = app.video_exporter.progress_queue.get_nowait()
+
+                if msg[0] == 'PHASE':
+                    _, phase, current, total = msg
+                    self.update_progress(phase, current, total)
+                elif msg[0] == 'PROGRESS':
+                    _, phase, current, total = msg
+                    self.update_progress(phase, current, total)
+                elif msg[0] == 'COMPLETE':
+                    _, filename, event_count, frame_count = msg
+                    text = f"Complete: {filename}\n{event_count} events, {frame_count} frames"
+                    self.itemconfig(self.progress_text, text=text)
+                    self.coords(self.progress_bar, 220, 250, 580, 270)
+                    # Auto-hide after 3 seconds
+                    self.after(3000, self.hide_progress_overlay)
+                    return
+                elif msg[0] == 'ERROR':
+                    _, error_msg = msg
+                    self.itemconfig(self.progress_text, text=f"Error: {error_msg}")
+                    self.after(3000, self.hide_progress_overlay)
+                    return
+
+            # Continue polling
+            self.progress_poll = self.after(200, self.poll_export_progress)
+
+        except Exception as e:
+            logger.exception(f"Error polling export progress: {str(e)}")
+            self.hide_progress_overlay()
+
+    def show_event_list(self, event=None):
+        """Navigate to event list page"""
+        logger.debug("PlayerPage LIST button pressed")
+        self.pause()
+        app.show_page(UserPage.EVENTS)
+
     def share(self, event=None):
         logger.debug("PlayerPage share button pressed")
         self.hide_buttons_now()
+        if self.enable_share and app.state_manager.last_event is not None:
+            viewname, date, evt_id = app.state_manager.last_event
+            app.export_event(viewname, date, evt_id)
+            self.show_progress_overlay()
+            self.poll_export_progress()
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
@@ -1094,11 +1493,27 @@ class Application(ttk.Frame):
         self.player_daemon = PlayerDaemon(self.wirename, self._ringbuffers)
         self.sentinel_subscriber = SentinelSubscriber(CFG['sentinel'])
         self.eventList_updater = EventListUpdater(self.sentinel_subscriber.eventQueue, self.newEvent, self.outpost_views)
-        self.pages = [PlayerPage(),
+
+        # Initialize video exporter if configured
+        self.video_exporter = None
+        enable_share = False
+        if 'video_export' in CFG:
+            try:
+                self.video_exporter = VideoExporter(CFG['video_export'], self.outpost_views)
+                enable_share = True
+                logger.info("VideoExporter initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize VideoExporter: {str(e)}")
+
+        self.pages = [PlayerPage(enable_share=enable_share),
                       OutpostPage(self.outpost_views),
-                      SettingsPage()]
+                      EventListPage(self.outpost_views),
+                      SettingsPage(),
+                      MotionCalibrationPage(self, self.outpost_views)]
         self.auto_play = False
         self.auto_pause = None
+        self.move_next = False
+        self.inactivity_timer = CFG.get('inactivity_timeout', 30)  # Default to 30 seconds
         self.player_panel = self.pages[UserPage.PLAYER]
         self.player_panel.grid(row=0, column=0)
         self.current_page = UserPage.PLAYER
@@ -1141,9 +1556,29 @@ class Application(ttk.Frame):
 
     def show_page(self, page):
         if page != self.current_page:
+            # Pause calibration when switching away from it
+            if self.current_page == UserPage.CALIBRATE:
+                self.pages[UserPage.CALIBRATE].pause_calibration()
+
+            # Resume calibration when switching back to it
+            if page == UserPage.CALIBRATE:
+                self.pages[UserPage.CALIBRATE].resume_calibration()
+
+            # Refresh event list when navigating to it
+            if page == UserPage.EVENTS:
+                self.pages[UserPage.EVENTS].refresh_list(force=True)
+            # Update settings page view label when showing settings
+            if page == UserPage.SETTINGS:
+                self.pages[UserPage.SETTINGS].update_view_label()
+
             self.pages[self.current_page].grid_remove()
             self.pages[page].grid(row=0, column=0)
             self.current_page = page
+
+    @property
+    def current_view(self):
+        """Get the currently selected view name"""
+        return self._current_view
 
     def select_outpost_view(self, viewname=None, auto_play=False):
         """Select a live outpost view"""
@@ -1159,12 +1594,22 @@ class Application(ttk.Frame):
         self.show_page(UserPage.PLAYER)
         self.view = view
 
-    def select_event(self, idx):
+    def select_event(self, idx, move_next=False):
         """Select a specific event from the event list for the current view"""
+        self.move_next = move_next  # user pressed next button, assume auto-advance after event
+        if move_next:
+            logger.debug(f"Selecting event {idx} with auto-advance enabled")
+            self.state_manager.request_transition(StateChange.AUTO, "app.select_event()", idx)
         (dt, date, event, size) = self.view.eventlist[idx]
         source_cmd = ((PlayerCommand.EVENT, self.view.datapump, self._current_view, date, event, size), size)
         self.state_manager.request_transition(StateChange.LOAD, "app.select_event()", source_cmd)
         self.auto_play = True
+
+    def is_browsing_history(self):
+        """Check if user is actively browsing event history"""
+        return (self.state_manager.player_command and
+                self.state_manager.player_command[0] == PlayerCommand.EVENT and
+                self.state_manager.current_state != PlayerState.IDLE)
 
     def previous_event(self):
         if self.eventIdx > 0:
@@ -1177,15 +1622,31 @@ class Application(ttk.Frame):
     def next_event(self):
         if self.eventIdx < self.view.event_count() - 1:
             self.eventIdx += 1
-            self.select_event(self.eventIdx)
+            self.select_event(self.eventIdx, move_next=True)
         else:
-            # After current event found while stepping fowrard, switch to live view
+            # After current event found while stepping forward, switch to live view
             self.select_outpost_view(self._current_view, auto_play=True)
+
+    def start_motion_calibration(self, viewname):
+        """Enter motion calibration mode for a view"""
+        self.pages[UserPage.CALIBRATE].start_calibration(viewname)
+        self.show_page(UserPage.CALIBRATE)
+
+    def export_event(self, viewname, date, event):
+        """Queue an event for video export"""
+        if self.video_exporter is not None:
+            view = self.outpost_views[viewname]
+            self.video_exporter.export_event(viewname, date, event, view.datapump)
+            logger.info(f"Queued video export for {viewname} {date}/{event}")
 
     def reset_inactivity(self, event=None):
         if self.auto_pause is not None:
             self.master.after_cancel(self.auto_pause)
-        self.auto_pause = self.master.after(30000, self.player_panel.forced_pause)
+        self.auto_pause = self.master.after(self.inactivity_timer * 1000, self.reset_player)
+
+    def reset_player(self):
+        logger.debug("Forced pause and reset to PlayerPage for inactivity")
+        self.select_outpost_view(self._current_view, auto_play=False)
 
     def update(self):
         _delay = 1
@@ -1202,14 +1663,18 @@ class Application(ttk.Frame):
         # New event data is available from the sentinel subscriber
         if self.newEvent.is_set():
             ((viewname, evtref), image) = self.eventList_updater.getEventData()
-            logger.debug(f"EventListUpdater has new event data: {viewname} {evtref}")
+            logger.debug(f"Main update thread has new event data: {viewname} {evtref}")
             if viewname in self.outpost_views:
                 v = self.outpost_views[viewname]
                 v.update_thumbnail(image)
                 v.add_event(evtref)
                 v.menuref.update()
-                if viewname == self._current_view:
+                # Only reset eventIdx if not actively browsing history
+                if viewname == self._current_view and not self.is_browsing_history():
                     self.eventIdx = self.view.event_count()
+                if self.state_manager.current_state in [PlayerState.PAUSED, PlayerState.READY, PlayerState.IDLE]:
+                    self.select_outpost_view(viewname, auto_play=False)
+                    self.player_panel.update_image(image)
             self.newEvent.clear()
 
         self.master.after(_delay, self.update)

@@ -17,9 +17,6 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   **sentinel** tasks. Needed to support the capture of multiple neural nets producing 
   results in parallel from a single event or task. 
 - Aditional refinements for the **sentinel** module. 
-  - Implement result signaling to Twilio, to Node-RED via MQTT, and to **imagehub** logging 
-    to help support reponsiveness to events in progress as well as for knowledge and state 
-    management throughout the larger system. 
   - Provide an abstraction to support a reusable design pattern for ring buffer control 
     based on an object detection result filter.
   - Implement internal housekeeping to periodically purge oldest job history. This is 
@@ -41,6 +38,72 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.4-alpha - 2026-01-17
+
+### Added
+
+- Added a **sentinel** task for vehicle speed estimation by VASCAR calculations. Intended for an
+  outpost deployment with a view of the street where vehicle traffic is passing horizontally across
+  the field of view. See the `VehicleSpeed.yaml` task configuration file for details. 
+- While browsing event history, the share button on the **watchtower** will now produce an on-demand 
+  video export of captured event data and make it available for externally sharing via the following
+  protocol:
+     1. An outpost node will generally capture event data only while there is motion. At times, a single larger event might be comprised of multiple event captures due to intermittent pauses in activity.
+     2. The configuration file includes settings for the maximum elapsed time between captures for individual segments to be considered part of the larger event, i.e., 30 seconds, and an upper limit on the number of sequential captures to be stitched together into a single video export.
+     3. An MP4 video format export is produced of the event data complete with labeling and bounding box overlays from model inference results. A date and time heading is briefly included as labeling along the top of the video as each segment is introduced. The export is optimized for streaming.
+     4. A copy of the MP4 file is dropped in a folder on the primary data sink. This is currently unmanaaged, an item for the To-Do list.
+     5. The Sentinelcam network is secured by a bastion host that is connected to a public-facing VPS via a WireGuard tunnel.
+     6. The tunnel is on private a 10.0.0.0/24 network segment, and an operational SSH key for the VPS is deployed to the watchtower nodes. A simple `scp` command is employed to drop a copy of the MP4 file into a folder on the virtual private server.
+     7. The VPS is running *Nginx* with a public-facing address. *Nginx* supports a secured link, containing an MD5-encrypted hash, which expires based on time. 
+     8. A secured link to the uploaded file is constructed and delivered to a *Telegram* bot in a Markdown-formatted message. 
+     9.  This link can be shared with anyone. If preservation is desired, the recipient will need to download and save the video prior to its expiration time.
+     10. A scheduled clean-up task on the VPS deletes expired videos from the upload folder. 
+- Added a motion detector calibration tool to the **watchtower**. Though functional, this is still coming
+  together. Based on the currently selected outpost node, the live current camera view is displayed. A set 
+  of controls are also presented which allow for manipulating parameters supporting the motion detector. As
+  parameters are adjusted, changes to motion detection sensitity can be evaluated in real time. There is 
+  currently no facility to apply the new settings back to the outpost, nor does the tool open with the
+  current settings. Also for the to To Do list, this same control should allow for reviewing the ROI (region 
+  of interest) settings visually, adjust them as desired, and save back to the outpost configuration.
+- Added a general purpose alert re-broadcast mechanism to the **sentinel**. Initially implemented
+  for the **camwatcher** to send out event deletion alerts. The **watchtower** needeed this message
+  to prune stale data from its internal event cache. This was built as a general purpose alerting 
+  mechanism which could be exploited to allow an outpost node to produce a system-wide alert for
+  re-broadcast by the **sentinel** log publisher. This information would then be available to the
+  **watchtower**, or any interested subscriber, in real time.
+
+### Changed
+
+- The **imagenode** configuration for outpost nodes now support an `interesting_objects` setting, which 
+  is a list of classnames from the object detection neural net. This expands on the original hard-coded
+  value of `['person']` as the single class of interesting objects. This is used in event retention and 
+  directing analysis tasking for the **sentinel** pipeline at the end of event capture.
+- Simplified Python dependency mangmement. Moved standard `requirements.txt` into a file in the
+  `sentinelcam_base` role rather than maintaining a file system object in the source repository. This 
+  can now be easily overriden at the host level as needed.
+- Expand on the `DailyCleanup.yaml` task logic and configuration for the **sentinel** into the beginnings
+  of a rules-based data retention policy. This now supports data policy by tracking type, retention length, 
+  and categorization by outpost node. This is still evolving.
+- Motion detection parameters moved into the **imagenode** application configuration file.
+- The **watchtower** nodes are now configured as kiosks with an always-on display. These nodes subscribe to
+  **sentinel** log publishing, watching for task results. As new events arrive, a sample image is selected
+  based on inference results available at that time. Labeling and bounding box overlays from neural net
+  outputs are drawn on the image, which is then displayed on the viewer and used as the thumbnail 
+  in the list of outpost nodes. The current view selection is also automatically changed to whichever outpost
+  produced the event. Tapping on the play button at the point will provide a live camera view from the
+  outpost. Tapping on the previous button will replay the event which was shown on the viewer.
+- An event history list was added to the **watchtower**, which is tracked internally by outpost view. Due 
+  to the potentially large number of events which can occur, the menu allows selection by hourly time slot.
+  One a starting time is selected, the user can begin replay or browse forward and back as desired.
+
+### Fixed
+
+- Auto-advance functionality for the **watchtower** event reviewer fleshed out and completed. Tapping on the
+  previous button will replay the previous event and stop at the end of it. The play/pause button can then be
+  used to replay that event multiple times. Tapping on the next button implies an auto-advance. The player
+  will then begin playing each subsequent event in sequence. When the last event is reached, the player
+  transistions into a live camera view. During replay, tapping any other button will stop the auto-advance.
+
 ## 0.2.3-alpha - 2026-01-02
 
 ### Fixed
@@ -59,14 +122,14 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Added
 
-- Move DepthAI model file name into application configuration, and incorporate into the model
+- Moved DepthAI model file name into application configuration, and incorporate into the model
   registry and devops playbooks.
 
 ## 0.2.1-alpha - 2025-12-30
 
 ### Added
 
-- Full support for Google Coral USB Accelerator, for both the outposts and sentinels. This includes 
+- Full support for Google Coral USB Accelerator, on both the outposts and sentinels. This includes 
   software package provisioning, application configuration, as well as model registry and deployment 
   for `mobilenet_ssd_edgetpu` and `face_detection_edgetpu`. Support for face detection on the outposts, 
   as a supplementary lens for the `SpyGlass`, is an outstanding To Do List item.
