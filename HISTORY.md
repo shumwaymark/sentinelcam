@@ -31,6 +31,9 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   of the storage breakdown, utilization, and available capacity of the data sinks. 
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
   **imagenode**. 
+- Begin to explore capitalizing on the functionality of the **librarian**  and its design 
+  philosophy as a vehicle to centralize knowledge and state.
+
 
 ### Known bugs
 
@@ -48,16 +51,26 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - While browsing event history, the share button on the **watchtower** will now produce an on-demand 
   video export of captured event data and make it available for externally sharing via the following
   protocol:
-     1. An outpost node will generally capture event data only while there is motion. At times, a single larger event might be comprised of multiple event captures due to intermittent pauses in activity.
-     2. The configuration file includes settings for the maximum elapsed time between captures for individual segments to be considered part of the larger event, i.e., 30 seconds, and an upper limit on the number of sequential captures to be stitched together into a single video export.
-     3. An MP4 video format export is produced of the event data complete with labeling and bounding box overlays from model inference results. A date and time heading is briefly included as labeling along the top of the video as each segment is introduced. The export is optimized for streaming.
-     4. A copy of the MP4 file is dropped in a folder on the primary data sink. This is currently unmanaaged, an item for the To-Do list.
-     5. The Sentinelcam network is secured by a bastion host that is connected to a public-facing VPS via a WireGuard tunnel.
-     6. The tunnel is on private a 10.0.0.0/24 network segment, and an operational SSH key for the VPS is deployed to the watchtower nodes. A simple `scp` command is employed to drop a copy of the MP4 file into a folder on the virtual private server.
-     7. The VPS is running *Nginx* with a public-facing address. *Nginx* supports a secured link, containing an MD5-encrypted hash, which expires based on time. 
-     8. A secured link to the uploaded file is constructed and delivered to a *Telegram* bot in a Markdown-formatted message. 
-     9.  This link can be shared with anyone. If preservation is desired, the recipient will need to download and save the video prior to its expiration time.
-     10. A scheduled clean-up task on the VPS deletes expired videos from the upload folder. 
+
+    - An outpost node will generally capture event data only while there is motion.
+    - At times, a single larger event might be comprised of multiple event captures due to intermittent pauses in activity.
+    - The configuration file includes a setting for the maximum elapsed time between captures for individual segments to be considered part of the larger event, i.e., 30 seconds. 
+    - There is also a configurable upper limit on the number of sequential captures to be stitched together into a single video export.
+    - An MP4 video format export is produced of the event data complete with labeling and bounding box overlays from model inference results.
+    - A date and time heading is briefly included as labeling along the top of the video as each segment is introduced.
+    - The export is optimized for streaming.
+    - A copy of the MP4 file is dropped in a folder on the primary data sink.
+    - This is currently unmanaaged, an item for the To-Do list.
+    - The Sentinelcam network is secured by a bastion host connected to a public-facing VPS via a WireGuard tunnel.
+    - The tunnel is on private a 10.0.0.0/24 network segment, and an operational SSH key for the VPS is deployed to the watchtower nodes.
+    - A simple `scp` command is employed to drop a copy of the MP4 file into a folder on the virtual private server.
+    - The VPS is running *Nginx* with a public-facing address.
+    - *Nginx* supports a secured link, containing an MD5-encrypted hash, which expires based on time. 
+    - A secure link to the uploaded file is constructed and delivered to a *Telegram* bot in a Markdown-formatted message. 
+    - This link can be shared with anyone.
+    - If preservation is desired, the recipient will need to download and save the video prior to its expiration time.
+    - A scheduled clean-up task on the VPS deletes expired videos from the upload folder. 
+   
 - Added a motion detector calibration tool to the **watchtower**. Though functional, this is still coming
   together. Based on the currently selected outpost node, the live current camera view is displayed. A set 
   of controls are also presented which allow for manipulating parameters supporting the motion detector. As
