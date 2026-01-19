@@ -438,6 +438,8 @@ results. They subscribe to **sentinel** log publishing, and are continually revi
 These nodes are configured as kiosks with an always-on display. Although originally conceived as a wall mount,
 depending on case selection preferences, they can also be adapted for use on a desk or table top.
 
+  **Status**: working proof of concept; in production use, still evolving.
+
 As new events occur, a sample image is selected based on inference results available at that time. Labeling
 and bounding box overlays from neural net outputs are drawn on the image along with a time stamp. This selected
 image is pushed to the viewer display and used as the thumbnail in the list of outpost nodes.
@@ -450,8 +452,6 @@ which was shown on the viewer.
 
 .. image:: docs/images/Watchtower.png
    :alt: Sketch of Watchtower design
-
-  **Status**: working proof of concept; in production use, still evolving.
 
 The **watchtower**, though functional, is still being developed. It has an open-ended feature list, much of which
 is still only whiteboarded at this point. Its primary purpose as a live camera viewer and event review tool has been
