@@ -115,11 +115,11 @@ ZeroMQ and imageZMQ respectively.
   *How Sentinelcam benefits from image and logfile publishing*
 
 - Image capture can be quickly initiated by an event in progress. This supports multiple image
-  subscribers, for both on-demand capture and parallel live video viewing.
+  subscribers, for both on-demand capture and live viewing in parallel.
 
-- Error and warning conditions can be accumulated in a centralized repository as they occur.
-  This avoids reliance on SD cards with limited storage capacity which could be dispersed across
-  potentially dozens of individual camera nodes.
+- Error and warning conditions are accumulated in a centralized repository as they occur. This
+  simplifies management and review of system health over time and avoids reliance on SD cards with
+  limited storage capacity which could be dispersed across potentially dozens of individual camera nodes.
 
 - More importantly, logged event notifications including information related to an event in progress
   are then available as data available and to multiple interested consumers.
