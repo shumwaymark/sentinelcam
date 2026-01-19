@@ -150,7 +150,7 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 ### Changed
 
 - Code and model deployment tasks now pull from the repositories on the primary data sink directly to each 
-  target node via locally executed rsync commands. An operational SSH key is stored as a variable in
+  target node via locally executed `rsync` commands. An operational SSH key is stored as a variable in
   an Ansible encrypted vault for deployment and use by target nodes. See `playbooks/deploy-ssh-key.yaml` 
   for details.
 
@@ -159,8 +159,8 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 ### Added
 
 - *Complete DevOps infrastructure*: Full Ansible-based CI/CD pipeline and configuration management
-  system. A comprehensive automation framework for deployment, configuration, and maintenance of all 
-  system components:
+  system. A comprehensive automation framework for server provisioning, software deployment, configuration, 
+  and maintenance of all system components:
   
   - Role-based architecture definitions for all major components including sentinel, imagenode, imagehub, 
     camwatcher, datapump, watchtower, and supporting infrastructure roles: base provisioning, configuration, 
