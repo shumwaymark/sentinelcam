@@ -112,18 +112,17 @@ slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as
 Two key enhancements provide the essential wiring to make this possible. Log and image publishing over
 ZeroMQ and imageZMQ respectively.
 
-  *How Sentinelcam benefits from Image and logfile publishing*
+  *How Sentinelcam benefits from image and logfile publishing*
 
-- Image capture can be quickly initiated by an event in progress.
-
-- Supports multiple subscribers, for both batch processing and live video viewing.
+- Image capture can be quickly initiated by an event in progress. This supports multiple image
+  subscribers, for both on-demand capture and parallel live video viewing.
 
 - Error and warning conditions can be accumulated in a centralized repository as they occur.
   This avoids reliance on SD cards with limited storage capacity which could be dispersed across
   potentially dozens of individual camera nodes.
 
 - More importantly, logged event notifications including information related to an event in progress
-  are then available as data which can be streamed to multiple interested consumers.
+  are then available as data available and to multiple interested consumers.
 
 Images are transported as individual full-sized frames, each compressed into JPEG format. For
 smooth realistic video playback, the pipeline needs to run with a target throughput of somewhere
