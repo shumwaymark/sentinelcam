@@ -112,14 +112,13 @@ slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as
 Two key enhancements provide the essential wiring to make this possible. Log and image publishing over
 ZeroMQ and imageZMQ respectively.
 
-  *Image publishing has a twofold benefit*
+  *How Sentinelcam benefits from Image and logfile publishing*
 
-- Image capture from another node can be quickly initiated by an event in progress.
-- A live stream can simultaneously feed one or more monitors for on-demand real-time display.
+- Image capture can be quickly initiated by an event in progress.
 
-  *Log publishing also offers two benefits*
+- Supports multiple subscribers, for both batch processing and live video viewing.
 
-- Allows error and warning conditions to be accumulated in a centralized repository as they occur.
+- Error and warning conditions can be accumulated in a centralized repository as they occur.
   This avoids reliance on SD cards with limited storage capacity which could be dispersed across
   potentially dozens of individual camera nodes.
 
