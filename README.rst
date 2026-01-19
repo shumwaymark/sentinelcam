@@ -5,7 +5,7 @@ SentinelCam: vision and machine learning pipeline
 Introduction
 ============
 
-**SentinelCam** is an unfinished work in progress. The project goal is to develop a small-scale
+**SentinelCam** is an ongoing development effort. The project goal is to develop a small-scale
 distributed facial recognition and learning pipeline hosted on a network of Raspberry Pi computers.
 The practical application for this is to build a stand-alone embedded system served by multiple
 camera feeds that can easily support presence detection within the context of smart home automation.
@@ -41,8 +41,8 @@ One or more *data aggregators* are responsible for accumulating reported data an
 video streams.
 
 Realtime analysis of logged data from each **Outpost** feeds a *dispatcher* responsible for
-submitting tasks to the **Sentinel**. Inference and labeling tasks should be prioritized over
-modeling runs. The **Sentinel** will need to be provisioned with adequate memory and computing
+submitting tasks to the **sentinel**. Inference and labeling tasks should be prioritized over
+modeling runs. The **sentinel** will need to be provisioned with adequate memory and computing
 resources.
 
 .. image:: docs/images/SentinelCamOverview.png
@@ -117,6 +117,15 @@ ZeroMQ and imageZMQ respectively.
 - Image capture from another node can be quickly initiated by an event in progress.
 - A live stream can simultaneously feed one or more monitors for on-demand real-time display.
 
+  *Log publishing also offers two benefits*
+
+- Allows error and warning conditions to be accumulated in a centralized repository as they occur.
+  This avoids reliance on SD cards with limited storage capacity which could be dispersed across
+  potentially dozens of individual camera nodes.
+
+- More importantly, logged event notifications including information related to an event in progress
+  are then available as data which can be streamed to multiple interested consumers.
+
 Images are transported as individual full-sized frames, each compressed into JPEG format. For
 smooth realistic video playback, the pipeline needs to run with a target throughput of somewhere
 close to 30 frames per second, ideally.
@@ -136,7 +145,7 @@ The following general strategy provides an overview of this technique.
 - Motion detection is applied continually whenever there is nothing of interest within the field
   of view. This is a relatively quick background subtraction model which easily runs within the main
   image processing pipeline.
-- A motion event triggers the application of an object identification lens to the spyglass.
+- A motion event within a region of interest triggers the application of an object identification lens to the spyglass.
 - Each object of interest is logged for tracking.
 - With objects of interest in view, additional lenses may be selected and applied to subsequent frames
   whenever the spyglass is not already busy.
@@ -158,15 +167,6 @@ determined? The color? Is there a license plate visible?
 
 As a general rule, in-depth analysis tasks such as these are assigned to batch jobs running on the
 **sentinel** itself.
-
-  *Log publishing also offers two benefits*
-
-- Allows error and warning conditions to be accumulated in a centralized repository as they occur.
-  This avoids reliance on SD cards with limited storage capacity which could be dispersed across
-  potentially dozens of individual camera nodes.
-
-- More importantly, logged event notifications including information related to an event in progress
-  are then available as data which can be streamed to multiple interested consumers.
 
 The ``Outpost`` as currently implemented is still considered experimental, and best represents proof
 of concept as an evolving work in progress. Further detail on the design, structure, and operation of
@@ -428,6 +428,41 @@ inference co-processor and is kept ready for immediate supplemental event analys
 
 See `sentinel.yaml <sentinel.yaml>`_ for an example of how this is configured.
 
+Watchtower Kiosk
+----------------
+
+The **watchtower** is the SentinelCam wall console. Designed for the Raspberry Pi 7-inch touchscreen
+display, this is a combination live outpost viewer and prior event display tool showing model inference
+results. They subscribe to **sentinel** log publishing, and are continually reviewing task activity.
+
+These nodes are configured as kiosks with an always-on display. Although originally conceived as a wall mount,
+depending on case selection preferences, they can also be adapted for use on a desk or table top.
+
+As new events occur, a sample image is selected based on inference results available at that time. Labeling
+and bounding box overlays from neural net outputs are drawn on the image along with a time stamp. This selected
+image is pushed to the viewer display and used as the thumbnail in the list of outpost nodes.
+
+The current view selection is also automatically changed to whichever outpost produced the event. This results
+in an immediate visual update on the display. With multiple outposts capturing events, an ever-changing slideshow
+presenting the most recent event capture is provided. Tapping on the play button from an idle state will show the
+live camera view from the outpost with most recent activity. Tapping on the previous button will replay the event
+which was shown on the viewer.
+
+.. image:: docs/images/Watchtower.png
+   :alt: Sketch of Watchtower design
+
+  **Status**: working proof of concept; in production use, still evolving.
+
+The **watchtower**, though functional, is still being developed. It has an open-ended feature list, much of which
+is still only whiteboarded at this point. Its primary purpose as a live camera viewer and event review tool has been
+realized. Conceptually, this will become the central hub for operational control and status, system health monitoring,
+model development feedback, and general administration.
+
+  Currently implemented features include:
+
+  - Video export and external sharing of event captures
+  - An interactive motion detection calibration and tuning tool
+
 Research and development roadmap
 ================================
 
@@ -538,9 +573,9 @@ of incoming frames could help determine whether a motion event should be priorit
 closer analysis by the **sentinel**.
 
 Additional performance gains can be achieved here by equipping selected ``Outpost`` nodes with
-a coprocessor, such as the Google Coral USB Accelerator or Intel Neural Compute Stick. Proper
-hardware provisioning can allow for running facial and vehicle recognition models directly on
-the camera node. When focused on an entry into the house, any face immediately recognized would
+a coprocessor. SentinelCam currently supports the Google Coral USB Accelerator for this purpose.
+Proper hardware provisioning can allow for running facial and vehicle recognition models directly
+on the camera node. When focused on an entry into the house, any face immediately recognized would
 not require engaging the **sentinel** for further analysis.
 
 Essentially, this could enable a camera to provide data in real-time for discerning between
@@ -572,74 +607,6 @@ performance directly on an embedded low-voltage edge device.
 The prototype pipeline definition can be found in
 `imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
 See the `depthai.yaml <depthai.yaml>`_ file for the setups.
-
-Data management
----------------
-
-There are several aspects to data management. For starters, it's a challenge. These little
-embedded devices are not generally regarded as high-performing data movers. Provisioning
-with Gigabit Ethernet network cabling and low power SSD storage over USB3 go a long way
-towards alleviating those concerns.
-
-  Complacency should be avoided here, it is easy to be deceived. These are still small devices,
-  and this design has a way of keeping most nodes fully tasked. Always keep the basics in mind.
-  It is critically important to give due consideration to key factors such as CPU resources,
-  memory utilization, disk I/O, storage capacity, and network traffic. Each impact the others.
-  The penalties incurred due to missteps always seem to hit harder than anticipated.
-
-  As more and more Outpost nodes are added, additional data sinks will be required to support them.
-
-Raw data gleaned from an Outpost event can be voluminous and detailed.
-
-SentinelCam endeavors to always capture as much image detail as possible. As noted above
-in the data model discussion, individual image frames require much more space than a compressed
-video format. The computer vision technology underpinning this design is based on the analysis of
-two-dimensional images. The intent is to capture high-resolution ground-truth data, reducing
-the likelihood that key details might be missed. This is helpful for analysis and modeling,
-while also allowing for the production of high-quality full-motion archival videos.
-
-There can be multiple objects of interest moving through the field of view simultaneously.
-Collected logging data can include geometry, classification, and labeling. These datasets could
-represent the aggregated results inferred from multiple deep neural networks, both collected
-in real-time by an Outpost node and analysis results later produced by the Sentinel.
-
-It adds up in a hurry. *And the rest of the story...*
-
-Much of it can be meaningless, trivial, forgettable, and simply not wanted. For example,
-imagine an outdoor camera with a view of both an entry into the home and the driveway. The
-occupants and their vehicles will pass in front of that camera multiple times per day.
-
-  SentinelCam was conceived as a system providing for the analysis of various camera events
-  as they are occurring. Not a long-term video archival and retrieval engine.
-
-  *Built to operate exclusively on low-voltage embedded devices like the Raspberry Pi*, there
-  are a few assumptions baked-in to the design. One of these is that the primary data sinks
-  are assumed to be something simple, like a permanently mounted SSD card over USB3. More
-  exotic options, such as high-capacity NAS systems, are certainly available. Just not assumed.
-
-  Jeff's Librarian capitalizes on Unix utilities to periodically keep a central data store updated.
-  A great idea. If desired, the SentinelCam data sinks could simply be hosted directly on a larger
-  high-capacity system. Though again, that should not be a requirement.
-
-  What to keep, and why. That's the real question to be answered. Isn't it always?
-
-  - All these collected images: incredibly valuable for model-building.
-      For feeding the SentinelCam machine learning life cycle, this is the first order of business.
-  - For long-term storage, perhaps image data should be converted into a video format and moved elsewhere.
-  - Why keep old video? For routine events, maybe there isn't much reason to keep it around long.
-  - For unexpected and unusual events, maybe that data is retained. Perhaps even copied off-site immediately.
-  - The beauty of SentinelCam, is that it knows the difference.
-
-This all needs to be mostly automatic and self-maintaining. The goal is to build a system requiring only
-the bare minimum of care and feeding. Ideally, set it up and forget about it. It should just work.
-
-*Saying it once more. Dream big*.
-
-Librarian
----------
-
-Begin to explore capitalizing on the functionality of the **librarian**  and its design philosophy
-as a vehicle to centralize knowledge and state.
 
 Additional documentation
 ========================
