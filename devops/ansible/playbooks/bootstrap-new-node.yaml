@@ -1,8 +1,6 @@
 ---
 # Bootstrap playbook for fresh OS installations
 # Run this after initial SSH access is established but before network deployment
-# NOTE: Only for NEW modern nodes (Ubuntu 22.04+, Debian 12+, RPi OS Bookworm+)
-#       Legacy nodes should NOT be bootstrapped
 #
 # Usage:
 #   ansible-playbook -i inventory/bootstrap.yaml \
