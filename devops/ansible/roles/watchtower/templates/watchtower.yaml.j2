@@ -44,7 +44,7 @@ datapumps:
 outposts:
 {% for outpost_name, outpost_config in sentinelcam_outposts.items() %}
 {%   if outpost_name in watchtower_monitored_outposts %}
-{%     set outpost_host = hostvars[outpost_name].ansible_host | default(outpost_name) %}
+{%     set outpost_host = outpost_config.hostname | default(outpost_name) %}
 {%     for camera_id, camera_config in outpost_config.cameras.items() %}
 {%       set image_port = camera_config.image_port | default(sentinelcam_ports.imagenode_publisher) %}
   {{ outpost_name }}:
