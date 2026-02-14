@@ -1,285 +1,98 @@
 # ImageNode Role
 
-Deploys and manages **imagenode** service on outpost camera nodes.
+Deploys and manages **imagenode** on outpost camera nodes.
 
 ## Purpose
 
-ImageNode captures images from cameras and publishes them via ZeroMQ to ImageHub datasinks. Supports edge detection, hardware acceleration, and multi-modal inference.
+ImageNode captures images from cameras and publishes them via ZeroMQ to datasink nodes. Supports PiCamera,
+OAK/DepthAI, and USB webcam sources with edge detection via Spyglass (CPU/VPU) and optional DepthAI neural
+network pipelines. Person detections trigger sentinel task chains for face recognition and tracking.
 
-## Architecture
+## Dependencies
 
-- **Node Name**: Internal identifier for the outpost (e.g., "east", "alpha5") - can differ from hostname
-- **View Name**: Each camera on the node is assigned a viewname for identifcation
-- **Camera Types**: Identified by prefix - P* (PiCamera), O* (OAK/DepthAI), W* (Webcam)
-- **Datasink Mapping**: Automatically resolved from `sentinelcam_outposts` registry
-- **Edge Processing**: Spyglass pipeline (CPU/VPU) + optional DepthAI pipeline (OAK devices)
+- **sentinelcam_base** — user, venv, directory setup
+- **Model registry** on primary datasink — MobileNetSSD and other detection models
 
-## Camera Configuration in host_vars
+## Configuration
 
-Define cameras in `host_vars/<hostname>.yaml`:
-
-### Example 1: PiCamera with MobileNetSSD
+Camera configuration lives in `host_vars/<hostname>.yaml` via the `imagenode_config` structure:
 
 ```yaml
-# host_vars/alpha5.yaml
 imagenode_config:
-  node_name: alpha5              # Outpost identifier
+  node_name: east              # Outpost identifier (can differ from hostname)
   cameras:
-    P1:                          # PiCamera type
-      viewname: PiCam3           # Camera view identifier
-      resolution: [640, 480]
-      framerate: 32
-      vflip: false
-      detector:
-        detectobjects: mobilenetssd    # Spyglass detector
-        accelerator: none              # none | ncs2 | coral
-        sentinel_tasks:
-          person: GetFaces2            # Task to trigger on person detection
-          default: MobileNetSSD_allFrames  # Catch-all task (optional)
-```
-
-### Example 2: OAK-1 with DepthAI Pipeline
-
-```yaml
-# host_vars/east.yaml
-imagenode_config:
-  node_name: east
-  cameras:
-    O1:                          # OAK camera type
-      viewname: Front
+    O1:                        # Camera type prefix: P* (PiCamera), O* (OAK), W* (Webcam)
+      viewname: Front          # View identifier
       resolution: [640, 360]
       framerate: 30
       detector:
-        encoder: oak             # oak | cpu (JPEG encoding location)
-        detectobjects: none      # Spyglass not used with DepthAI
-        accelerator: none
-        depthai:                 # DepthAI-specific config
-          pipeline: MobileNetSSD
-          images: frames         # Image queue name
-          jpegs: jpegs          # JPEG queue name
-          neural_nets:
-            Q1: nn              # Neural network output queue
-        sentinel_tasks:
-          person: GetFaces2
-```
-
-### Example 3: Multi-Camera Setup
-
-```yaml
-# host_vars/multinode.yaml
-imagenode_config:
-  node_name: multinode0
-  cameras:
-    P1:
-      viewname: Indoor
-      resolution: [1920, 1080]
-      framerate: 15
-      detector:
-        detectobjects: mobilenetssd
-        accelerator: coral       # Using Coral TPU
-        sentinel_tasks:
-          person: GetFaces2
-    O1:
-      viewname: Outdoor
-      resolution: [640, 360]
-      framerate: 30
-      detector:
-        encoder: oak
-        detectobjects: none
-        depthai:
+        detectobjects: none    # Spyglass detector (mobilenetssd | none)
+        accelerator: none      # none | ncs2 | coral
+        depthai:               # OAK-only: DepthAI pipeline config
           pipeline: MobileNetSSD
           images: frames
           jpegs: jpegs
           neural_nets:
             Q1: nn
         sentinel_tasks:
-          person: GetFaces2
-          vehicle: VehicleDetect
+          person: GetFaces2    # Task triggered on person detection
+```
+
+Datasink mapping is auto-resolved from the `sentinelcam_outposts` registry in `group_vars/all/site.yaml`.
+
+### Hardware Accelerator
+
+Set `imagenode_accelerator_type` in host_vars: `coral`, `ncs2`, or `none`. Coral EdgeTPU packages
+install automatically when `imagenode_install_coral_packages: true`.
+
+### Models
+
+Models deploy from the centralized registry on the primary datasink. Default: `mobilenet_ssd`.
+Override per-node with `outpost_models` list in host_vars.
+
+```bash
+ansible-playbook playbooks/deploy-models.yaml --limit=<hostname>
 ```
 
 ## Deployment
 
-### Initial Setup (New Outpost)
-
 ```bash
-# 1. Add node to inventory/production.yaml
-# 2. Create host_vars/<hostname>.yaml with camera config
-# 3. Deploy
+# Full setup (new outpost)
 ansible-playbook playbooks/deploy-outpost.yaml --limit <hostname>
-```
 
-### Code Updates (Most Common)
-
-```bash
-# From development workstation
-python devops/scripts/sync/deploy.py imagenode
-
-# From ramrod control node
+# Code update
 ansible-playbook playbooks/deploy-outpost.yaml --tags deploy
-```
 
-### Configuration Updates
-
-```bash
-# Edit host_vars/<hostname>.yaml
-# Deploy config only
+# Config change
 ansible-playbook playbooks/deploy-outpost.yaml --tags config --limit <hostname>
-```
-
-## File Structure
-
-```
-/home/<sentinelcam_user>/
-├── imagenode.yaml         # application configuration
-└── imagenode/                
-    ├── imagenode/         # Python package
-    │   ├── __init__.py
-    │   ├── imagenode.py   # Main application
-    │   ├── tools/         # imagenode libraries
-    │   └── sentinelcam/   # outpost, spyglass, and sentinelcam common libraries
-    └── models/            # deployed model files (versioned)
-        └── mobilenet_ssd/
-            └── 2020-12-06/
-
-Config file: /home/<sentinelcam_user>/imagenode.yaml
-Service: /etc/systemd/system/imagenode.service
-```
-
-## Model Deployment
-
-### Automated Model Registry
-
-**Status**: Fully automated via centralized model registry
-
-Models are deployed from the model registry on `primary_datasink` to outpost nodes:
-
-**Registry Structure**:
-```
-/home/ops/sentinelcam/model_registry/
-├── mobilenet_ssd/
-│   └── 2020-12-06/          # Version timestamp
-│       ├── MobileNetSSD_deploy.prototxt
-│       ├── MobileNetSSD_deploy.caffemodel
-│       └── manifest.yaml
-├── face_detection/
-│   └── 2025-02-25/
-└── vehicle_detection/
-    └── YYYY-MM-DD/
-```
-
-**Deployment**:
-```bash
-# Deploy all models to all outposts
-ansible-playbook playbooks/deploy-models.yaml
-
-# Deploy specific model
-ansible-playbook playbooks/deploy-models.yaml --tags=mobilenet_ssd
-
-# Deploy to specific host
-ansible-playbook playbooks/deploy-models.yaml --limit=east
-```
-
-**Filtering Models per Node**:
-
-By default, only `mobilenet_ssd` is deployed to outposts. Override in `host_vars/<hostname>.yaml`:
-
-```yaml
-# Deploy additional models to specific node
-outpost_models:
-  - mobilenet_ssd
-  - face_detection
-```
-
-**Version Management**:
-
-Model versions are defined in `inventory/group_vars/all/model_registry.yaml`:
-```yaml
-sentinelcam_models:
-  mobilenet_ssd:
-    current_version: "2020-12-06"
-    previous_version: "2020-03-25"
-```
-
-See `devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md` for complete documentation.
-
-## Hardware Acceleration
-
-### Intel Neural Compute Stick 2 (NCS2)
-
-Requires OpenVINO toolkit:
-```yaml
-accelerator: ncs2
-```
-
-ImageNode will use `imagenode_ncs2.sh` launcher script which sources OpenVINO environment before starting Python.
-
-### Google Coral Edge TPU
-
-**TODO**: Not yet implemented
-```yaml
-accelerator: coral
-```
-
-## Troubleshooting
-
-### Camera Not Detected
-
-```bash
-# PiCamera
-ssh <outpost> 'vcgencmd get_camera'
-# Should show: supported=1 detected=1
-
-# DepthAI
-ssh <outpost> 'python3 -c "import depthai; print(depthai.Device.getAllAvailableDevices())"'
-```
-
-### Service Fails to Start
-
-```bash
-# Check logs
-ssh <outpost> 'sudo journalctl -u imagenode -n 50'
-
-# Common issues:
-# - Camera permissions: Add user to video group
-# - Missing models: Check outpost/mobilenet_ssd/ directory
-# - Hub unreachable: Verify network connectivity to datasink
-```
-
-### Model Files Missing
-
-```bash
-# Check if models exist
-ssh <outpost> 'ls -la ~/imagenode/models/mobilenet_ssd/'
-
-# Verify model version deployed
-ssh <outpost> 'ls -la ~/imagenode/models/mobilenet_ssd/2020-12-06/'
-
-# Redeploy models if missing
-ansible-playbook playbooks/deploy-models.yaml --limit=<outpost>
-```
-
-### Images Not Reaching Hub
-
-```bash
-# Check ImageHub is listening
-ssh data1 'sudo netstat -tlnp | grep 5555'
-
-# Check ImageNode can connect
-ssh <outpost> 'nc -zv data1 5555'
-
-# View ImageNode logs
-ssh <outpost> 'sudo journalctl -u imagenode -f'
 ```
 
 ## Tags
 
-- `deploy` - Deploy code only (fast)
-- `config` - Deploy configuration files
-- `service` - Manage systemd service
-- `status` - Check service status
-- `health` - Run health checks
+| Tag | Scope |
+|-----|-------|
+| `deploy` | Application code sync |
+| `config` | Generate and deploy imagenode.yaml |
+| `service` | Systemd unit management |
+| `coral` | Coral EdgeTPU package provisioning |
 
-## References
+## File Structure (on target)
 
-- [Baseline Documentation](../../../../imagenode/README.rst)
-- [Modifications for SentinelCam](../../../../docs/YingYangRanch_Changes.rst)
+```
+/home/<sentinelcam_user>/
+├── imagenode.yaml              # Application configuration  
+└── imagenode/
+    ├── imagenode/              # Python package
+    │   ├── imagenode.py
+    │   ├── tools/
+    │   └── sentinelcam/        # Common libraries
+    └── models/                 # Deployed model files (versioned)
+        └── mobilenet_ssd/
+            └── YYYY-MM-DD/
+```
+
+## See Also
+
+- [Outpost Registry Pattern](../../../docs/configuration/OUTPOST_REGISTRY_PATTERN.md)
+- [Model Registry](../../../docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md)
+- [Upstream imagenode](../../../../imagenode/README.rst)

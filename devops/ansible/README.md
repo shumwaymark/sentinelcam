@@ -22,13 +22,16 @@ Each role has detailed documentation in its directory:
 
 | Component | Role README | Purpose |
 |-----------|-------------|---------|
-| imagemode | [roles/imagenode/README.md](../ansible/roles/imagenode/README.md) | Outpost cameras and edge inference |
-| camwatcher | [roles/camwatcher/README.md](../ansible/roles/camwatcher/README.md) | Outpost subscriber (datasink) |
-| datapump | [roles/datapump/README.md](../ansible/roles/datapump/README.md) | Data retrieval (datasink) |
-| imagehub | [roles/imagehub/README.md](../ansible/roles/imagehub/README.md) | Ad hoc image collection (datasink) |
-| sentinel | [roles/sentinel/README.md](../ansible/roles/sentinel/README.md) | AI/ML processing and inference |
-| watchtower | [roles/watchtower/README.md](../ansible/roles/watchtower/README.md) | Wall console, outpost and event viewer |
-| bastion | [roles/bastion/README.md](../ansible/roles/bastion/README.md) | Network gateway/VPN |
+| sentinelcam_base | [roles/sentinelcam_base/](roles/sentinelcam_base/README.md) | Foundation provisioning (all nodes) |
+| imagenode | [roles/imagenode/](roles/imagenode/README.md) | Outpost cameras and edge inference |
+| camwatcher | [roles/camwatcher/](roles/camwatcher/README.md) | Outpost subscriber (datasink) |
+| datapump | [roles/datapump/](roles/datapump/README.md) | Data retrieval API (datasink) |
+| imagehub | [roles/imagehub/](roles/imagehub/README.md) | Image collection (datasink) |
+| sentinel | [roles/sentinel/](roles/sentinel/README.md) | AI/ML processing and inference |
+| watchtower | [roles/watchtower/](roles/watchtower/README.md) | Wall console, outpost and event viewer |
+| deepthink | [roles/deepthink/](roles/deepthink/README.md) | ML training node (Jetson Nano) |
+| bastion | [roles/bastion/](roles/bastion/README.md) | Network gateway/VPN (infrastructure) |
+| infrastructure | [roles/infrastructure/](roles/infrastructure/README.md) | DNS management (infrastructure) |
 
 ## Deployment Patterns
 

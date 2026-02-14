@@ -1,202 +1,87 @@
 # DataPump Role
 
-Deploys and manages **datapump** service on datasink nodes.
+Deploys and manages **datapump** on datasink nodes.
 
 ## Purpose
 
-**datapump** is the primary data retrieval and storage management engine for the SentinelCam system. The `DataFeed` 
-library provides the application programming interface for accessing data and event storage for the SentinelCam 
-system. 
-
-## Supported Nodes
-
-- **datasinks**: data1 (any node in `datasinks` group)
+DataPump is the data retrieval and storage management service for SentinelCam. The `DataFeed` library
+provides the API that sentinel, watchtower, and external tools use to access event data, images, and
+tracking results. Also manages face data deployment (facelist CSV from the model registry) and automated
+model registry cleanup.
 
 ## Dependencies
 
-- **sentinelcam_base**: Must run first to provision Python environment and system packages
-- **camwatcher**: Sibling service responsible for data capture from outpost nodes and sentinel analysis tasks
-
-## Variables
-
-### Core Configuration (group_vars/all/sentinelcam_ports.yaml)
-
-```yaml
-sentinelcam_ports:
-  datapump_control: 5556           # TCP control port
-```
-
-### Service Configuration (group_vars/datasinks.yaml)
-
-```yaml
-datapump_service: datapump
-datapump_install_path: /home/ops/camwatcher/datapump
-datapump_config_path: /home/ops/datapump.yaml
-```
-
-### Optional Overrides
-
-```yaml
-datapump_service: datapump         # Service name
-datapump_user: "{{ sentinelcam_user }}"  # Service user (pi or ops)
-datapump_control_port: 5556        # TCP control port
-```
-
-## Deployment
-
-### Initial Setup
-
-```bash
-# Deploy full service (includes config, systemd, code)
-ansible-playbook playbooks/deploy-datapump.yaml
-```
-
-### Code Updates (Most Common)
-
-```bash
-# From development workstation
-python devops/scripts/sync/deploy.py datapump
-
-# From ramrod control node
-ansible-playbook playbooks/deploy-datapump.yaml --tags deploy
-```
-
-### Configuration Updates
-
-```bash
-# Edit config, then deploy
-ansible-playbook playbooks/deploy-datapump.yaml --tags config
-```
-
-## File Structure
-
-```
-/home/<sentinelcam_user>/
-├── camwatcher.yaml        # application configuration
-├── datapump.yaml          # application configuration
-└── camwatcher/       
-    ├── camwatcher/        # Python package
-    │   ├── camwatcher.py  # Main application 
-    │   └── sentinelcam/   # common libraries
-    └── datapump/          # Python package
-        ├── datapump.py    # Main application 
-        └── sentinelcam/   # common libraries
-
-Config file: /home/<sentinelcam_user>/datapump.yaml
-Service: /etc/systemd/system/datapump.service
-```
-
-Note: DataPump is deployed under `camwatcher/` directory as a sibling to CamWatcher.
+- **sentinelcam_base** — user, venv, directory setup
+- **camwatcher** — sibling service; data capture source
 
 ## Configuration
 
-### Example datapump.yaml
+Service-level variables are defined in `group_vars/datasinks.yaml`. The application config template
+generates `datapump.yaml` from role defaults.
 
-```yaml
-%YAML 1.0
----
-# Settings file datapump.yaml 
-control_port: 5556
-camwatcher: tcp://127.0.0.1:5566
+| Variable | Source | Purpose |
+|----------|--------|---------|
+| `datapump_service` | `group_vars/datasinks.yaml` | Service name |
+| `datapump_install_path` | `group_vars/datasinks.yaml` | Install directory |
+| `faces_data_file` | `defaults/main.yaml` | Versioned facelist CSV path |
+| `debug_mode` | host_vars (optional) | Enable debug logging |
 
-# Data storage locations  
-imagefolder: /home/ops/sentinelcam/images
-datafolder:  /home/ops/sentinelcam/camwatcher
+### Face Data
 
-# Current FaceList CSV file (deployed from model registry)
-facefile: /home/ops/sentinelcam/faces/facebeta6.csv
-
-# Logging configuration
-logconfig:
-    version: 1
-    formatters:
-        default:
-            format: '%(asctime)s %(levelname)s: %(message)s'
-    handlers:
-        file:
-            class: logging.handlers.RotatingFileHandler
-            filename: /home/ops/sentinelcam/logs/datapump.log
-            formatter: default
-            maxBytes: 524288
-            backupCount: 5
-            level: WARN
-    root:
-        handlers: [file]
-        level: WARN
-```
-
-## Data Management
-
-### Storage Structure
-
-```
-  /home/<sentinelcam_user>/
-  └── sentinelcam/             # SSD mount point
-      ├── camwatcher/          # Collected CSV data from **camwatcher** and **sentinel**
-      ├── images/              # Collected JPEG data from **camwatcher**
-      ├── faces/               # FaceList CSV (deployed from model registry)
-      └── model_registry/      # Centralized model storage (datasinks only)
-          ├── mobilenet_ssd/
-          ├── face_detection/
-          └── face_recognition/
-```
+The role deploys the current facelist CSV from the model registry to the datasink. Version is
+controlled via `group_vars/all/model_registry.yaml`.
 
 ### Model Registry Cleanup
 
-Datapump role includes automated model cleanup via systemd timer:
+A systemd timer runs weekly (Sunday 3 AM) to prune old model versions. Retention: current + previous
++ 5 most recent.
 
-**Cleanup Schedule**: Weekly (Sunday 3:00 AM)
-**Retention Policy**: Current + Previous + 5 most recent versions
-
-```bash
-# Check cleanup timer status
-ssh data1 'sudo systemctl status model-cleanup.timer'
-
-# View cleanup logs
-ssh data1 'sudo journalctl -u model-cleanup.service'
-
-# Manual cleanup
-ssh data1 'sudo /home/ops/sentinelcam/devops/scripts/cleanup_model_registry.sh'
-```
-
-See `devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md` for details.
-
-## Integration
-
-### With CamWatcher
-
-Receives event notifications from CamWatcher via TCP control port 5556.
-
-### With Sentinel
-
-Provides face images and event data to Sentinel for AI processing via shared filesystem.
-
-## Troubleshooting
-
-### Service Won't Start
+## Deployment
 
 ```bash
-# Check logs
-ssh data1 'sudo journalctl -u datapump -n 50'
+# Full setup
+ansible-playbook playbooks/deploy-datapump.yaml
 
-# Potential issues:
-# - Port already in use: Check if another service is using the control port
-# - Permission denied: Check directory permissions for data storage
-# - Disk space exhaustion: Execute clean-up protocols, possibly add capacity
+# Code update
+ansible-playbook playbooks/deploy-datapump.yaml --tags deploy
+
+# Config change
+ansible-playbook playbooks/deploy-datapump.yaml --tags config
+
+# Face data update (after model registry change)
+ansible-playbook playbooks/deploy-datapump.yaml --tags faces
 ```
 
-### Events Not Being Stored
+## Tags
 
-```bash
-# Check if receiving events
-ssh data1 'sudo journalctl -u datapump -f | grep "Event"'
+| Tag | Scope |
+|-----|-------|
+| `deploy` | Application code sync |
+| `config` | Generate and deploy datapump.yaml + systemd unit |
+| `service` | Systemd service management |
+| `faces` | Deploy facelist CSV from model registry |
+| `model_registry` / `cleanup` | Model registry cleanup timer |
+| `status` | Check service state |
 
-# Verify CamWatcher is sending
-ssh data1 'sudo journalctl -u camwatcher -f'
+## File Structure (on target)
 
-# Check storage usage
-ssh data1 'df -h /home/ops/sentinelcam/'
 ```
+/home/<sentinelcam_user>/
+├── datapump.yaml              # Application configuration
+├── camwatcher/
+│   └── datapump/              # Python package (datapump.py, sentinelcam/)
+└── sentinelcam/
+    ├── camwatcher/            # CSV event data
+    ├── images/                # JPEG storage
+    ├── faces/                 # Facelist CSV (deployed from registry)
+    └── model_registry/        # Centralized model storage (datasinks only)
+```
+
+## See Also
+
+- [CamWatcher role](../camwatcher/README.md) — sibling service, shared deployment
+- [Model Registry](../../../docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md)
+- [Sentinel role](../sentinel/README.md) — primary DataFeed consumer
 
 ## Tags
 
