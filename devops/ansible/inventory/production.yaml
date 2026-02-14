@@ -2,49 +2,41 @@
 all:
   children:
     sentinelcam_nodes:
-      children:
-        modern_nodes:
-          hosts:
-            east:
-              ansible_host: 192.168.10.21
-              node_name: east
-              node_role: outpost
-              interface: eth0
-            alpha5:
-              ansible_host: 192.168.10.22
-              node_name: alpha5
-              node_role: outpost
-              interface: eth0
-            data1:
-              ansible_host: 192.168.10.50
-              node_name: data1
-              node_role: datasink
-              interface: eth0
-            sentinel:
-              ansible_host: 192.168.10.60
-              node_name: sentinel
-              node_role: sentinel
-              interface: eth0
-            wall1:
-              ansible_host: 192.168.10.70
-              node_name: wall1
-              node_role: watchtower
-              interface: eth0
-          vars:
-            ansible_user: ops
-            network_manager: systemd-networkd
-            ansible_python_interpreter: /usr/bin/python3
-
-        legacy_nodes:
-          hosts:
-            lab1:
-              ansible_host: 192.168.10.20
-              node_name: lab1
-              node_role: outpost
-              interface: eth0
-          vars:
-            ansible_user: pi
-            network_manager: dhcpcd
+      hosts:
+        lab1:
+          ansible_host: 192.168.10.20
+          node_name: lab1
+          node_role: outpost
+          interface: eth0
+        east:
+          ansible_host: 192.168.10.21
+          node_name: east
+          node_role: outpost
+          interface: eth0
+        alpha5:
+          ansible_host: 192.168.10.22
+          node_name: alpha5
+          node_role: outpost
+          interface: eth0
+        data1:
+          ansible_host: 192.168.10.50
+          node_name: data1
+          node_role: datasink
+          interface: eth0
+        sentinel:
+          ansible_host: 192.168.10.60
+          node_name: sentinel
+          node_role: sentinel
+          interface: eth0
+        wall1:
+          ansible_host: 192.168.10.70
+          node_name: wall1
+          node_role: watchtower
+          interface: eth0
+      vars:
+        ansible_user: ops
+        network_manager: systemd-networkd
+        ansible_python_interpreter: /usr/bin/python3
 
     infrastructure:
       hosts:

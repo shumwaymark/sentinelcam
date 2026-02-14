@@ -1,4 +1,4 @@
-# Node-specific configuration for lab1 outpost (legacy node)
+# Node-specific configuration for lab1 outpost
 ---
 # ImageNode configuration using unified template
 imagenode_config:

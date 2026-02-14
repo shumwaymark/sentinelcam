@@ -6,31 +6,29 @@
 all:
   children:
     sentinelcam_nodes:
-      children:
-        modern_nodes:
-          hosts:
-            north:
-              ansible_host: 192.168.10.23  # Standard internal network
-              ansible_user: ops
-              node_name: north
-              node_role: outpost
-              interface: eth0
-            south:
-              ansible_host: 192.168.10.24  # Standard internal network
-              ansible_user: ops
-              node_name: south
-              node_role: outpost
-              interface: eth0
-            datasink2:
-              ansible_host: 192.168.10.51  # Standard internal network
-              ansible_user: ops
-              node_name: datasink2
-              node_role: datasink
-              interface: eth0
-          vars:
-            network_manager: systemd-networkd
-            ansible_python_interpreter: /usr/bin/python3
-            
+      hosts:
+        north:
+          ansible_host: 192.168.10.23  # Standard internal network
+          ansible_user: ops
+          node_name: north
+          node_role: outpost
+          interface: eth0
+        south:
+          ansible_host: 192.168.10.24  # Standard internal network
+          ansible_user: ops
+          node_name: south
+          node_role: outpost
+          interface: eth0
+        datasink2:
+          ansible_host: 192.168.10.51  # Standard internal network
+          ansible_user: ops
+          node_name: datasink2
+          node_role: datasink
+          interface: eth0
+      vars:
+        network_manager: systemd-networkd
+        ansible_python_interpreter: /usr/bin/python3
+
     infrastructure:
       hosts:
         remote-gate:
@@ -47,7 +45,7 @@ all:
         network_manager: NetworkManager
         ansible_become_method: sudo
         ansible_become_timeout: 30
-        
+
     # Functional groupings
     outposts:
       hosts:
@@ -56,7 +54,7 @@ all:
       vars:
         services:
           - imagenode
-          
+
     datasinks:
       hosts:
         datasink2:
@@ -79,7 +77,7 @@ all:
     dns_servers:
       - 192.168.10.254  # remote-gate internal interface
       - 8.8.8.8
-    
+
     # External Network Configuration (SITE-SPECIFIC)
     # This is what DIFFERS between sites - customize for local upstream network
     bastion_external_network:
@@ -87,28 +85,28 @@ all:
       gateway: "10.0.1.1"            # Example: Different ISP/business router
       dns: ["8.8.8.8", "8.8.4.4"]   # Can use different DNS
       zone: "external"               # Can use different firewall zone name
-    
+
     # VPN Configuration (SITE-SPECIFIC)
     # IMPORTANT: Each site must have a UNIQUE VPN IP to enable multi-site mesh
     bastion_vpn_ipv4: "10.0.0.4/24"      # Site 2 bastion (different from Site 1's .3)
     bastion_vpn_ipv6: "fc00:23:5::4/64"  # Site 2 bastion IPv6 (different from Site 1's ::3)
-      
+
     # Site-specific configuration
     sentinelcam_site_name: "remote"
     sentinelcam_site_location: "Remote Location"
     sentinelcam_bastion_hostname: "remote-gate"
-    
+
     # Site-specific interface names (adjust based on hardware)
     bastion_interface_external: "eno1"  # Example: built-in Ethernet
     bastion_interface_internal: "eth1"  # Example: different from Chandler site
-    
+
     # Health check hosts specific to this site
     sentinelcam_health_check_hosts:
       internal_network: "datasink2"
       dns_test: "datasink2"
-    
+
     sentinelcam_vpn_gateway: "10.0.0.1"
-    
+
     # SSH configuration
     ansible_ssh_pipelining: true
     ansible_ssh_timeout: 30

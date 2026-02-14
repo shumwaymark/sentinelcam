@@ -1,6 +1,6 @@
 ---
 # Site-specific configuration for SentinelCam deployment
-# 
+#
 # This file is loaded automatically by Ansible from group_vars/all/
 # Variables defined here apply to all hosts in the inventory.
 
@@ -44,36 +44,39 @@ bastion_interface_internal: enp1s0u1u4    # Internal/LAN interface (can be set f
 #   - camwatcher.yaml (datasink subscriptions to outposts)
 #   - watchtower.yaml (watchtower connections to outposts + datasink mappings)
 #
-# Each outpost MUST exist in the inventory with matching hostname.
+# Each outpost node MUST exist in the inventory with a matching hostname.
 # The hostname is used to resolve ansible_host for connection URLs.
 #
 # Port assignments use sentinelcam_ports.imagenode_publisher and imagenode_logging
 # defined in group_vars/all/sentinelcam_ports.yaml
 #
 # Architecture notes:
-#   - One outpost can have multiple cameras (P1, P2, etc.)
+#   - One outpost node can have multiple cameras (P1, P2, etc.)
 #   - Each camera is assigned a viewname (PiCamera, Front, etc.)
 #   - Each view publishes on standard imagenode ports (unless overridden)
-#   - One outpost is processed by exactly ONE datasink (outpost -> datasink is many-to-one)
+#   - One outpost node is processed by exactly ONE datasink (outpost -> datasink is many-to-one)
 #
 sentinelcam_outposts:
-  lab1:
+  outpost:                    # Outpost node name
+    hostname: lab1            # Inventory hostname of this outpost
     datasink: data1           # Which datasink processes this outpost's data
     cameras:
       P1:                     # Camera identifier (matches imagenode.yaml cameras: key)
         viewname: PiCamera    # View name (matches imagenode.yaml viewname:)
         description: "Lab Workstation Desktop"
         resolution: [640, 480]
-  
+
   east:
+    hostname: east
     datasink: data1
     cameras:
       P1:
         viewname: Front
         description: "Front Driveway"
         resolution: [640, 360]
-  
+
   alpha5:
+    hostname: alpha5
     datasink: data1
     cameras:
       P1:

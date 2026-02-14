@@ -1,6 +1,6 @@
 ---
 # Datasinks group variables
-# 
+#
 # Note: Common variables (users, paths, network buffers) are defined in:
 #   - group_vars/all/sentinelcam_standards.yaml
 # This file contains datasink-specific overrides and service configurations.
@@ -23,8 +23,8 @@ imagehub_config_file: imagehub.yaml
 imagehub_install_path: /home/{{ sentinelcam_user }}/imagehub
 imagehub_config_path: /home/{{ sentinelcam_user }}/imagehub.yaml
 
-# Face detection data (references sentinelcam_directories from standards)
-faces_data_file: "{{ sentinelcam_directories.faces }}/facebeta6.csv"
+# Current FaceList CSV file, defines the population of locked events
+faces_data_file: "{{ sentinelcam_directories.faces }}/facelist_gamma4.csv"
 
 # Hardware-specific settings for Pi 5 + NVMe SSD
 data_device: /dev/nvme0n1

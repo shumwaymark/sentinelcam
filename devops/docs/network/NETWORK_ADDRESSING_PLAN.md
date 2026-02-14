@@ -13,7 +13,7 @@ This document records the **actual current IP assignments** for the SentinelCam 
 |------------|----------|---------|--------|
 | 192.168.10.1 | - | Reserved for future router/switch management | Reserved |
 | 192.168.10.2-9 | - | Reserved for network infrastructure | Reserved |
-| 192.168.10.10 | buzz | Ansible control / jump server | ✅ Active |
+| 192.168.10.10 | buzz | Ramrod node: Ansible control / jump server | ✅ Active |
 
 ## SentinelCam Application Tier
 
@@ -37,14 +37,14 @@ This document records the **actual current IP assignments** for the SentinelCam 
 
 | IP Address | Hostname | User | Role | Status |
 |------------|----------|------|------|--------|
-| 192.168.10.60 | sentinel | ops (modern) | AI inference (NCS2) | ✅ Active |
+| 192.168.10.60 | sentinel | ops (modern) | AI inference (Google Coral) | ✅ Active |
 | 192.168.10.61-69 | - | - | - | Available |
 
 ### Wall Consoles (Watchtowers)
 
 | IP Address | Hostname | User | Display | Status |
 |------------|----------|------|---------|--------|
-| 192.168.10.70 | wall1 | pi (legacy) | 7" touchscreen | ✅ Active |
+| 192.168.10.70 | wall1 | ops (modern) | 7" touchscreen | ✅ Active |
 | 192.168.10.71-79 | - | - | - | Available |
 
 ### Reserved
