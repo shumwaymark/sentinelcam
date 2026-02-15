@@ -1,5 +1,6 @@
 # Node-specific configuration for lab1 outpost
 ---
+
 # ImageNode configuration using unified template
 imagenode_config:
   node_name: outpost
@@ -15,5 +16,4 @@ imagenode_config:
         accelerator: none
         sentinel_tasks:
           person: GetFaces2
-
-imagenode_venv_path: "{{ sentinelcam_venv_py3cv4 }}"
+          default: MobileNetSSD_allFrames
