@@ -8,7 +8,7 @@
     sentinelcam_venv_opencv: "{{ sentinelcam_venv_opencv }}"
   tags: always
 
-- name: "Install system dependencies for SentinelCam (modern nodes only)"
+- name: "Install system dependencies for SentinelCam"
   ansible.builtin.package:
     name:
       - python3-picamera2  # Pi Camera support for --system-site-packages (Bookworm+)
@@ -16,7 +16,6 @@
     state: present
   when:
     - skip_base_provisioning | default(false) == false
-    - inventory_hostname in groups['modern_nodes']
   tags: system_deps
 
 - name: "Create SentinelCam Python virtual environment with system site packages"
@@ -26,7 +25,6 @@
   become_user: "{{ sentinelcam_user }}"
   when:
     - skip_base_provisioning | default(false) == false
-    - inventory_hostname in groups['modern_nodes']
   tags: venv
 
 - name: "Deploy requirements.txt from role files to temporary location"

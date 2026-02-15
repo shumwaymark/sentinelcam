@@ -18,8 +18,6 @@ sentinel_config_path: "/home/{{ sentinelcam_user }}/sentinel.yaml"
 sentinel_accelerator_type: coral
 
 # Virtual environment path
-# For Coral/CPU: use standard SentinelCam venv
-# For NCS2 (legacy): use OpenVINO venv
 sentinel_venv_path: "{{ sentinelcam_venv_opencv }}"
 
 # OpenVINO environment (LEGACY - only for nodes with an NCS2 accelerator)
