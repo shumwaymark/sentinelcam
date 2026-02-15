@@ -611,6 +611,7 @@ Additional documentation
 - `Version history and Changelog <HISTORY.md>`_
 - `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
 - `Facial recognition, model training, and machine learning pipeline <docs/FACIAL_RECON_LEARNING.md>`_
+- `Data management policies and retention strategy <docs/DATA_MANAGEMENT.md>`_
 - `Ansible playbooks for provisioning, application deployment, and configuration <devops/ansible/README.md>`_
 - `Automated edge deployment and CI/CD pipeline <devops/README.rst>`_
 - `Development blog <https://blog.swanriver.dev>`_

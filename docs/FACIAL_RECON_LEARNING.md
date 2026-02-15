@@ -1,510 +1,224 @@
-# Facial Recognition Training and Machine Learning Pipeline
+# Facial Recognition and Machine Learning Pipeline
 
-## Overview
+## Introduction
 
-The prototype **ML Training Pipeline** automates the training, validation, and deployment of machine
-learning models for facial recognition functionality across the SentinelCam distributed system. Model 
-training runs on a **Jetson Nano** (embedded ARM64 device) to maintain the philosophy of running 
-exclusively on low-power embedded infrastructure.
+This is the first machine learning pipeline built for SentinelCam. It implements facial
+recognition through an incremental cycle of data collection, model training, and deployment
+— all running on embedded hardware. The design is meant to be foundational: a working pattern
+for building and refining recognition models that can be extended to other domains like vehicle
+identification.
 
-Once proven, this becomes the foundation for future model development and the scaffolding for bespoke 
-model training and retraining. For example, vehicle recognition. 
+The pipeline draws from data that SentinelCam collects naturally during normal operation. There
+is no formal enrollment process. Individuals are learned through ongoing observation, with human
+feedback guiding the model through a semi-supervised curation loop.
 
-## Face Recognition Pipeline
+## Two task chains
 
-### Data Collection
+The sentinel task system uses configurable chaining to build multi-step analysis pipelines.
+Each task produces a typed tracking result set that becomes the input to the next task in
+the chain. This mechanism created two parallel paths to facial recognition, driven by
+differences in what the Outpost hardware can deliver.
 
+### The original path
 
-## Sentinel Task Chain
+With a standard camera (PiCamera, USB webcam), the Outpost runs a SpyGlass in a parallel
+process for real-time object detection. The SpyGlass only processes a subset of frames —
+it takes one image at a time, runs inference, and waits for results before accepting the
+next. The main pipeline keeps publishing at 30 FPS regardless. The SpyGlass produces the
+`trk` tracking set: a record of what it found, but not a complete analysis of every frame.
 
+At end of event, the Outpost submits `MobileNetSSD_allFrames` to the sentinel. This task
+pulls the full image set from the data sink and runs MobileNet SSD detection against every
+frame, producing the `obj` result set — a complete object detection record for the event.
 
-### Model Training Data Flow
+The chain continues:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ 1. Data Collection (Continuous)                              │
-│    Outposts → Datasink → Sentinel                            │
-│    Person detections trigger GetFaces → FaceRecon tasks      │
-└──────────────────────────────────────────────────────────────┘
-                            ↓
-┌──────────────────────────────────────────────────────────────┐
-│ 2. Curation (Manual/Semi-Automated)                          │
-│    FaceSweep task runs on Sentinel: updates facelist.csv     │
-│    facelist_gamma3.ipynb: Analyze recognition results        │
-│    - Filter by confidence (proba > 0.99)                     │
-│    - Filter by distance (< 0.65)                             │
-│    - Generate montages for review                            │
-│    - Flag usable images                                      │
-└──────────────────────────────────────────────────────────────┘
-                            ↓
-┌──────────────────────────────────────────────────────────────┐
-│ 3. Embedding Generation (Sentinel Task)                      │
-│    FaceDataUpdate task                                       │
-│    - Reads curated facelist.csv                              │
-│    - Generates OpenFace embeddings                           │
-│    - Outputs: facedata.hdf5                                  │
-└──────────────────────────────────────────────────────────────┘
-                            ↓
-┌──────────────────────────────────────────────────────────────┐
-│ 4. Model Training (DeepThink - Jetson Nano)                  │
-│    facemodel_build_beta.ipynb executed via Papermill         │
-│    - Load facedata.hdf5                                      │
-│    - GridSearchCV for SVM hyperparameters                    │
-│    - Train classifier on embeddings                          │
-│    - Generate per-person baseline thresholds                 │
-│    - Outputs:                                                │
-│      • facemodel.pickle (SVM classifier)                     │
-│      • baselines.hdf5 (distance thresholds)                  │
-└──────────────────────────────────────────────────────────────┘
-                            ↓
-┌──────────────────────────────────────────────────────────────┐
-│ 5. Model Deployment (Automated via Script)                   │
-│    deploy_model.sh facemodel_gamma3                          │
-│    - SCP model files to Sentinels                            │
-│    - SCP facelist.csv to Datasinks                           │
-│    - Restart services to load new model                      │
-└──────────────────────────────────────────────────────────────┘
+MobileNetSSD_allFrames (obj) → GetFaces (fd1) → FaceRecon (fr1)
 ```
 
-### Key Files and Versioning
+`GetFaces` reads the `obj` results, filters for `person` detections, and runs face detection
+on those frames. It does not search every frame — it uses the `obj` timestamps to skip directly
+to frames where people were found. This produces the `fd1` tracking set: one record per detected
+face with bounding rectangle coordinates.
 
-| File | Purpose | Location | Generated By |
-|------|---------|----------|--------------|
-| `facelist_<version>.csv` | Current curated training data selections | Sentinel | Manual curation |
-| `facedata_<version>.hdf5` | OpenFace embeddings of selected images | Sentinel | FaceDataUpdate task |
-| `facemodel_<version>.pickle` | Trained SVM classifier | DeepEnd | Papermill execution |
-| `baselines_<version>.hdf5` | Per-person distance thresholds | DeepEnd | Papermill execution |
-| `<version>.yaml` | Training parameters (input/output filenames) | DeepEnd | Manual creation |
-| `facemodel_build_beta.ipynb` | Template notebook (parameterized) | Repository | Version controlled |
-| `facemodel_<version>.ipynb` | Executed notebook with results | DeepEnd | Papermill output |
+`FaceRecon` takes the `fd1` results, extracts each face region, generates OpenFace embeddings,
+and runs the SVM classifier. Results include identity, confidence probability, distance from
+baseline, and a usability flag. This produces the `fr1` tracking set — the final recognition
+output.
 
-**Version Naming Convention:**
-- Current production: `gamma3` (facemodel_gamma3.pickle, baselines_gamma3.hdf5)
-- Previous versions: beta2, beta, alpha, etc.
-- Version tracks entire pipeline: embeddings → model → baselines
+### The DepthAI path
 
-## Training Notebooks
+An OAK camera with a DepthAI pipeline changes the equation. The on-board VPU runs MobileNet SSD
+on every frame at 30 FPS, producing complete detection results in hardware. The `trk` result set
+from this Outpost already contains full object detection data — there is no gap to fill, no need
+for the `MobileNetSSD_allFrames` batch job.
 
-### facelist_gamma3.ipynb
-
-**Purpose:** Manual curation of face recognition results
-
-**Key Features:**
-- Load face recognition results from datasink
-- Calculate statistics (confidence, distance, margins)
-- Filter candidates: `proba > 0.99`, `usable == 1`, `distance < 0.65`
-- Generate visual montages for review
-- Export updated `facelist.csv` with selection flags
-
-**Inputs:**
-- Raw face detection/recognition data from datasink
-
-**Outputs:**
-- Curated `facelist.csv` with training selection flags
-
-### facemodel_build_beta.ipynb (Template Notebook)
-
-**Purpose:** Parameterized training notebook for SVM classifier
-
-**Key Features:**
-- **Parameterized cells** for version-specific inputs/outputs
-- Load `facedata_<version>.hdf5` (OpenFace embeddings)
-- GridSearchCV for hyperparameter tuning:
-  - Kernel: RBF, Linear
-  - C: Regularization strength (0.001 to 1000)
-  - Gamma: Kernel coefficient (1e-1 to 1e-5)
-- Train best model on full dataset
-- Generate per-person baseline thresholds: `mean - std`
-- Save versioned model and baselines
-
-**Parameter Cell (Replaced by Papermill):**
-```python
-# parameters
-facialembeddings = 'facebeta2.hdf5'      # Overridden by yaml
-modelout         = 'facemodel_beta2.pickle'  # Overridden by yaml
-newbaselines     = 'baselines_beta2.hdf5'    # Overridden by yaml
-```
-
-**Execution via Papermill:**
-```bash
-# On deepend node
-papermill -f gamma3.yaml facemodel_build_beta.ipynb facemodel_gamma3.ipynb
-
-# This:
-# 1. Loads parameters from gamma3.yaml
-# 2. Injects them into parameter cell
-# 3. Executes all cells
-# 4. Saves executed notebook as facemodel_gamma3.ipynb (with results)
-# 5. Outputs facemodel_gamma3.pickle and baselines_gamma3.hdf5
-```
-
-**Version Configuration (gamma3.yaml):**
-```yaml
-facialembeddings: facedata_gamma3.hdf5
-modelout:         facemodel_gamma3.pickle
-newbaselines:     baselines_gamma3.hdf5
-```
-
-## Architecture
-
-### Components
-
-1. **DeepEnd Node** (Jetson Nano)
-   - **Hardware**: NVIDIA Jetson Nano Developer Kit
-   - **OS**: Ubuntu 18.04 (JetPack 4.6)
-   - **Role**: Model training using Jupyter notebooks executed via Papermill
-   - **Network**: 192.168.10.100 (deepend)
-
-2. **Training Data Sources**
-   - **Sentinel**: Provides `facelist.csv` (curated training selections)
-   - **Sentinel**: Generates `facedata.hdf5` (OpenFace embeddings)
-
-3. **Deployment Targets**
-   - **Sentinels**: Receive `facemodel.pickle` and `baselines.hdf5` modeling outputs
-   - **Datasinks**: Receive updated `facelist.csv` (for event retention)
-   - **Outposts**: Receive models as specified (e.g., facial-recognition, vehicle recognition)
-
-## Jetson Nano Configuration
-
-### Why Jetson Nano for Training?
-
-**Challenges:**
-- Jetson Nano is designed for edge **inference**, not model training
-- Limited RAM (4GB), slower CPU than desktop
-- ARM64 architecture has fewer pre-built ML packages
-
-**Advantages:**
-- **Low power consumption** (~10W vs 200W+ for desktop GPU)
-- **Embedded architecture** fits SentinelCam design philosophy
-- **CUDA support** (128 cores, Maxwell architecture)
-- **Always-on** availability for overnight training
-- **Cost effective** (~$100 vs $1000+ for workstation)
-
-**Trade-offs:**
-- Training takes longer (overnight vs minutes)
-- **This is acceptable** - training happens infrequently
-- SVM training on embeddings is computationally light
-- Most work already done by OpenFace (on Sentinel)
-- Can be utilized for model retraining, such as for vehicle and pet recognition
-
-### JetPack Integration
-
-The Jetson Nano comes with **JetPack SDK** pre-installed:
-- CUDA Toolkit
-- cuDNN
-- TensorRT
-- Pre-built TensorFlow, PyTorch (for JetPack 4.6)
-
-**Solution approach:**
-- Use JetPack's system Python for CUDA-enabled packages
-- Create venv for additional packages (scikit-learn, papermill)
-- Let Ansible manage the venv, not JetPack packages
-
-## Deployment Workflow
-
-### 1. Initial Setup
-
-```bash
-# Deploy DeepThink role to Jetson Nano
-cd devops/ansible
-ansible-playbook playbooks/deploy-deepthink.yaml
-
-# Verify installation
-ansible ml_trainers -m command -a "/home/ops/.virtualenvs/ml-training/bin/python --version"
-ansible ml_trainers -m command -a "ls -la /home/ops/deepthink/notebooks"
-```
-
-### 2. Manual Training Workflow
-
-```bash
-# SSH to deepend node
-ssh pyimagesearch@deepend
-
-# Run training script
-/home/pyimagesearch/deepthink/train_face_model.sh
-
-# Monitor output
-tail -f /home/ops/sentinelcam/logs/training.log
-
-# Once complete, deploy model
-/home/ops/deepthink/deploy_model.sh facemodel_gamma3
-
-# Restart services to load new model
-ansible sentinels -a "systemctl restart sentinel"
-```
-
-### 3. Automated Training (Future)
+The Outpost configuration for an OAK camera specifies `GetFaces2` as the sentinel task triggered
+on person detection:
 
 ```yaml
-# Enable in host_vars/deepthink.yaml
-deepthink_training_schedule:
-  face_model:
-    enabled: true    # Run automatically
-    hour: "3"        # 3 AM daily
-    minute: "0"
-    day: "*"
+sentinel_tasks:
+    person: GetFaces2
 ```
 
-## Model Deployment
-
-### deploy_model.sh Script
-
-Generated from Ansible template, handles:
-
-1. **Validation**: Check model files exist
-2. **Sentinel Deployment**:
-   ```bash
-   scp facemodel_gamma3.pickle ops@sentinel:/home/ops/sentinel/models/
-   scp baselines_gamma3.hdf5 ops@sentinel:/home/ops/sentinel/models/
-   ```
-3. **Datasink Deployment**:
-   ```bash
-   scp facelist_gamma3.csv ops@data1:/home/ops/sentinelcam/faces/
-   ```
-4. **Verification**: SSH to targets and verify file presence
-
-### Deployment Targets
-
-Defined in `roles/deepthink/defaults/main.yaml`:
+`GetFaces2` is a task alias — it runs the same `GetFaces` code, but is configured to read from
+`trk` instead of `obj`:
 
 ```yaml
-deepthink_deployment_targets:
-  face_model:
-    sentinels:
-      - sentinel
-    datasinks:
-      - data1
-  vehicle_model:
-    outposts:
-      - east
-      - alpha5
+# sentinel.yaml task_list
+GetFaces2:
+    alias: GetFaces
+    config: /home/ops/sentinel/tasks/GetFaces.yaml
+    chain: FaceRecon
+    class: 1
 ```
 
-**Auto-resolves** hostnames and paths from inventory/standards.
+The chain becomes:
 
-## Version Management
-
-### Current Versioning System
-
-**Version naming:** `alpha`, `beta`, `beta2`, `gamma3`, etc.
-
-**What a version represents:**
-- Complete training pipeline execution
-- Specific set of training data selections (facelist.csv snapshot)
-- Embeddings generated from those selections
-- Trained model + baselines
-
-**Version artifacts:**
 ```
-twister/
-├── gamma3.yaml                    # Parameter file (version definition)
-├── facemodel_build_beta.ipynb     # Template notebook (version controlled)
-├── facemodel_gamma3.ipynb         # Executed notebook (training results/metrics)
-├── facedata_gamma3.hdf5           # Embeddings for this version
-├── facemodel_gamma3.pickle        # Trained model
-└── baselines_gamma3.hdf5          # Per-person thresholds
+GetFaces2 (fd1, from trk input) → FaceRecon (fr1)
 ```
 
-### Tracking "Current" and "Good" Versions
+Same face detection, same recognition — but skipping the batch object detection step entirely.
+The Outpost hardware already did that work.
 
-**Current Challenge:** No formal tracking of which version is:
-- Currently deployed in production
-- Known good (validated, performs well)
-- Experimental (testing new data/parameters)
+### Why this matters
 
-**Manual Process (Current):**
-1. Train new version (e.g., gamma3)
-2. Review executed notebook for metrics
-3. Deploy to sentinel for testing
-4. Observe production performance
-5. Decide to keep or rollback
-6. **Problem:** No formal record of this decision
+The task aliasing and chaining mechanism means the same analysis code adapts to different hardware
+configurations without modification. A standard PiCamera outpost and an OAK camera outpost both
+produce identical `fd1` and `fr1` result sets; only the path to get there differs. This same
+flexibility should be useful as new detection models and hardware accelerators are introduced.
 
-**Proposed Solution Options:**
+The Outpost configuration also supports a `default` sentinel task for non-person detections.
+An OAK camera watching a driveway might trigger `GetFaces2` for people and `VehicleSpeed` for
+everything else — both configured in the same `sentinel_tasks` block.
 
-#### Option 1: Version Metadata File
-```yaml
-# versions.yaml
-production:
-  version: gamma3
-  deployed: 2025-12-01
-  accuracy: 0.97
-  notes: "Improved threshold calculation"
-  
-validated:
-  - version: gamma3
-    accuracy: 0.97
-    validated: 2025-12-01
-  - version: beta2
-    accuracy: 0.95
-    validated: 2025-11-15
-    
-experimental:
-  - version: gamma4
-    status: testing
-    deployed: 2025-12-05
+## The recognition model
+
+SentinelCam uses [OpenFace](https://cmusatyalab.github.io/openface/) embeddings as the
+foundation for facial recognition. The OpenFace deep neural network transforms a face image
+into a 128-dimension unit hypersphere representation. The Euclidean distance between two such
+embeddings reflects how similar the faces are — smaller distance means more likely the same
+person.
+
+An SVM classifier is trained on embeddings generated from curated face images of known
+individuals. At inference time, the `FaceRecon` task uses an ensemble approach:
+
+- **SVM probability** — the classifier's confidence in its prediction
+- **Euclidean distance** — comparison against per-person baseline thresholds
+- **Fallback search** — when confidence is high but distance is large, search for the
+  closest known face as confirmation
+
+This combination addresses the open-set problem inherent to the system's design. SentinelCam
+does not know in advance who will appear. It must distinguish between low confidence on a known
+person and the first appearance of someone new. The distance metric helps make that distinction,
+and the `usable` flag on each face capture marks whether it is a candidate for improving the model.
+
+## Data collection and curation
+
+Data collection is continuous and automatic. Every event with a person detection flows through
+the task chain and produces `fr1` recognition results. The pipeline then feeds a curation cycle
+that selects training data for the next model iteration.
+
+### FaceSweep
+
+The `FaceSweep` sentinel task scans recognition results for a given date, looking for face
+captures worth including in the training set. It filters on several criteria:
+
+- High-confidence recognitions (`proba > 0.99`) — confirmed examples of known individuals
+- Unknown faces with large distance (`distance > 0.99`) — likely new people
+- Borderline cases with small margin — faces near the decision boundary, valuable for
+  refining the model
+
+Each candidate is deduplicated by perceptual hash and added to `facelist.csv` — the master
+registry of face images selected for model training. The facelist tracks the image coordinates,
+face alignment landmarks, recognition statistics, and a status flag used to control which
+selections are included in the next training run.
+
+### Manual review
+
+The facelist curation notebooks provide tools for reviewing FaceSweep candidates. Montages of
+face crops are generated for visual inspection. A human reviewer confirms identities, flags
+incorrect labels, and marks new individuals for enrollment. This review step is what makes
+the pipeline semi-supervised — the system proposes candidates, a person validates them.
+
+### Embedding generation
+
+The `FaceDataUpdate` sentinel task reads the curated facelist, retrieves the original images
+from the data sink, extracts and aligns each face, generates OpenFace embeddings, and writes
+them to `facedata.hdf5`. This HDF5 file is the direct input to model training — a collection
+of 128-dimensional embedding vectors keyed by face reference.
+
+## Model training
+
+Training runs on a dedicated node using Papermill to execute a parameterized Jupyter notebook.
+The notebook loads the embeddings from `facedata.hdf5`, runs GridSearchCV to tune SVM
+hyperparameters (kernel, regularization, gamma), trains the classifier on the full dataset,
+and generates per-person baseline distance thresholds.
+
+Training produces three artifacts:
+
+| File | Purpose |
+|------|---------|
+| `facemodel.pickle` | Trained SVM classifier with label encoder |
+| `baselines.hdf5` | Per-person distance thresholds (mean − std of training embeddings) |
+| `facelist.csv` | The curated selections that produced this model |
+
+Version naming follows a `YYYY-MM-DD` timestamp convention aligned with the model registry.
+Each version represents a complete snapshot: the training data selections, the embeddings,
+and the resulting model.
+
+## Deployment
+
+Trained models deploy through the model registry. The `facemodel.pickle` and `baselines.hdf5`
+files go to sentinels. The `facelist.csv` goes to data sinks (where it is available to the
+DataPump for downstream use). Services restart to load the new model, and the next person
+detection begins producing `fr1` results against the updated classifier.
+
+See [Model Registry](../devops/docs/deployment/MODEL_REGISTRY_IMPLEMENTATION.md) for version
+management and deployment mechanics.
+
+## The learning cycle
+
+The pipeline forms a closed loop:
+
+```
+Outpost events → Sentinel task chain → fr1 recognition results
+       ↑                                        ↓
+  Deploy model                            FaceSweep curation
+       ↑                                        ↓
+  Train classifier ← FaceDataUpdate ← Manual review of facelist
 ```
 
-#### Option 2: Symlinks
-```bash
-# Create symlinks for known-good versions
-ln -s facemodel_gamma3.pickle facemodel_production.pickle
-ln -s baselines_gamma3.hdf5 baselines_production.hdf5
-ln -s facemodel_beta2.pickle facemodel_validated.pickle
-```
+Each iteration of the cycle improves the model. New individuals are enrolled. Existing subjects
+gain more training examples from varied angles and lighting. The recognition thresholds tighten.
+The DailyCleanup retention task adapts in response — events that were once kept for their
+ambiguous recognition results can now be confidently discarded as the model improves.
 
-#### Option 3: Git Tags
-```bash
-# Tag versions in repository
-git tag -a model-gamma3 -m "Production model - 97% accuracy"
-git tag -a model-beta2-validated -m "Validated fallback model"
-```
+## Challenges
 
-### Recommended Workflow
+The constraints of the embedded platform shape what is practical:
 
-1. **Create new version**
-   ```bash
-   # Create parameter file
-   cat > gamma4.yaml << EOF
-   facialembeddings: facedata_gamma4.hdf5
-   modelout:         facemodel_gamma4.pickle
-   newbaselines:     baselines_gamma4.hdf5
-   EOF
-   ```
+- **Small faces** — VGA and XGA resolution frames mean detected faces are often tiny, limiting
+  the quality of embeddings
+- **Lighting and angle** — outdoor cameras produce shadows, backlighting, profile views, and
+  oblique angles that degrade recognition
+- **Rolling shutter** — subjects in motion produce blur artifacts, particularly at high frame rates
+- **Volume vs. quality** — a single event can yield hundreds of face detections, but only a handful
+  may be suitable for training
+- **Open-set recognition** — the system must detect new individuals, not just recognize known ones
 
-2. **Train model**
-   ```bash
-   papermill -f gamma4.yaml facemodel_build_beta.ipynb facemodel_gamma4.ipynb
-   ```
+Camera placement and lighting deserve careful attention. These physical factors often have more
+impact on recognition quality than any software tuning.
 
-3. **Review results**
-   - Open `facemodel_gamma4.ipynb`
-   - Check accuracy, classification report
-   - Review baseline thresholds
+## What is here, and what comes next
 
-4. **Deploy for testing**
-   ```bash
-   # Copy to sentinel
-   scp facemodel_gamma4.pickle baselines_gamma4.hdf5 ops@sentinel:/home/ops/sentinel/models/
-   
-   # Restart sentinel to load new model
-   ssh ops@sentinel "systemctl restart sentinel"
-   ```
+This is a working pipeline. It collects data, trains models, deploys them, and feeds the results
+back into the next cycle. The sentinel task chain structure, the curation loop, and the model
+registry integration are all operational.
 
-5. **Track deployment** (manual for now)
-   - Update `versions.yaml` or symlinks
-   - Note in deployment log
-   - Keep previous version available for rollback
-
-## Future Enhancements
-
-### Short Term
-
-1. **Automated Version Tracking**
-   - Create `versions.yaml` metadata file
-   - Update during deployment
-   - Track: version, date, accuracy, notes
-
-2. **Automated Training Trigger**
-   - Sentinel FaceDataUpdate completes → notify DeepEnd
-   - DeepEnd runs training automatically
-   - Saves as new experimental version
-
-3. **Model Validation Framework**
-   - Automated accuracy checks on test set
-   - Compare to production model
-   - Flag for manual review if improvement > threshold
-
-### Long Term
-
-4. **Multi-Model Support**
-   - Vehicle detection models
-   - Animal detection models
-   - Custom per-camera models
-
-5. **Federated Learning**
-   - Train on multiple sites' data
-   - Privacy-preserving aggregation
-   - Multi-site model distribution
-
-6. **Online Learning**
-   - Incremental model updates
-   - Active learning from corrections
-   - Continuous improvement loop
-
-## Troubleshooting
-
-### Training Fails with Memory Error
-
-```bash
-# Check available memory on Jetson
-ssh ops@deepthink
-free -h
-
-# Reduce batch size in notebook
-# Or enable swap (not recommended for SD card)
-```
-
-### Model Deployment Fails
-
-```bash
-# Check SSH connectivity
-ansible sentinels -m ping
-ansible datasinks -m ping
-
-# Verify paths exist
-ansible sentinels -m command -a "ls -la /home/ops/sentinel/models"
-
-# Manual deployment
-scp /home/ops/deepthink/models/facemodel_gamma3.pickle ops@sentinel:/home/ops/sentinel/models/
-```
-
-### Notebook Execution Hangs
-
-```bash
-# Check Jupyter kernel
-ssh ops@deepthink
-ps aux | grep jupyter
-
-# Check training log
-tail -f /home/ops/sentinelcam/logs/training.log
-
-# Restart if needed
-pkill -f jupyter
-/home/ops/deepthink/train_face_model.sh
-```
-
-## Performance Notes
-
-### Training Time Expectations
-
-| Task | Duration (Jetson Nano) | Duration (Desktop i7) |
-|------|------------------------|----------------------|
-| Load HDF5 data | ~2 min | ~30 sec |
-| GridSearchCV (3x5 grid) | ~4-6 hours | ~30-45 min |
-| Final model training | ~10 min | ~2 min |
-| **Total** | **~6 hours** | **~45 min** |
-
-**Conclusion:** Overnight training on Jetson Nano is acceptable for infrequent retraining (weekly/monthly).
-
-### Power Consumption
-
-- **Jetson Nano**: ~10W (training), ~5W (idle)
-- **Desktop GPU**: ~200-300W (training), ~50W (idle)
-- **Annual cost difference**: ~$200/year in electricity
-
-## Best Practices
-
-1. **Version your models**: Use timestamp or version in filenames
-2. **Test before deploying**: Validate on hold-out set
-3. **Deploy during low-traffic hours**: 3-5 AM
-4. **Keep backup models**: Don't overwrite previous working model
-5. **Monitor performance**: Track recognition accuracy over time
-6. **Document changes**: Note what training data changes affected model
-
-## Related Documentation
-
-- `devops/ansible/OUTPOST_REGISTRY_PATTERN.md` - Outpost configuration
-- `devops/ansible/CODE_DEPLOYMENT_PATTERN.md` - Code deployment system
-- `devops/ansible/VARIABLE_PRECEDENCE_MAPS.md` - Configuration hierarchy
-- `sentinel/README.rst` - Sentinel task system
+The foundation is designed to extend. The same task chaining pattern that drives facial recognition
+can be applied to vehicle identification, license plate reading, or any other domain where the
+system collects data that can train a classifier. New tasks plug into the sentinel configuration,
+new models register with the model registry, and new retention strategies slot into DailyCleanup.
