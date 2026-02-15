@@ -4,6 +4,94 @@
 # Note: Skip sentinelcam_base role for Jetson Nano - already provisioned
 # with py3cv4 virtualenv from PyImageSearch setup
 
+# Python 3.8 installation (Jetson Nano on Ubuntu 18.04)
+# Install from deadsnakes PPA without affecting system Python or JetPack
+- name: Add deadsnakes PPA for Python 3.8
+  ansible.builtin.apt_repository:
+    repo: "{{ deepthink_deadsnakes_ppa }}"
+    state: present
+    update_cache: yes
+  become: true
+  when:
+    - deepthink_python38_enabled | default(false)
+    - ansible_distribution == "Ubuntu"
+    - ansible_distribution_version == "18.04"
+  tags: [python38, setup]
+
+- name: Update apt cache after PPA addition
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 0
+  become: true
+  when:
+    - deepthink_python38_enabled | default(false)
+    - ansible_distribution == "Ubuntu"
+    - ansible_distribution_version == "18.04"
+  tags: [python38, setup]
+
+- name: Check available Python packages from PPA (debug)
+  ansible.builtin.shell:
+    cmd: "apt-cache search python3.8 | grep -E '^python3\\.8' || echo 'No python3.8 packages found'"
+  register: available_python38
+  changed_when: false
+  when:
+    - deepthink_python38_enabled | default(false)
+    - ansible_distribution == "Ubuntu"
+    - ansible_distribution_version == "18.04"
+  tags: [python38, setup, debug]
+
+- name: Display available Python 3.8 packages
+  ansible.builtin.debug:
+    msg: "{{ available_python38.stdout_lines }}"
+  when:
+    - deepthink_python38_enabled | default(false)
+    - available_python38 is defined
+  tags: [python38, setup, debug]
+
+- name: Install Python 3.8 and venv module (if available from PPA)
+  ansible.builtin.apt:
+    name:
+      - "python{{ deepthink_python38_version }}"
+      - "python{{ deepthink_python38_version }}-venv"
+      - "python{{ deepthink_python38_version }}-dev"
+    state: present
+  become: true
+  when:
+    - deepthink_python38_enabled | default(false)
+    - ansible_distribution == "Ubuntu"
+    - ansible_distribution_version == "18.04"
+    - available_python38.stdout is defined
+    - "'python3.8' in available_python38.stdout"
+  tags: [python38, setup]
+
+- name: Warning about Python 3.8 unavailability on ARM64
+  ansible.builtin.debug:
+    msg:
+      - "WARNING: Python 3.8 not available from deadsnakes PPA for ARM64 (aarch64)"
+      - "Alternative options:"
+      - "1. Build Python 3.8 from source (time-consuming)"
+      - "2. Use system Python 3.6 with older scikit-learn version"
+      - "Falling back to existing virtualenv setup..."
+  when:
+    - deepthink_python38_enabled | default(false)
+    - ansible_distribution == "Ubuntu"
+    - ansible_distribution_version == "18.04"
+    - available_python38.stdout is defined
+    - "'python3.8' not in available_python38.stdout"
+  tags: [python38, setup, warning]
+
+- name: Verify system Python is not affected
+  ansible.builtin.command: "python3 --version"
+  register: system_python_version
+  changed_when: false
+  tags: [python39, verify]
+
+- name: Display system Python version (should remain unchanged)
+  ansible.builtin.debug:
+    msg: "System Python: {{ system_python_version.stdout }}"
+  when: system_python_version is defined
+  tags: [python39, verify]
+
 - name: Create deepthink directory structure
   ansible.builtin.file:
     path: "{{ item }}"
@@ -28,10 +116,33 @@
 - name: Set virtualenv path to existing py3cv4
   ansible.builtin.set_fact:
     deepthink_venv_path: "{{ deepthink_user_home }}/.virtualenvs/py3cv4"
-  when: py3cv4_venv.stat.exists
+  when:
+    - py3cv4_venv.stat.exists
+    - not (deepthink_python38_enabled | default(false))
   tags: [venv]
 
-- name: Create Python virtual environment if py3cv4 doesn't exist
+- name: Create Python 3.8 virtual environment
+  ansible.builtin.command:
+    cmd: "python{{ deepthink_python38_version }} -m venv {{ deepthink_python38_venv_path }}"
+    creates: "{{ deepthink_python38_venv_path }}/bin/activate"
+  become: true
+  become_user: "{{ deepthink_user }}"
+  when:
+    - deepthink_python38_enabled | default(false)
+    - available_python38 is defined
+    - "'python3.8' in available_python38.stdout"
+  tags: [venv, python38]
+
+- name: Set virtualenv path to Python 3.8 venv
+  ansible.builtin.set_fact:
+    deepthink_venv_path: "{{ deepthink_python38_venv_path }}"
+  when:
+    - deepthink_python38_enabled | default(false)
+    - available_python38 is defined
+    - "'python3.8' in available_python38.stdout"
+  tags: [venv, python38]
+
+- name: Create Python virtual environment if py3cv4 doesn't exist (fallback)
   ansible.builtin.pip:
     name: pip
     virtualenv: "{{ deepthink_venv_path }}"
@@ -39,10 +150,12 @@
     state: latest
   become: true
   become_user: "{{ deepthink_user }}"
-  when: not py3cv4_venv.stat.exists
+  when:
+    - not py3cv4_venv.stat.exists
+    - not (deepthink_python38_enabled | default(false))
   tags: [venv]
 
-- name: Upgrade pip in existing/new virtualenv
+- name: Upgrade pip in virtualenv
   ansible.builtin.pip:
     name: pip
     virtualenv: "{{ deepthink_venv_path }}"
@@ -50,6 +163,19 @@
   become: true
   become_user: "{{ deepthink_user }}"
   tags: [venv]
+
+- name: Verify Python version in virtualenv
+  ansible.builtin.shell:
+    cmd: "{{ deepthink_venv_path }}/bin/python --version"
+  register: venv_python_version
+  changed_when: false
+  tags: [venv, verify]
+
+- name: Display virtualenv Python version
+  ansible.builtin.debug:
+    msg: "Virtualenv Python: {{ venv_python_version.stdout }}"
+  when: venv_python_version is defined
+  tags: [venv, verify]
 
 - name: Install additional ML training Python packages
   ansible.builtin.pip:
@@ -68,7 +194,7 @@
 - name: Set Jetson Nano power mode
   ansible.builtin.shell:
     cmd: "nvpmodel -m {{ '0' if jetson_max_power_mode else '1' }}"
-  when: 
+  when:
     - platform is defined
     - platform == "jetson_nano"
   become: true
@@ -85,8 +211,14 @@
       - "  - Models: {{ deepthink_models_path }}"
       - "  - Data: {{ deepthink_data_path }}"
       - ""
+      - "System Python: {{ system_python_version.stdout | default('Not checked') }}"
       - "Virtual environment: {{ deepthink_venv_path }}"
-      - "ML packages installed: scikit-learn, papermill, jupyter, matplotlib, pandas"
+      - "Virtualenv Python: {{ venv_python_version.stdout | default('Not checked') }}"
+      - "ML packages installed: scikit-learn==1.3.2, papermill, jupyter, matplotlib, pandas"
+      - ""
+      - "Python 3.8 from deadsnakes PPA: {{ 'Enabled' if deepthink_python38_enabled else 'Disabled' }}"
+      - "Models trained here are forward-compatible with scikit-learn 1.6.x"
+      - "JetPack and system Python remain unchanged"
       - ""
       - "Next steps (manual):"
       - "  1. Develop/test training notebooks in {{ deepthink_notebooks_path }}"

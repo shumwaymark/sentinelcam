@@ -15,10 +15,19 @@ deepthink_notebooks_path: "/home/{{ sentinelcam_user }}/deepthink/notebooks"
 deepthink_models_path: "/home/{{ sentinelcam_user }}/deepthink/models"
 deepthink_data_path: "/home/{{ sentinelcam_user }}/deepthink/data"
 
+# Python 3.8 configuration for Jetson Nano (Ubuntu 18.04)
+# Required for scikit-learn 1.4.2 compatibility (ARM64 limitation)
+# Install from deadsnakes PPA without affecting system Python or JetPack
+deepthink_python38_enabled: true  # Set false to use system Python
+deepthink_python38_version: "3.8"
+deepthink_deadsnakes_ppa: "ppa:deadsnakes/ppa"
+
 # Virtual environment for ML training
 # Prefer existing py3cv4 venv (PyImageSearch standard with OpenCV)
 # Falls back to creating new venv if py3cv4 doesn't exist
+# When python38 is enabled, creates separate ml-training venv with Python 3.8
 deepthink_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/ml-training"
+deepthink_python38_venv_path: "/home/{{ sentinelcam_user }}/.virtualenvs/ml-training-py38"
 
 # Papermill configuration for automated notebook execution
 deepthink_papermill_enabled: true
@@ -56,15 +65,14 @@ jetson_headless: true  # Run without GUI to save GPU memory (can be overridden i
 
 # Python packages required for ML training
 deepthink_python_packages:
-  - scikit-learn
+  - scikit-learn==1.3.2  # Latest version with ARM64 wheels available
   - pandas
-  - h5py
+  - h5py<3.9.0  # Pin to version compatible with HDF5 1.10.0 (Ubuntu 18.04)
   - papermill
   - jupyter
   - ipykernel
   - matplotlib
   - seaborn
-  - imbalanced-learn  # For SMOTE oversampling
 
 # Debug mode flag
 debug_mode: false
