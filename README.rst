@@ -562,6 +562,9 @@ This ensemble approach not only bolsters classification results, it presents a s
 problem inherent to SentinelCam design goals. The distance metric is helpful in the quest to identify and remember
 newly introduced faces.
 
+See `FACIAL_RECON_LEARNING.md <docs/FACIAL_RECON_LEARNING.md>`_ for more details on the facial recognition and
+learning pipeline.
+
 Outpost
 -------
 
