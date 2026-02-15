@@ -25,7 +25,7 @@ Internet
 
 ### **192.168.10.0/24** - SentinelCam Internal Network
 
-This network is **standardized across all sites** and for consistency and simplified managenent, should not be changed.
+This network is **standardized across all sites** and for consistency and simplified management, should not be changed.
 
 #### Network Parameters
 - **Network**: `192.168.10.0/24`
@@ -286,4 +286,4 @@ All Ansible playbooks and roles must:
 - `devops/ansible/inventory/production.yaml` - Site 1 example
 - `devops/ansible/inventory/site2-example.yaml` - Site 2 example
 - `devops/ansible/roles/bastion/defaults/main.yaml` - Bastion configuration
-- `devops/SITE_VARIABLES_REFERENCE.md` - All site-specific variables
+- `devops/docs/configuration/SITE_VARIABLES_REFERENCE.md` - All site-specific variables

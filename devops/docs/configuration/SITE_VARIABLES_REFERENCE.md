@@ -14,22 +14,22 @@ all:
   vars:
     # Site identification
     sentinelcam_site_name: "chandler"          # Site identifier (lowercase, no spaces)
-sentinelcam_site_location: "Ying Yang Ranch"  # Human-readable location name
+    sentinelcam_site_location: "Ying Yang Ranch"  # Human-readable location name
 
-# Bastion host configuration
-sentinelcam_bastion_hostname: "chandler-gate"  # Must match inventory_hostname
+    # Bastion host configuration
+    sentinelcam_bastion_hostname: "chandler-gate"  # Must match inventory_hostname
 
-# Health check reference hosts (must exist in inventory)
-sentinelcam_health_check_hosts:
-  internal_network: "data1"   # Host to ping for internal network test
-  dns_test: "data1"           # Host to use for DNS resolution test
+    # Health check reference hosts (must exist in inventory)
+    sentinelcam_health_check_hosts:
+      internal_network: "data1"   # Host to ping for internal network test
+      dns_test: "data1"           # Host to use for DNS resolution test
 
-# VPN gateway (for VPN health checks)
-sentinelcam_vpn_gateway: "10.0.0.1"
+    # VPN gateway (for VPN health checks)
+    sentinelcam_vpn_gateway: "10.0.0.1"
 
-# Network interface names (hardware-specific)
-bastion_interface_external: "eth0"          # External/WAN interface
-bastion_interface_internal: "enp1s0u1u4"    # Internal/LAN interface
+    # Network interface names (hardware-specific)
+    bastion_interface_external: "eth0"          # External/WAN interface
+    bastion_interface_internal: "enp1s0u1u4"    # Internal/LAN interface
 ```
 
 ## Variable Reference by Function

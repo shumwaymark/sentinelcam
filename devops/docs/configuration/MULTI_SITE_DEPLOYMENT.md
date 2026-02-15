@@ -2,26 +2,27 @@
 
 ## Overview
 
-The SentinelCam Ansible infrastructure now supports deployment to multiple sites with different hostnames and network configurations. This is achieved through site-specific variable files and dynamic DNS generation from inventory.
+SentinelCam's Ansible infrastructure supports deployment to multiple sites with different
+hostnames and network configurations. Each site gets its own inventory file with site-specific
+variables, and the bastion role generates DNS entries dynamically from that inventory.
 
-## Key Changes
+## How It Works
 
-### 1. Site Configuration Variables
+### Site Configuration Variables
 
-**File:** `inventory/group_vars/all/site.yaml`
+Each site defines its identity in the inventory file's `all.vars` section (or in
+`group_vars/all/site.yaml`):
 
-This file defines site-specific settings:
 - `sentinelcam_site_name`: Identifier for the site (e.g., "chandler", "remote")
-- `sentinelcam_site_location`: Human-readable location
-- `sentinelcam_bastion_hostname`: The inventory hostname of the bastion host
+- `sentinelcam_bastion_hostname`: Must match the bastion's `inventory_hostname`
 - `sentinelcam_health_check_hosts`: Reference hosts for connectivity tests
-- `sentinelcam_vpn_gateway`: VPN gateway IP for health checks
 
-### 2. Dynamic DNS Generation
+See `SITE_VARIABLES_REFERENCE.md` for the complete variable list.
 
-**File:** `roles/bastion/defaults/main.yaml`
+### Dynamic DNS Generation
 
-DNS entries are now dynamically generated from the Ansible inventory:
+The bastion role generates DNS entries from the Ansible inventory rather than hardcoded
+host lists:
 
 ```yaml
 bastion_dnsmasq:
@@ -32,32 +33,20 @@ bastion_dnsmasq:
     - { name: "gateway", ip: "192.168.10.254" }
 ```
 
-**Benefits:**
-- No hardcoded hostnames in the role
-- DNS automatically includes all hosts from inventory
-- Easy to add site-specific devices via `extra_static_hosts`
+The `sentinelcam.conf.j2` template iterates through the specified inventory groups, creates
+an `address=/<hostname>/<ip>` entry for each host, adds reverse PTR records, and appends any
+extra static hosts. Each entry is commented with the node role.
 
-### 3. Flexible Host Assertions
+### Host Assertions
 
-**File:** `playbooks/deploy-bastion.yaml`
+The bastion deployment playbook validates it's running on the correct host:
 
-The bastion deployment playbook now checks:
 ```yaml
 - inventory_hostname == sentinelcam_bastion_hostname
 - "'infrastructure' in group_names"
 ```
 
-This validates the correct host type rather than a hardcoded hostname.
-
-### 4. Variable-Based Health Checks
-
-Health check targets now reference inventory hosts dynamically:
-```yaml
-bastion_health_checks:
-  tests:
-    - name: "internal_network"
-      target: "{{ groups['datasinks'][0] | default('192.168.10.50') }}"
-```
+This prevents accidental deployment of bastion configuration to the wrong node.
 
 ## Deploying to Multiple Sites
 
@@ -101,30 +90,6 @@ all:
 ansible-playbook -i inventory/site2.yaml playbooks/deploy-bastion.yaml
 ```
 
-## Migration from Hardcoded Values
-
-### What Changed
-
-1. **Playbook hostname check:**
-   - Old: `inventory_hostname == "chandler-gate"`
-   - New: `inventory_hostname == sentinelcam_bastion_hostname`
-
-2. **DNS static hosts:**
-   - Old: Hardcoded list in `roles/bastion/defaults/main.yaml`
-   - New: Generated from `groups['sentinelcam_nodes']` in inventory
-
-3. **Health check targets:**
-   - Old: `ping -c 2 192.168.10.50`
-   - New: `ping -c 2 {{ hostvars[sentinelcam_health_check_hosts.internal_network]['ansible_host'] }}`
-
-4. **DNS test:**
-   - Old: `nslookup data1 127.0.0.1`
-   - New: `nslookup {{ sentinelcam_health_check_hosts.dns_test }} 127.0.0.1`
-
-### Backward Compatibility
-
-All existing deployments remain functional. The `site.yaml` file provides defaults for the Chandler site, so no changes are required to existing playbook runs.
-
 ## Creating a New Site
 
 ### Step 1: Create Site Inventory
@@ -153,7 +118,7 @@ ansible-vault edit inventory/<sitename>/group_vars/infrastructure/vault.yaml
 # Just ensure group_vars/infrastructure/vault.yaml exists and is encrypted
 ```
 
-See `ANSIBLE_VAULT_SETUP.md` for detailed vault file configuration.
+See `inventory/group_vars/infrastructure/vault.yaml.template` for the vault file structure.
 
 ### Step 3: Update Site-Specific Variables (Optional)
 
@@ -321,35 +286,3 @@ sentinelcam_health_check_hosts:
   internal_network: "datasink2"  # Must exist in inventory
   dns_test: "datasink2"
 ```
-
-## Migration Checklist
-
-When migrating an existing site to this new structure:
-
-- [ ] Create `group_vars/all/site.yaml` with current site settings
-- [ ] Verify inventory includes all hosts in `sentinelcam_nodes` group
-- [ ] Test DNS generation: `--tags dnsmasq --check`
-- [ ] Run full deployment with `--check` flag
-- [ ] Deploy to production
-- [ ] Verify DNS resolution of all hosts
-- [ ] Verify health checks pass
-- [ ] Document any site-specific customizations
-
-## Future Enhancements
-
-Potential improvements for multi-site support:
-
-1. **Site-specific firewall rules** - different allowed services per site
-2. **Automatic backup sync** - replicate configs between sites
-3. **Cross-site monitoring** - central dashboard for all sites
-4. **Dynamic inventory** - pull site configs from central database
-5. **Site templates** - `ansible-playbook create-site.yaml -e site_name=newsite`
-
-## Summary
-
-This refactoring provides:
-- ✅ **Flexibility:** Deploy to unlimited sites with different hostnames
-- ✅ **Maintainability:** Single source of truth (inventory) for all hosts
-- ✅ **Safety:** Validation ensures deployment to correct hosts
-- ✅ **Simplicity:** No role modifications needed for new sites
-- ✅ **Backward Compatibility:** Existing deployments work unchanged
