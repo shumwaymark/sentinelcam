@@ -26,9 +26,6 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
     self-diagnosis. 
   - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
     based on the queue length for tasks waiting in that job class.  
-- **datapump** needs data sink storage and data analysis with clean-up and reporting as a nightly 
-  task. Will need control panel instrumentation for this as well, including perhaps charts
-  of the storage breakdown, utilization, and available capacity of the data sinks. 
 - Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
   **imagenode**. 
 - Begin to explore capitalizing on the functionality of the **librarian**  and its design 
@@ -40,6 +37,82 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - Just a general note of caution. Run this at your own risk. All major components are under 
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
+
+## 0.2.5-alpha - 2026-02-22
+
+### Added
+
+- Added `TaskEngine.restart()` to the **sentinel** to recover from child process failures without 
+  restarting the entire service. The ten-step teardown-and-rebuild sequence: fail any in-flight job, 
+  terminate the child process, tear down parent-side IPC (`RingWire.close()`, `asyncSUB.disconnect()`), 
+  clean up stale `ipc://` socket files on disk, reset ring buffer indices (shared memory stays allocated), 
+  create a fresh `RingWire` REP socket, fork a new `JobTasking` child process reusing existing shared 
+  memory references, complete the handshake with a 10-second timeout guard, and reconnect `asyncSUB` to 
+  the new child's PUB endpoint. The `JobManager` detects dead engines via `is_alive()` and triggers 
+  restart automatically, with a configurable failure limit per engine before removal from the pool. 
+  Successful job completions reset the failure counter. A `RESTART_ENGINE` command is also available on 
+  the **sentinel** control port for manual intervention. Fixed a companion bug in the `task_feedback` 
+  coroutine where the `TaskBOMB` handler was calling `taskFeed.put()` with two arguments instead of a 
+  tuple — bomb messages from failed engines were being silently dropped and never reaching the `JobManager`.
+- Replaced the flat hourly time-slot event list in the **watchtower** with a full calendar-based event 
+  history browser. The new `CalendarPage` presents a month-view grid showing event density per day, with 
+  color-coded cells: dark for no events, green for populated days, amber for the selected date, and 
+  white-outlined for today. All 42 day cells are pre-allocated canvas items updated via `itemconfig()` — 
+  no widget creation or destruction on refresh. Tapping a day drills down to hourly time slots via a 
+  scrollable `MenuPanel` with touch-drag support for the Pi 7" touchscreen. Previous and next month 
+  navigation is bounded by the earliest and latest dates in the event cache.
+- Added a `HistoryLoader` subprocess to the **watchtower** that populates multi-day event history from 
+  the **datapump** at startup. The `EventListUpdater` loads only today's events for immediate 
+  responsiveness; `HistoryLoader` then walks backward through all available dates via 
+  `DataFeed.get_date_list()`, one REQ/REP round-trip per date. Results feed through a 
+  `multiprocessing.Queue` and are drained progressively in `Application.update()`, one batch per cycle. 
+  The kiosk is usable immediately while older dates fill in behind the scenes. A per-view `max_events` 
+  cap (default 1500) limits memory consumption. Must be a subprocess rather than a thread because 
+  `DataFeed` creates ZMQ sockets that cannot be shared across a fork.
+- Added a storage analysis reporting pipeline. A new `storage_analysis` module on the **datapump** walks 
+  the sentinelcam filesystem to produce a pre-computed report of disk capacity, daily image intake, and 
+  per-view storage breakdowns. The report is serialized as a pickle file and served on demand through a 
+  new `get_storage_report()` request on the `DataFeed`. A new `StoragePage` on the **watchtower** 
+  presents the results in a three-level drill-down: sink overview with capacity gauge and runway 
+  estimate, daily intake trend as a bar chart, and per-camera storage breakdown. Designed to run 
+  nightly via systemd timer after `DailyCleanup` completes. This is a read-only reporting tool — it 
+  does not delete anything.
+
+### Changed
+
+- Redesigned motion calibration tool in the **watchtower** as a player overlay instead of an independent 
+  viewer. The original `MotionCalibrationPage` created its own `ImageSubscriber`, running a second 
+  subscription to the outpost's PUB socket alongside the `PlayerDaemon`. ZMQ PUB/SUB distributes 
+  messages round-robin when multiple subscribers connect to the same endpoint — each subscriber saw 
+  roughly half the published frames, producing choppy feeds for both. Calibration now receives frames 
+  through the existing player pipeline via a page-aware dispatch in `Application.update()`. No 
+  `self.after()` polling loop, no blocking `receive()` call that was freezing the Tk event loop for up 
+  to one second per frame. Frames arrive at the natural rate of the player thread. Extracted 
+  `_load_viewer_source()` from `select_outpost_view()` to allow loading a view into the `PlayerDaemon` 
+  without forcing a page switch or resetting `eventIdx`. This establishes the standard integration 
+  pattern for future feature modules: receive frames through the `update()` dispatch, never create an 
+  independent `ImageSubscriber`.
+
+### Fixed
+
+- Addressed a state machine deadlock in the **watchtower** where rapid button presses during event 
+  browsing could lock the UI, requiring a service restart. The root cause was synchronous blocking 
+  calls inside `PlayerStateManager.process_transitions()`, which runs on the main Tk event thread. 
+  `PlayerDaemon.start()` and `.stop()` blocked on unbounded `stateQueue.get()`, and `Player.stop()` 
+  blocked on `idle.wait()` — rapid TOGGLE requests caused acknowledgment mismatch where a STOPPED 
+  message from a prior stop was consumed by a subsequent start. Added timeouts to all `PlayerDaemon` 
+  stateQueue interactions and `Player.stop()` idle wait, converting potential infinite hangs into 
+  recoverable error states. Added a re-entrant guard on TOGGLE processing as defense-in-depth.
+- Corrected an auto-advance defect in the **watchtower** event reviewer where the `PlayerDaemon` would 
+  wedge during sequential event playback. When an event ended, the EOF handler queued a LOAD transition 
+  followed by EOF. The LOAD changed state from PLAYING to LOADING, so when EOF processed next it found 
+  `current_state != PLAYING` and skipped `player_daemon.stop()` — leaving the daemon running in its 
+  inner service loop, deaf to `commandQueue`. The fix moves daemon lifecycle management into the LOAD 
+  handler at processing time when the actual state is known, rather than inserting compensating TOGGLE 
+  commands at queue time when state may change before processing. Also unified event position tracking 
+  by eliminating `cursor_event_idx` from `PlayerStateManager` — auto-advance now increments 
+  `app.eventIdx` directly, so previous/next navigation always reflects the actual viewing position.
+
 
 ## 0.2.4-alpha - 2026-01-17
 

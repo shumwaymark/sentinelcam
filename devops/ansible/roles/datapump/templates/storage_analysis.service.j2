@@ -1,0 +1,22 @@
+[Unit]
+Description=SentinelCam Storage Analysis
+Documentation=man:systemd.service(5)
+After=network.target
+
+[Service]
+Type=oneshot
+User={{ sentinelcam_user }}
+Group={{ sentinelcam_group }}
+WorkingDirectory={{ datapump_install_path }}
+ExecStart={{ sentinelcam_services.python_executable }} -u {{ datapump_install_path }}/storage_analysis.py
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths={{ sentinelcam_data_path }}
+
+[Install]
+WantedBy=multi-user.target

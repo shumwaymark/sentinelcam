@@ -106,7 +106,7 @@ sentinelcam_directories:
   faces: "{{ sentinelcam_data_path }}/faces"
   imagehub_data: "{{ sentinelcam_data_path }}/imagehub"
   video_archives: "{{ sentinelcam_data_path }}/video_archives"  # Video export destination (watchtower)
-  # Future: Additional export directories for model results, analytics reports, etc.
+  storage_report: "{{ sentinelcam_data_path }}/storage_report"  # Pre-computed storage analysis reports
 
 # Virtual Environment Paths
 sentinelcam_venv_opencv: "/home/{{ sentinelcam_user }}/.opencv"

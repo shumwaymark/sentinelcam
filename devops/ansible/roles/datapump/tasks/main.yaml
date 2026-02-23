@@ -25,7 +25,7 @@
 - name: "Include I/O performance optimizations"
   ansible.builtin.include_tasks: io_optimization.yaml
   when: optimize_io | default(true) == true
-  tags: 
+  tags:
     - io
     - performance
     - never  # Optional: Run with --tags io,performance
@@ -40,7 +40,7 @@
   loop:
     - "{{ sentinelcam_directories.csvfiles }}"
     - "{{ sentinelcam_directories.images }}"
-  tags: 
+  tags:
     - directories
     - setup
 
@@ -51,7 +51,7 @@
     owner: "{{ sentinelcam_user }}"
     group: "{{ sentinelcam_group }}"
     mode: '0755'
-  tags: 
+  tags:
     - directories
     - setup
 
@@ -63,14 +63,14 @@
     backup: yes
   notify:
     - reload systemd
-  tags: 
+  tags:
     - service
     - systemd
     - setup
 
 - name: "Include face data management tasks"
   ansible.builtin.include_tasks: face_data.yaml
-  tags: 
+  tags:
     - faces
     - face_data
     - never  # Optional: Run with --tags faces
@@ -85,7 +85,7 @@
     backup: yes
   notify:
     - restart datapump
-  tags: 
+  tags:
     - config
     - setup
 
@@ -100,7 +100,7 @@
     - model_cleanup.timer
   notify:
     - reload systemd
-  when: inventory_hostname == groups['primary_datasink'][0]
+  when: inventory_hostname == primary_datasink
   tags:
     - model_registry
     - cleanup
@@ -111,7 +111,60 @@
     enabled: yes
     state: started
     daemon_reload: yes
-  when: inventory_hostname == groups['primary_datasink'][0]
+  when: inventory_hostname == primary_datasink
   tags:
     - model_registry
     - cleanup
+
+- name: "Ensure storage report directory exists"
+  ansible.builtin.file:
+    path: "{{ sentinelcam_directories.storage_report }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags:
+    - directories
+    - storage_analysis
+    - setup
+
+- name: "Deploy storage analysis configuration"
+  ansible.builtin.template:
+    src: storage_analysis.yaml.j2
+    dest: "/home/{{ sentinelcam_user }}/storage_analysis.yaml"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+    backup: yes
+  tags:
+    - config
+    - storage_analysis
+    - setup
+
+- name: "Deploy storage analysis systemd units"
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: '0644'
+    backup: yes
+  loop:
+    - storage_analysis.service
+    - storage_analysis.timer
+  notify:
+    - reload systemd
+  tags:
+    - service
+    - systemd
+    - storage_analysis
+    - setup
+
+- name: "Enable and start storage analysis timer"
+  ansible.builtin.systemd:
+    name: storage_analysis.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags:
+    - service
+    - storage_analysis
+    - setup

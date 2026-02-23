@@ -16,10 +16,6 @@ from sentinelcam.camdata import CamData
 from sentinelcam.facedata import FaceList
 from sentinelcam.utils import readConfig
 
-# NOTE: Using pickle protocol 4 for compatibility with legacy nodes running
-# Python 3.7 (Debian Buster). Can be upgraded to protocol 5 once all nodes
-# are running Python 3.8+ (Debian Bullseye or later).
-
 class DataPump(imagezmq.ImageHub):
     """ Service access requests to camwatcher data store and Sentinel DataFeed
 
@@ -61,8 +57,7 @@ class DataPump(imagezmq.ImageHub):
                        track=False):
         """Sends a pandas.DataFrame
 
-        Sends a pickled pandas.DataFrame as the response using pickle protocol 4
-        for compatibility with legacy nodes running Python 3.7 and older pandas versions.
+        Sends a pickled pandas.DataFrame as the response.
         Preceded by a response code or other text msg,
 
         Parameters:
@@ -81,16 +76,13 @@ class DataPump(imagezmq.ImageHub):
 
         md = dict(msg=msg, )
         buffer = io.BytesIO()
-        # Use pickle directly with protocol 4 for compatibility with Python 3.7 (Debian Buster)
-        # and older pandas versions that don't support protocol parameter in to_pickle()
-        pickle.dump(df, buffer, protocol=4)
+        pickle.dump(df, buffer)
         self.zmq_socket.send_json(md, flags | zmq.SNDMORE)
         return self.zmq_socket.send(buffer.getvalue(), flags, copy=copy, track=track)
 
     def pickle_and_send(self,
                         msg='OK',
                         obj=None,
-                        protocol=4,  # Use protocol 4 for Python 3.7+ compatibility
                         flags=0,
                         copy=False,
                         track=False):
@@ -99,17 +91,12 @@ class DataPump(imagezmq.ImageHub):
         Pickle and compress an object to send as the response.
         Preceded by a response code or other text msg,
 
-        Uses pickle protocol 4 for compatibility with legacy nodes running
-        Python 3.7 (Debian Buster) until all nodes are upgraded.
-
         Parameters:
         -----------
         msg : str
             response code or message
         obj : data
             object to be sent
-        protocol : int, optional
-            pickling protocol (default 4 for Python 3.7+ compatibility)
         flags : int, optional
             zmq flags
         copy : bool, optional
@@ -119,7 +106,7 @@ class DataPump(imagezmq.ImageHub):
         """
 
         md = dict(msg=msg, )
-        p = pickle.dumps(obj, protocol)
+        p = pickle.dumps(obj)
         z = zlib.compress(p)
         self.zmq_socket.send_json(md, flags | zmq.SNDMORE)
         return self.zmq_socket.send(z, flags, copy=copy, track=track)
@@ -128,6 +115,28 @@ def create_tiny_jpeg() -> bytes:
     pixel = np.zeros((1, 1, 3), dtype=np.uint8)  # 1-pixel image
     buffer = simplejpeg.encode_jpeg(pixel)
     return buffer
+
+def load_storage_report(sentinelcam_root):
+    """Load pre-computed storage report from disk.
+
+    Parameters
+    ----------
+    sentinelcam_root : str
+        Base sentinelcam data path (e.g. /home/ops/sentinelcam)
+
+    Returns
+    -------
+    dict or None
+        The storage report dict, or None if unavailable
+    """
+    report_file = os.path.join(sentinelcam_root, 'storage_report', 'storage_report.pickle')
+    if not os.path.isfile(report_file):
+        return None
+    try:
+        with open(report_file, 'rb') as f:
+            return pickle.load(f)
+    except Exception:
+        return None
 
 def main():
     CFG = readConfig(os.path.join(os.path.expanduser("~"), "datapump.yaml"))
@@ -139,6 +148,9 @@ def main():
     pump = DataPump(f"tcp://*:{CFG['control_port']}")
     camwatcher = zmq.Context.instance().socket(zmq.REQ)
     camwatcher.connect(CFG['camwatcher'])
+    # Derive sentinelcam root from the configured data folder
+    # datafolder is .../sentinelcam/camwatcher, root is one level up
+    sentinelcam_root = os.path.dirname(CFG['datafolder'])
     log.info("datapump response loop starting")
     # TODO: Graceful shutdown / termination handling needed.
     # Need a policy for sending meaningful response codes back to the DataFeed.
@@ -200,6 +212,13 @@ def main():
                         log.debug(f"camwatcher delete response {reply}")
                 elif request['cmd'] == 'HC':  # health checkcd
                     reply = b'OK'
+                elif request['cmd'] == 'str':  # storage report
+                    report = load_storage_report(sentinelcam_root)
+                    if report is not None:
+                        pump.pickle_and_send(reply, report)
+                    else:
+                        pump.pickle_and_send('NoReport', None)
+                    continue
                 else:
                     log.error(f"Unrecognized command: {str(request)}")
                     reply = b'Error'

@@ -1,4 +1,4 @@
-"""datafeed: A component of the SentinelCam data layer. 
+"""datafeed: A component of the SentinelCam data layer.
 Services data requests for access to camera event and image data.
 
 Copyright (c) 2021 by Mark K Shumway, mark.shumway@swanriver.dev
@@ -6,7 +6,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 """
 
 import io
-import pickle 
+import pickle
 import zlib
 import imagezmq
 import msgpack
@@ -30,7 +30,7 @@ class DataFeed(imagezmq.ImageSender):
 
         Returns
         -------
-        msg 
+        msg
             response code, text message, image name
         jpg_buffer
             bytestring jpg compressed image
@@ -38,13 +38,13 @@ class DataFeed(imagezmq.ImageSender):
 
         msg, jpg_buffer = self.zmq_socket.recv_jpg(copy=copy)
         return msg, jpg_buffer
-    
+
     def recv_DataFrame(self, flags=0, copy=False, track=False) -> "tuple[str, pandas.DataFrame]":
         """Receives text message and pickled pandas.DataFrame
 
         Parameters
         ----------
-        flags : int, optional 
+        flags : int, optional
             zmq flags
         copy : bool, optional
             zmq copy flag
@@ -53,7 +53,7 @@ class DataFeed(imagezmq.ImageSender):
 
         Returns
         -------
-        str 
+        str
             response code / text message
         pandas.DataFrame
             response result
@@ -65,11 +65,11 @@ class DataFeed(imagezmq.ImageSender):
         return (md["msg"], pandas.read_pickle(payload))
 
     def recv_pickle(self, flags=0, copy=False, track=False):
-        """Receives text message and compressed pickle 
+        """Receives text message and compressed pickle
 
         Parameters
         ----------
-        flags : int, optional 
+        flags : int, optional
             zmq flags
         copy : bool, optional
             zmq copy flag
@@ -78,7 +78,7 @@ class DataFeed(imagezmq.ImageSender):
 
         Returns
         -------
-        str 
+        str
             response code / text message
         result
             unpickled payload
@@ -111,6 +111,7 @@ class DataFeed(imagezmq.ImageSender):
     IMG_LST = 3
     IMG_JPG = 4
     DEL_EVT = 5
+    STG_RPT = 6
     HEALTH = -1
 
     def __init__(self, connect_to, timeout=15.0):
@@ -124,6 +125,7 @@ class DataFeed(imagezmq.ImageSender):
             DataFeed.IMG_LST: self.recv_pickle,
             DataFeed.IMG_JPG: self.recv_jpg,
             DataFeed.DEL_EVT: self.recv,
+            DataFeed.STG_RPT: self.recv_pickle,
             DataFeed.HEALTH: self.recv
         }
         self._cmdQ = queue.Queue()
@@ -134,7 +136,7 @@ class DataFeed(imagezmq.ImageSender):
     def _registerPoller(self) -> None:
         self._poller = zmq.Poller()
         self._poller.register(self.zmq_socket, zmq.POLLIN)
-        
+
     def _startThread(self) -> None:
         self._thread = threading.Thread(target=self._cmdloop, args=())
         self._thread.daemon = True
@@ -145,7 +147,7 @@ class DataFeed(imagezmq.ImageSender):
         if self.zmq_socket in events:
             return events[self.zmq_socket] == zmq.POLLIN
         else:
-            return False    
+            return False
 
     def _cmdloop(self):
         self._happy = True
@@ -175,7 +177,7 @@ class DataFeed(imagezmq.ImageSender):
             self.zmq_socket = self.zmq_context.socket(zmq.REQ)
             self.zmq_socket.connect(self._pump)
             self._registerPoller()
-            self._startThread()            
+            self._startThread()
             raise TimeoutError(timedout)
         return self._data
 
@@ -189,7 +191,7 @@ class DataFeed(imagezmq.ImageSender):
     def get_tracking_data(self, date, event, type='trk') -> pandas.DataFrame:
         request = {'cmd': 'evt', 'date': date, 'evt': event, 'trk': type}
         result = self.pump_action(DataFeed.TRK_DATA, request)
-        if len(result.index) == 0: 
+        if len(result.index) == 0:
             raise DataFeed.TrackingSetEmpty(date, event, type)
         return result
 
@@ -205,6 +207,19 @@ class DataFeed(imagezmq.ImageSender):
         request = {'cmd': 'pic', 'date': date, 'evt': event,
                    'frametime': "{}_{}".format(dt[:10], dt[11:].replace(':','.'))}
         result = self.pump_action(DataFeed.IMG_JPG, request)
+        return result
+
+    def get_storage_report(self) -> dict:
+        """Retrieve the pre-computed storage analysis report.
+
+        Returns
+        -------
+        dict or None
+            Storage report dict with keys: report_version, datasink_name,
+            generated_at, disk_summary (DataFrame), daily_summary (DataFrame).
+            Returns None if no report is available on this data sink.
+        """
+        result = self.pump_action(DataFeed.STG_RPT, {'cmd': 'str'})
         return result
 
     def delete_event(self, date, event) -> str:
@@ -242,12 +257,12 @@ class EventList:
         return self.eventList
 
 # ----------------------------------------------------------------------------------------
-#   See below for usaage 
+#   See below for usaage
 # ----------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
 
-    cfg = { 'datapump': 'tcp://data1:5556' } 
+    cfg = { 'datapump': 'tcp://data1:5556' }
     today = datetime.now().isoformat()[:10]
 
     feed = DataFeed(cfg["datapump"])
@@ -256,19 +271,19 @@ if __name__ == "__main__":
     # most recent 5 events
     for row in cindx[:5].itertuples():
         print(row.node + " " + row.viewname + " " + str(row.timestamp) + " " + row.event)
-    
+
     lastevent = cindx.iloc[0].event
     print("Last event " + lastevent)
 
     evt_data = feed.get_tracking_data(today, lastevent)
     for row in evt_data[:10].itertuples():
-        print(str(row.timestamp) + " " + 
-              str(row.elapsed) + " " + 
-              str(row.objid) + " " + 
-              str(row.classname) + " " + 
-              str(row.rect_x1) + " " + 
-              str(row.rect_x2) + " " + 
-              str(row.rect_y1) + " " + 
+        print(str(row.timestamp) + " " +
+              str(row.elapsed) + " " +
+              str(row.objid) + " " +
+              str(row.classname) + " " +
+              str(row.rect_x1) + " " +
+              str(row.rect_x2) + " " +
+              str(row.rect_y1) + " " +
               str(row.rect_y2))
 
     frametimes = feed.get_image_list(today, lastevent)  # returns list of timestamps

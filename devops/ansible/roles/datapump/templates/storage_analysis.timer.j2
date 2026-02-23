@@ -1,0 +1,15 @@
+[Unit]
+Description=SentinelCam Storage Analysis Timer
+Documentation=man:systemd.timer(5)
+Requires=storage_analysis.service
+
+[Timer]
+# Run daily at 02:30 AM — after DailyCleanup (midnight) has completed
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+# Random delay up to 15 minutes to avoid load spikes
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
