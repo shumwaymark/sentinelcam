@@ -1,7 +1,7 @@
 """Motion detector calibration tool for Sentinelcam watchtower
 
 Provides real-time visual feedback for tuning motion detection parameters.
-Self-contained calibration interface that operates independently of the Player subsystem.
+Calibration display mode layered on top of the existing Player subsystem.
 
 Copyright (c) 2026 by Mark K Shumway, mark.shumway@swanriver.dev
 License: MIT, see the sentinelcam LICENSE for more details.
@@ -14,9 +14,7 @@ import cv2
 import numpy as np
 import tkinter as tk
 import PIL.Image, PIL.ImageTk
-import simplejpeg
 from datetime import datetime
-from sentinelcam.utils import ImageSubscriber
 
 logger = logging.getLogger("watchtower.motion_calibration")
 
@@ -123,14 +121,15 @@ class MotionCalibrationPage(tk.Canvas):
     for parameter adjustment.
     """
 
-    def __init__(self, parent, outpost_views):
-        tk.Canvas.__init__(self, parent, width=800, height=480, borderwidth=0,
+    def __init__(self, app, outpost_views):
+        tk.Canvas.__init__(self, app.master, width=800, height=480, borderwidth=0,
                           highlightthickness=0, background="black")
 
-        self.parent = parent
+        self.app = app
         self.outpost_views = outpost_views
         self.current_view = None
         self.calibrator = None
+        self.active = False
 
         # Live image display area (reduced to make room for controls)
         self.current_image = convert_tkImage(blank_image(640, 360))
@@ -200,88 +199,50 @@ class MotionCalibrationPage(tk.Canvas):
         self.status_text = self.create_text(400, 460, text="Select a view to calibrate",
                                            fill="chartreuse", font=('TkDefaultFont', 11))
 
-        self.receiver = None
-        self.update_running = False
-        self.paused = False
-
     def start_calibration(self, viewname):
         """Start calibration for a specific view"""
         self.current_view = viewname
         view = self.outpost_views[viewname]
-
-        # Store the view's native resolution for proper display
         self.view_size = view.imgsize
-
-        # Initialize motion detector with current params
         self.calibrator = MotionCalibrator()
-
-        # Start image subscription
-        if self.receiver:
-            self.receiver.stop()
-        self.receiver = ImageSubscriber(view.publisher, view.view)
-        self.receiver.start()
-
-        # Start update loop
-        self.update_running = True
-        self.update_display()
-
+        self.active = True
+        # Load this view into the PlayerDaemon without switching page
+        self.app._load_viewer_source(viewname)
         self.itemconfig(self.status_text,
                        text=f"Calibrating: {view.description} ({self.view_size[0]}x{self.view_size[1]})")
 
     def pause_calibration(self):
-        """Pause calibration (called during inactivity timeout)"""
-        if not self.paused:
+        """Pause calibration when navigating away or on inactivity timeout"""
+        if self.active:
             logger.info("Pausing motion calibration")
-            self.paused = True
-            self.update_running = False
-            if self.receiver:
-                self.receiver.stop()
+            self.active = False
 
     def resume_calibration(self):
         """Resume calibration after pause - maintains original view being calibrated"""
-        if self.paused and self.current_view:
-            # Resume with the ORIGINAL view that was being calibrated
-            # User must explicitly close to calibrate a different view
+        if not self.active and self.current_view and self.calibrator:
             view = self.outpost_views[self.current_view]
             logger.info(f"Resuming motion calibration for {view.node}/{view.view}")
-
-            self.paused = False
-
-            # Restart the existing receiver (ImageSubscriber supports stop/start cycles)
-            if self.receiver:
-                self.receiver.start()
-            else:
-                logger.warning("No receiver to resume - calibration not properly initialized")
-                return
-
-            # Restore status display showing which view is being calibrated
+            self.active = True
             self.itemconfig(self.status_text,
                            text=f"Calibrating: {view.description} ({self.view_size[0]}x{self.view_size[1]})",
                            fill="chartreuse")
-
-            # Restart update loop
-            self.update_running = True
-            self.update_display()
-
             logger.debug(f"Motion calibration resumed successfully")
 
     def stop_calibration(self):
-        """Stop calibration completely and return to main page"""
+        """Stop calibration completely and return to player page"""
         logger.info("Stopping motion calibration")
-        self.update_running = False
-        self.paused = False
-        if self.receiver:
-            self.receiver.stop()
-            self.receiver = None
-
-        # Reset calibrator
+        self.active = False
         self.calibrator = None
         self.current_view = None
+        self.app.show_page(0)  # UserPage.PLAYER = 0
 
-        # Return to player page and ensure it's playing
-        self.parent.show_page(0)  # UserPage.PLAYER = 0
-        if self.parent.player_panel.paused:
-            self.parent.player_panel.play()
+    def on_frame(self, image):
+        """Receive a frame from Application.update() and display with motion overlay"""
+        if not self.active or self.calibrator is None:
+            return
+        annotated, mask, motion = self.calibrator.process_frame(image)
+        self.current_image = convert_tkImage(annotated)
+        self.itemconfig(self.image, image=self.current_image)
 
     def on_param_change(self, value):
         """Handle slider changes"""
@@ -299,36 +260,6 @@ class MotionCalibrationPage(tk.Canvas):
                 'gaussianBlur': blur,
                 'noMotionThreshold': self.no_motion_thresh.get()
             })
-
-    def update_display(self):
-        """Update calibration display with annotated frame"""
-        if not self.update_running:
-            logger.debug("Update display stopped - update_running is False")
-            return
-
-        try:
-            if self.receiver:
-                msg, jpg = self.receiver.receive(timeout=1.0)
-                frame = simplejpeg.decode_jpeg(jpg, colorspace='BGR')
-
-                # Apply motion detection with current parameters
-                annotated, mask, motion = self.calibrator.process_frame(frame)
-
-                # Display at native view resolution - no resize needed
-                # The view_size was set when calibration started
-                self.current_image = convert_tkImage(annotated)
-                self.itemconfig(self.image, image=self.current_image)
-            else:
-                logger.warning("Update display called but receiver is None")
-
-        except TimeoutError:
-            logger.debug("Timeout waiting for frame from receiver")
-        except Exception as e:
-            logger.exception(f"Calibration update error: {str(e)}")
-
-        # Schedule next update
-        if self.update_running:
-            self.after(50, self.update_display)  # ~20fps
 
     def save_config(self):
         """Save calibrated parameters to outpost config"""
