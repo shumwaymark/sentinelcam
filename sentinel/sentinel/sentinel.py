@@ -179,8 +179,15 @@ class RingWire:
     def send(self, result) -> None:
         self._wire.send(msgpack.packb(result))
 
-    def __del__(self) -> None:
+    def close(self) -> None:
+        self._poller.unregister(self._wire)
         self._wire.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
 class RingBuffer:
     def __init__(self, wh, length) -> None:
@@ -492,6 +499,7 @@ class TaskEngine:
     TaskCANCELED = 6
     TaskWARNING = 7
     TaskERROR = 8
+    TaskRESTART = 9
     TaskBOMB = -1
 
     def __init__(self, engineName, config, ringCFG, taskCFG, pump, asyncSUB) -> None:
@@ -499,6 +507,8 @@ class TaskEngine:
         self.job_classes = config["classes"]
         self.accelerator = config["accelerator"]
         self.taskCFG = taskCFG
+        self._asyncSUB = asyncSUB
+        self.restart_count = 0
         self.taskQ = multiprocessing.Queue()
         self.wire = RingWire(SOCKDIR, engineName)
         ringmodel = ringCFG[config["ring_buffers"]]
@@ -577,6 +587,79 @@ class TaskEngine:
         #self.taskFlag.value = TaskEngine.TaskCANCELED
         pass
 
+    def restart(self, pump) -> bool:
+        """Restart the TaskEngine child process. Called from _jobThread context.
+
+        Fails any in-flight job, tears down the child and IPC sockets,
+        resets ring buffers, then forks a fresh child with full handshake.
+
+        Returns True on success, False on failure.
+        """
+        engineName = self.name
+        logging.warning(f"TaskEngine '{engineName}' restart initiated")
+
+        # Step 1: Fail any in-flight job before touching sockets or processes
+        if self.jobreq is not None:
+            try:
+                task_stats = (self.get_image_cnt(), self.get_image_rate())
+            except Exception:
+                task_stats = (0, 0.0)
+            self.jobreq.deregisterJOB(JobRequest.Status_FAILED, task_stats)
+            self.jobreq = None
+        self.cursor = None
+
+        # Step 2: Kill the child process
+        self._engine.terminate()
+
+        # Step 3: Tear down parent-side IPC sockets
+        self.wire.close()
+        try:
+            self._asyncSUB.disconnect(f"ipc://{SOCKDIR}/{engineName}.PUB")
+        except zmq.ZMQError:
+            pass  # Already disconnected or never connected
+
+        # Step 4: Clean up IPC socket files on disk
+        for suffix in ['', '.PUB']:
+            try:
+                os.remove(f"{SOCKDIR}/{engineName}{suffix}")
+            except FileNotFoundError:
+                pass
+
+        # Step 5: Reset RingBuffer state (shared memory stays allocated)
+        for rb in self.ringbuffers.values():
+            rb.reset()
+        self.imagesize = (0, 0)
+        self.ringBuffer = None
+        self.dataFeed = None
+
+        # Step 6: Create fresh multiprocessing.Queue
+        self.taskQ = multiprocessing.Queue()
+
+        # Step 7: Create fresh RingWire (REP socket, must exist before child fork)
+        self.wire = RingWire(SOCKDIR, engineName)
+
+        # Step 8: Fork new JobTasking child process
+        self._engine = JobTasking(
+            engineName, pump, self.taskCFG, self.accelerator,
+            self.taskQ, self.rawBuffers)
+
+        # Step 9: Complete handshake with timeout guard (10 seconds)
+        poller = zmq.Poller()
+        poller.register(self.wire._wire, zmq.POLLIN)
+        events = dict(poller.poll(10000))
+        if self.wire._wire not in events:
+            logging.critical(f"TaskEngine '{engineName}' restart failed: handshake timeout")
+            self.wire.close()
+            self._engine.terminate()
+            return False
+        handshake = self.wire.recv()
+        self._asyncSUB.connect(f"ipc://{SOCKDIR}/{engineName}.PUB")
+        self.wire.send(handshake)
+
+        # Step 10: Log success
+        logging.warning(f"TaskEngine '{engineName}' restarted successfully")
+        return True
+
 class JobManager:
 
     JobSTATUS = 0
@@ -593,6 +676,8 @@ class JobManager:
         self.ondeck = {}
         self.engines = {}
         self.datafeeds = {}
+        self._default_pump = default_pump
+        self._asyncSUB = _asyncSUB
         for engine in engineCFG:
             self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, default_pump, _asyncSUB)
             for jobclass in self.engines[engine].getClasses():
@@ -608,6 +693,24 @@ class JobManager:
         if not pump in self.datafeeds:
             self.datafeeds[pump] = DataFeed(pump)
         return self.datafeeds[pump]
+
+    def _restart_engine(self, engineName) -> None:
+        """Attempt engine restart with failure counting. Called from _jobThread."""
+        if engineName not in self.engines:
+            logging.error(f"_restart_engine: engine '{engineName}' not found")
+            return
+        engine = self.engines[engineName]
+        engine.restart_count += 1
+        if engine.restart_count <= TaskEngine.FAIL_LIMIT:
+            logging.warning(f"Restarting engine '{engineName}' (attempt {engine.restart_count})")
+            if engine.restart(self._default_pump):
+                return  # success — engine stays in self.engines
+            else:
+                logging.critical(f"TaskEngine '{engineName}' restart failed, removing engine.")
+        else:
+            logging.critical(f"TaskEngine '{engineName}' exceeded restart limit ({TaskEngine.FAIL_LIMIT}), removing engine.")
+        # Restart failed or limit exceeded — remove from engine pool
+        del self.engines[engineName]
 
     def _releaseJob(self, jobid, engine) -> None:
         logging.debug(f"Release job {jobid}")
@@ -730,7 +833,8 @@ class JobManager:
                 try:
                     (tag, msg) = taskFeed.get()
                     # Have a task start request or job status update
-                    logging.debug(f"Job Manager has queue entry {(JobRequest.Status[tag],msg)}")
+                    tag_name = JobRequest.Status[tag] if 0 <= tag < len(JobRequest.Status) else f"Tag({tag})"
+                    logging.debug(f"Job Manager has queue entry {(tag_name, msg)}")
 
                     if tag == TaskEngine.TaskSUBMIT:
                         # New task request received
@@ -753,20 +857,25 @@ class JobManager:
                     elif tag in [TaskEngine.TaskDONE, TaskEngine.TaskFAIL, TaskEngine.TaskCANCELED]:
                         # Task completed, failed or was canceled
                         jobreq = taskList[msg]
-                        engine = self.engines[jobreq.engine]
-                        if engine.jobreq.jobID == msg:
+                        engine = self.engines.get(jobreq.engine)
+                        if engine and engine.jobreq and engine.jobreq.jobID == msg:
                             engine.jobreq = None
                             task_stats = (engine.get_image_cnt(), engine.get_image_rate())
                             jobreq.deregisterJOB(tag, task_stats)
+                            if tag == TaskEngine.TaskDONE:
+                                engine.restart_count = 0  # reset on successful completion
                             logging.debug(f"Engine {engine.getName()} gone idle.")
                         if self.ondeck[jobreq.jobClass] == jobreq:
                             self.ondeck[jobreq.jobClass] = None
 
                     elif tag == TaskEngine.TaskBOMB:
-                        # Handle engine failure
-                        logging.critical(f"TaskEngine '{msg}' failed catastrophically.")
-                        if msg in self.engines:
-                            del self.engines[msg]
+                        # Handle engine failure — attempt restart
+                        logging.critical(f"TaskEngine '{msg}' failed catastrophically — attempting restart.")
+                        self._restart_engine(msg)
+
+                    elif tag == TaskEngine.TaskRESTART:
+                        # Manual restart request
+                        self._restart_engine(msg)
 
                     else:
                         logging.error(f"Undefined status '{tag}' for job {msg}")
@@ -779,7 +888,8 @@ class JobManager:
 
             # Service the ring buffers for running tasks.
             runningTasks = 0
-            for engineName in self.engines:
+            dead_engines = []
+            for engineName in list(self.engines):
                 engine = self.engines[engineName]
                 if engine.is_alive():
                     if engine.getJobID() is not None:
@@ -797,9 +907,10 @@ class JobManager:
                         # TODO: Need a mechanism to cleanly shutdown a
                         # running task in the event of DataFeed timeouts.
                 else:
-                    # TODO: Need an engine restart here
-                    logging.error(f"TaskEngine '{engineName}' found dead.")
-                    del self.engines[engineName]
+                    dead_engines.append(engineName)
+            for engineName in dead_engines:
+                logging.error(f"TaskEngine '{engineName}' found dead, attempting restart.")
+                self._restart_engine(engineName)
 
             # Assign jobs ondeck to available engines by class
             if runningTasks < len(self.engines):
@@ -864,6 +975,13 @@ async def task_loop(asyncREP, taskCFG):
                     else:
                         logging.error(f"ALERT request missing payload: {request}")
                         reply = 'Error'
+                elif task == 'RESTART_ENGINE':
+                    if 'engine' in request:
+                        taskFeed.put((TaskEngine.TaskRESTART, request['engine']))
+                        reply = f"Restart requested for engine '{request['engine']}'"
+                    else:
+                        logging.error(f"RESTART_ENGINE request missing engine name: {request}")
+                        reply = 'Error'
                 else:
                     if task in taskCFG:
                         job = JobRequest(
@@ -916,7 +1034,7 @@ async def task_feedback(asyncSUB):
                 logging.error(str(taskMsg))
             elif msgTag == TaskEngine.TaskBOMB:
                 msg = taskMsg.split(':')
-                taskFeed.put(msgTag, msg[0])
+                taskFeed.put((msgTag, msg[0].strip()))
                 logging.critical(f"TaskEngine {taskMsg} failure.")
             else:
                 logging.error(f"Unsupported task message: {msgTag}")

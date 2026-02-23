@@ -31,9 +31,8 @@ datapumps:
 {% set datasinks_seen = [] %}
 {% for outpost_name, outpost_config in sentinelcam_outposts.items() %}
 {%   if outpost_name in watchtower_monitored_outposts and outpost_config.datasink not in datasinks_seen %}
-{%     set datasink_host = hostvars[outpost_config.datasink].ansible_host | default(outpost_config.datasink) %}
 {%     set _ = datasinks_seen.append(outpost_config.datasink) %}
-  {{ outpost_config.datasink }}: tcp://{{ datasink_host }}:{{ sentinelcam_ports.datapump_control }}
+  {{ outpost_config.datasink }}: tcp://{{ outpost_config.datasink }}:{{ sentinelcam_ports.datapump_control }}
 {%   endif %}
 {% endfor %}
 
