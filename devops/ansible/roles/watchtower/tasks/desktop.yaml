@@ -64,3 +64,39 @@
     mode: '0644'
   tags: desktop
 
+- name: "Deploy desktop wallpaper"
+  ansible.builtin.copy:
+    src: WhiteSwanOnGreenLake_800x480.jpg
+    dest: "/home/{{ sentinelcam_user }}/WhiteSwanOnGreenLake_800x480.jpg"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+  tags: desktop
+
+- name: "Create PCManFM config directory"
+  ansible.builtin.file:
+    path: "/home/{{ sentinelcam_user }}/.config/pcmanfm/LXDE-pi"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: desktop
+
+- name: "Set desktop wallpaper"
+  ansible.builtin.copy:
+    dest: "/home/{{ sentinelcam_user }}/.config/pcmanfm/LXDE-pi/desktop-items-0.conf"
+    content: |
+      [*]
+      wallpaper_mode=stretch
+      wallpaper=/home/{{ sentinelcam_user }}/WhiteSwanOnGreenLake_800x480.jpg
+      desktop_bg=#000000
+      desktop_fg=#ffffff
+      show_documents=0
+      show_trash=0
+      show_mounts=0
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0644'
+  notify: restart lightdm
+  tags: desktop
+
