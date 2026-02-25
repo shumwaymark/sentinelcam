@@ -605,6 +605,13 @@ async def main():
     asyncCtx = AsyncContext.instance()
     asyncREP = asyncCtx.socket(zmq.REP)  # 0MQ async socket for control loop
     asyncSUB = asyncCtx.socket(zmq.SUB)  # 0MQ async socket for camwatcher log subscriptions
+    # configure TCP keep-alive and reconnection options for the async SUB sockets
+    asyncSUB.setsockopt(zmq.TCP_KEEPALIVE, 1)
+    asyncSUB.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)    # start probes after 60s idle
+    asyncSUB.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 10)   # probe every 10s
+    asyncSUB.setsockopt(zmq.TCP_KEEPALIVE_CNT, 3)      # 3 failed probes = dead
+    asyncSUB.setsockopt(zmq.RECONNECT_IVL, 1000)       # start at 1s
+    asyncSUB.setsockopt(zmq.RECONNECT_IVL_MAX, 30000)  # cap at 30s
     asyncREP.bind(f"tcp://*:{CFG['control_port']}")
     asyncSUB.subscribe(b'')
     with threadLock:
