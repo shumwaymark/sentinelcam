@@ -30,6 +30,8 @@ from sentinelcam.datafeed import DataFeed
 from sentinelcam.utils import FPS, ImageSubscriber, readConfig
 from video_exporter import VideoExporter
 from motion_calibration import MotionCalibrationPage
+from calendar_page import CalendarPage
+from storage_page import StoragePage
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "watchtower.yaml"))
 SOCKDIR = CFG["socket_dir"]
@@ -41,6 +43,7 @@ class UserPage(enum.IntEnum):
     EVENTS = 2  # Event list for current view
     SETTINGS = 3  # To be determined: settings, controls, and tools cafe
     CALIBRATE = 4  # Motion detector calibration tool
+    STORAGE = 5   # Storage analysis report
 
 class PlayerCommand(enum.Enum):
     """Source command types for the Player subsystem"""
@@ -323,16 +326,29 @@ class PlayerDaemon:
                                     error_occurred = True
                     stateQueue.put(DaemonState.STOPPED)  # Acknowledge stopped
 
+    DAEMON_START_TIMEOUT = 10.0  # seconds; covers 7s outpost connect + margin
+    DAEMON_STOP_TIMEOUT  =  3.0  # seconds; stop should be fast
+
     def start(self, command_block):
         self.runswitch.value = 1
         self.commandQueue.put(command_block)
         logger.debug(f"PlayerDaemon started with command: {command_block}")
-        return self.stateQueue.get()  # Wait for acknowledgment
+        try:
+            result = self.stateQueue.get(timeout=self.DAEMON_START_TIMEOUT)
+            return result
+        except queue.Empty:
+            logger.error('PlayerDaemon.start() timed out — daemon did not acknowledge')
+            return DaemonState.ERROR
 
     def stop(self):
         self.runswitch.value = 0
         logger.debug("PlayerDaemon stopped.")
-        return self.stateQueue.get()  # Wait for acknowledgment
+        try:
+            result = self.stateQueue.get(timeout=self.DAEMON_STOP_TIMEOUT)
+            return result
+        except queue.Empty:
+            logger.error('PlayerDaemon.stop() timed out — daemon did not acknowledge')
+            return DaemonState.STOPPED  # treat as stopped; process may be wedged
 
 class TextHelper:
     def __init__(self) -> None:
@@ -573,7 +589,9 @@ class Player:
     def stop(self) -> None:
         logger.debug("Player thread paused.")
         self.paused.set()
-        self.idle.wait()
+        if not self.idle.wait(timeout=2.0):
+            logger.warning('Player.stop() timed out waiting for idle — thread may be wedged')
+        # Proceed regardless — the paused flag is set, which is what matters
 
     def start(self) -> None:
         logger.debug("Player thread resumed.")
@@ -588,24 +606,26 @@ class PlayerStateManager:
         self.message_queue = queue.Queue()
         self.current_state = PlayerState.STARTING
         self.player_command = None
-        self.cursor_event_idx = -1
+        self._transitioning = False
 
     def request_transition(self, reason, component, details=None):
         logger.debug(f"Requesting transition from {self.current_state}: {reason}, {component}")
+
+        if reason == StateChange.TOGGLE and self._transitioning:
+            logger.debug(f'Ignoring TOGGLE: transition already in progress')
+            return
 
         if reason == StateChange.LOAD:
             if self.current_state == PlayerState.LOADING:
                 logger.debug(f"Ignoring LOAD request while already in LOADING state from {component}")
                 return  # Reject rapid LOAD requests, wait for current load to complete
-            if self.current_state == PlayerState.PLAYING:
-                self.message_queue.put((StateChange.TOGGLE, component, 'PlayerStateManager auto-pause before LOAD'))
 
         elif reason == StateChange.EOF:
             if self.app.move_next:
-                if self.cursor_event_idx < self.app.view.event_count():
-                    self.cursor_event_idx += 1
-                    logger.debug(f"Auto-advance: queueing event {self.cursor_event_idx} of {self.app.eventIdx}")
-                    (dt, date, event, size) = self.app.view.eventlist[self.cursor_event_idx]
+                if self.app.eventIdx < self.app.view.event_count() - 1:
+                    self.app.eventIdx += 1
+                    logger.debug(f"Auto-advance: queueing event {self.app.eventIdx}")
+                    (dt, date, event, size) = self.app.view.eventlist[self.app.eventIdx]
                     source_cmd = ((PlayerCommand.EVENT, self.player_command[1], self.player_command[2],
                                    date, event, size), size)
                     self.message_queue.put((StateChange.LOAD, "auto-advance", source_cmd))
@@ -625,6 +645,13 @@ class PlayerStateManager:
                 old_state = self.current_state
 
                 if reason == StateChange.LOAD:
+                    # Stop the daemon if it is currently running, regardless of
+                    # how we got here. This replaces the queue-time TOGGLE insertion
+                    # in request_transition() and the conditional stop in the EOF handler.
+                    if self.current_state in [PlayerState.PLAYING, PlayerState.IDLE]:
+                        if self.current_state == PlayerState.PLAYING:
+                            self.app.viewer.stop()
+                        self.app.player_daemon.stop()
                     self.app.sourceCmds.put(details)
                     self.player_command = details[0]
                     new_state = PlayerState.LOADING
@@ -642,27 +669,29 @@ class PlayerStateManager:
                             new_state = PlayerState.PLAYING
 
                 elif reason == StateChange.TOGGLE:
-                    if self.current_state == PlayerState.ERROR:
-                        new_state = PlayerState.ERROR
-                    elif self.current_state == PlayerState.PLAYING:
-                        self.app.viewer.stop()
-                        self.app.player_daemon.stop()
-                        self.app.move_next = False
-                        new_state = PlayerState.PAUSED
-                    else:
-                        result = self.app.player_daemon.start(self.player_command)
-                        if result == DaemonState.ERROR:
+                    self._transitioning = True
+                    try:
+                        if self.current_state == PlayerState.ERROR:
                             new_state = PlayerState.ERROR
+                        elif self.current_state == PlayerState.PLAYING:
+                            self.app.viewer.stop()
+                            self.app.player_daemon.stop()
+                            self.app.move_next = False
+                            new_state = PlayerState.PAUSED
                         else:
-                            self.app.viewer.start()
-                            new_state = PlayerState.PLAYING
-
-                elif reason == StateChange.AUTO:
-                    self.cursor_event_idx = details
-                    new_state = self.current_state
+                            # Stop daemon if currently idle, to reset to the beginning of the event on next play
+                            if self.current_state == PlayerState.IDLE:
+                                self.app.player_daemon.stop()
+                            result = self.app.player_daemon.start(self.player_command)
+                            if result == DaemonState.ERROR:
+                                new_state = PlayerState.ERROR
+                            else:
+                                self.app.viewer.start()
+                                new_state = PlayerState.PLAYING
+                    finally:
+                        self._transitioning = False
 
                 elif reason == StateChange.EOF:
-                    self.app.player_daemon.stop()
                     new_state = PlayerState.IDLE
 
                 if new_state in [PlayerState.PLAYING, PlayerState.PAUSED, PlayerState.READY, PlayerState.IDLE]:
@@ -730,6 +759,108 @@ class SentinelSubscriber:
                 except Exception as e:
                     daemon_logger.exception(f"Exception parsing sentinel log '{message}': {str(e)}")
 
+class HistoryLoader:
+    """Background subprocess to populate full event history from datapumps.
+
+    At startup, EventListUpdater only loads today's events. This subprocess
+    walks backward through all available dates to fill the event list up to
+    max_events per view. Results are sent back through a multiprocessing.Queue
+    as (viewname, events_batch) tuples, with a (None, None) sentinel on completion.
+
+    Must be a subprocess (not a thread) because DataFeed creates ZMQ sockets
+    that cannot be shared across a fork — the child needs its own connections.
+    """
+
+    def __init__(self, view_configs, historyQ):
+        """Start the history loader subprocess.
+
+        Parameters
+        ----------
+        view_configs : dict
+            {viewname: {'node': str, 'sinktag': str, 'datapump': str,
+                        'imgsize': (int,int), 'max_events': int, 'current_count': int}}
+        historyQ : multiprocessing.Queue
+            Queue for returning (viewname, events_batch) to the parent.
+        """
+        self.process = multiprocessing.Process(
+            target=self._load_history,
+            args=(view_configs, historyQ),
+            daemon=True
+        )
+        self.process.start()
+
+    @staticmethod
+    def _load_history(view_configs, historyQ):
+        hist_logger = logging.getLogger("watchtower.HistoryLoader")
+        hist_logger.info("HistoryLoader started")
+        today = str(date.today())
+        try:
+            # Collect unique datapump addresses and map sinks to pumps
+            pump_addresses = {}  # sinktag -> datapump address
+            for vc in view_configs.values():
+                pump_addresses[vc['sinktag']] = vc['datapump']
+
+            # Track remaining capacity per view
+            remaining = {vn: vc['max_events'] - vc['current_count']
+                         for vn, vc in view_configs.items()}
+
+            # Get available dates from each datapump, walk backward excluding today
+            for sinktag, pump_addr in pump_addresses.items():
+                try:
+                    feed = DataFeed(pump_addr)
+                    datelist = feed.get_date_list()  # most recent first
+                except Exception:
+                    hist_logger.exception(f"HistoryLoader failed to connect to datapump {pump_addr}")
+                    continue
+
+                # Views served by this datapump
+                sink_views = {vn: vc for vn, vc in view_configs.items()
+                              if vc['sinktag'] == sinktag}
+
+                # Check if all views for this sink are already full
+                if all(remaining[vn] <= 0 for vn in sink_views):
+                    continue
+
+                for day in datelist:
+                    if day >= today:
+                        continue  # today's events already loaded by EventListUpdater
+
+                    # Stop if all views for this sink are full
+                    if all(remaining[vn] <= 0 for vn in sink_views):
+                        break
+
+                    try:
+                        cwIndx = feed.get_date_index(day).sort_values('timestamp')
+                        day_events = cwIndx.loc[cwIndx['type'] == 'trk']
+                    except Exception:
+                        hist_logger.exception(f"HistoryLoader failed to read index for {day}")
+                        continue
+
+                    for viewname, vc in sink_views.items():
+                        if remaining[viewname] <= 0:
+                            continue
+                        viewEvts = day_events.loc[
+                            (day_events['node'] == vc['node']) &
+                            (day_events['viewname'] == viewname)]
+                        if len(viewEvts.index) == 0:
+                            continue
+                        imgsize = vc['imgsize']
+                        batch = [(rec.timestamp, day, rec.event, (rec.width, rec.height))
+                                 for rec in viewEvts.itertuples()]
+                        # Trim batch if it would exceed capacity
+                        if len(batch) > remaining[viewname]:
+                            batch = batch[-remaining[viewname]:]  # keep most recent
+                        remaining[viewname] -= len(batch)
+                        historyQ.put((viewname, batch))
+                        hist_logger.debug(f"HistoryLoader sent {len(batch)} events for {viewname} on {day}")
+
+            hist_logger.info("HistoryLoader completed")
+        except Exception:
+            hist_logger.exception("HistoryLoader trapped exception")
+        finally:
+            historyQ.put((None, None))  # sentinel: done
+
+
 class EventListUpdater:
 
     EventList_NEW = 1
@@ -740,6 +871,7 @@ class EventListUpdater:
         self.outpost_views = outpost_views
         self.event_aggregator = EventAggregator()
         self._image = blank_image(1,1)
+        self.initial_load_done = False
         self._thread = threading.Thread(daemon=True, target=self._run, args=(eventQ, newEvent, outpost_views))
         self._thread.start()
 
@@ -828,6 +960,7 @@ class EventListUpdater:
                 while newEvent.is_set():
                     sleep(0.01)
                 logger.debug(f"EventListUpdater initialized view {v.view} with event list of {len(evtlist)} events.")
+        self.initial_load_done = True
         logger.debug('EventListUpdater started.')
         while True:
             logger.debug('EventListUpdater waiting for sentinel subscriber event...')
@@ -882,6 +1015,26 @@ class OutpostView:
     def set_event_list(self, newlist) -> None:
         with dataLock:
             self.eventlist = newlist
+
+    def prepend_history(self, events_batch) -> None:
+        """Prepend a batch of historical events before existing events.
+
+        Called from the UI thread with batches from HistoryLoader.
+        Events arrive one date at a time, most recent dates first.
+        Each batch is inserted at position 0 so older dates end up
+        at the front, maintaining chronological order.
+        Enforces max_events by trimming the oldest entries.
+        """
+        with dataLock:
+            self.eventlist = events_batch + self.eventlist
+            if len(self.eventlist) > self.max_events:
+                overflow = len(self.eventlist) - self.max_events
+                # purge oldest events and their cache entries
+                for evt in self.eventlist[:overflow]:
+                    event_key = (evt[1], evt[2])
+                    if event_key in self.eventCache:
+                        del self.eventCache[event_key]
+                self.eventlist = self.eventlist[overflow:]
 
     def add_event(self, event) -> None:
         logger.debug(f"OutpostView {self.view} adding event {event}")
@@ -992,154 +1145,6 @@ class MenuPanel(ttk.Frame):
         self.scrollposition += event.delta
         self.canvas.yview_moveto(self.scrollposition / self.canvasheight)
 
-class TimeSlotItem(tk.Frame):
-    """Time slot representing an hour with event count"""
-    def __init__(self, parent, dateYMD, start_hour, event_count, first_event_idx):
-        tk.Frame.__init__(self, parent, bg='gray20', relief=tk.RAISED, borderwidth=2, highlightthickness=0, width=550)
-
-        self.first_event_idx = first_event_idx
-        self.columnconfigure(0, weight=1)
-
-        date_str = date.fromisoformat(dateYMD).strftime('%A, %B %d')
-        # ('%I:%M %p - %A %B %d, %Y') for full timestamp formatting
-
-        # Time range label
-        self.time_label = tk.Label(self,
-                                   text=f"{date_str} {start_hour:02d}:00 - {start_hour:02d}:59",
-                                   font=('TkDefaultFont', 13, 'bold'),
-                                   bg='gray20', fg='white', anchor='w',
-                                   highlightthickness=0, borderwidth=0)
-        self.time_label.grid(row=0, column=0, sticky='ew', padx=15, pady=(8, 2))
-
-        # Event count label
-        self.count_label = tk.Label(self,
-                                    text=f"{event_count} event{'s' if event_count != 1 else ''}",
-                                    font=('TkDefaultFont', 10),
-                                    bg='gray20', fg='lightgray', anchor='w',
-                                    highlightthickness=0, borderwidth=0)
-        self.count_label.grid(row=1, column=0, sticky='ew', padx=15, pady=(0, 8))
-
-        # Arrow indicator
-        self.arrow_label = tk.Label(self, text="→",
-                                    font=('TkDefaultFont', 18),
-                                    bg='gray20', fg='chartreuse',
-                                    highlightthickness=0, borderwidth=0)
-        self.arrow_label.grid(row=0, column=1, rowspan=2, padx=15)
-
-        # Bind click handlers ONLY to labels
-        for widget in [self.time_label, self.count_label, self.arrow_label]:
-            widget.bind('<Button-1>', self.on_click)
-
-    def on_click(self, event=None):
-        """Jump to first event in this time slot"""
-        logger.debug(f"TimeSlot selected, jumping to event {self.first_event_idx}")
-        app.eventIdx = self.first_event_idx
-        app.select_event(self.first_event_idx)
-        app.show_page(UserPage.PLAYER)
-
-class EventListPage(tk.Canvas):
-    """Full-screen scrollable event list organized by time slots"""
-    def __init__(self, outpost_views):
-        tk.Canvas.__init__(self, width=800, height=480, borderwidth=0,
-                          highlightthickness=0, background="black")
-
-        self.outpost_views = outpost_views
-        self.current_view = None
-        self.last_event_count = 0
-
-        # Scrollable panel for time slots - full screen width minus button area
-        list_width = 720
-        slot_height = 75  # Height per time slot
-        max_slots = 24    # 24 hours per day
-        content_height = slot_height * max_slots
-        visible_height = 480  # Full screen height
-        self.event_panel = MenuPanel(self, list_width, content_height, show_scrollbar=True, visible_height=visible_height)
-        self.event_panel.interior.columnconfigure(0, weight=1)  # Allow column to expand
-        self.create_window(0, 0, window=self.event_panel, anchor=tk.NW)
-
-        # Back button (top right)
-        self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
-        id = self.create_image(730, 10, anchor="nw", image=self.close_img)
-        self.tag_bind(id, "<Button-1>", lambda e: app.show_page(UserPage.PLAYER))
-
-        # View title at top
-        self.title_text = self.create_text(
-            365, 30, text="Event List",
-            fill='chartreuse', font=('TkDefaultFont', 14, 'bold')
-        )
-
-    def refresh_list(self, force=False):
-        """Rebuild time-slot list for current view"""
-        # Guard against no view selected
-        if not app._current_view:
-            return
-
-        view = self.outpost_views[app._current_view]
-
-        # Check if refresh needed
-        if not force and self.current_view == app._current_view:
-            if self.last_event_count == view.event_count():
-                return
-
-        self.current_view = app._current_view
-        self.last_event_count = view.event_count()
-
-        # Update title with total count
-        total = view.event_count()
-        self.itemconfig(self.title_text, text=f"{view.description} - {total} Events")
-
-        # Clear existing items
-        for child in self.event_panel.interior.winfo_children():
-            child.destroy()
-
-        # Build time slot list
-        if view.event_count() > 0:
-            # Group events by hour
-            time_slots = self._group_events_by_date_and_hour(view.eventlist)
-
-            # Build time slot list (newest first)
-            for display_idx, (time_key, slot_data) in enumerate(
-                    sorted(time_slots.items(), reverse=True)):
-                dateYMD = time_key[0]
-                start_hour = time_key[1]
-                count = slot_data['count']
-                first_idx = slot_data['first_idx']
-
-                item = TimeSlotItem(self.event_panel.interior,
-                                   dateYMD, start_hour, count, first_idx)
-                # Don't use sticky='ew' - leave right side empty for scrolling
-                item.grid(row=display_idx, column=0, sticky='w', padx=10, pady=6)
-        else:
-            no_events = tk.Label(self.event_panel.interior,
-                                text="No events recorded",
-                                font=('TkDefaultFont', 12),
-                                bg='black', fg='gray')
-            no_events.grid(row=0, column=0, padx=10, pady=50)
-
-        # Update scroll region
-        self.event_panel.interior.update_idletasks()
-        bbox = self.event_panel.canvas.bbox("all")
-        if bbox:
-            self.event_panel.canvas.config(scrollregion=bbox)
-
-    def _group_events_by_date_and_hour(self, eventlist):
-        """Group events into hourly time slots"""
-        slots = {}
-
-        for idx, (timestamp, date, event_id, size) in enumerate(eventlist):
-            # Extract hour from timestamp
-            hour = timestamp.hour
-
-            if (date, hour) not in slots:
-                slots[(date, hour)] = {
-                    'count': 0,
-                    'first_idx': idx  # Index of first event in this hour
-                }
-
-            slots[(date, hour)]['count'] += 1
-
-        return slots
-
 class OutpostMenuitem(ttk.Frame):
     def __init__(self, parent, view, outpost_views):
         ttk.Frame.__init__(self, parent, borderwidth=0)
@@ -1207,6 +1212,19 @@ class SettingsPage(tk.Canvas):
             text="No view selected",
             fill="gray", font=('TkDefaultFont', 10, 'italic')
         )
+
+        # Storage Report button
+        y_pos += button_height + button_spacing + 30
+        self.storage_btn = tk.Button(
+            self,
+            text="Storage Report",
+            command=lambda: app.show_page(UserPage.STORAGE),
+            bg='#2E86AB', fg='white',
+            font=('TkDefaultFont', 14, 'bold'),
+            width=40, height=2,
+            relief=tk.RAISED, bd=3
+        )
+        self.create_window(400, y_pos, window=self.storage_btn, anchor="n")
 
         # Close/Back button
         self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
@@ -1494,6 +1512,12 @@ class Application(ttk.Frame):
         self.sentinel_subscriber = SentinelSubscriber(CFG['sentinel'])
         self.eventList_updater = EventListUpdater(self.sentinel_subscriber.eventQueue, self.newEvent, self.outpost_views)
 
+        # Background history loader — deferred until EventListUpdater finishes
+        # initial load to avoid race where set_event_list() overwrites prepended history
+        self.historyQ = multiprocessing.Queue()
+        self.history_loading = False
+        self.history_loader = None
+
         # Initialize video exporter if configured
         self.video_exporter = None
         enable_share = False
@@ -1507,9 +1531,10 @@ class Application(ttk.Frame):
 
         self.pages = [PlayerPage(enable_share=enable_share),
                       OutpostPage(self.outpost_views),
-                      EventListPage(self.outpost_views),
+                      CalendarPage(self, self.outpost_views),
                       SettingsPage(),
-                      MotionCalibrationPage(self, self.outpost_views)]
+                      MotionCalibrationPage(self, self.outpost_views),
+                      StoragePage(self, CFG['datapumps'])]
         self.auto_play = False
         self.auto_pause = None
         self.move_next = False
@@ -1564,12 +1589,15 @@ class Application(ttk.Frame):
             if page == UserPage.CALIBRATE:
                 self.pages[UserPage.CALIBRATE].resume_calibration()
 
-            # Refresh event list when navigating to it
+            # Refresh calendar when navigating to it
             if page == UserPage.EVENTS:
-                self.pages[UserPage.EVENTS].refresh_list(force=True)
+                self.pages[UserPage.EVENTS].refresh_calendar()
             # Update settings page view label when showing settings
             if page == UserPage.SETTINGS:
                 self.pages[UserPage.SETTINGS].update_view_label()
+            # Refresh storage report when navigating to it
+            if page == UserPage.STORAGE:
+                self.pages[UserPage.STORAGE].refresh()
 
             self.pages[self.current_page].grid_remove()
             self.pages[page].grid(row=0, column=0)
@@ -1580,26 +1608,29 @@ class Application(ttk.Frame):
         """Get the currently selected view name"""
         return self._current_view
 
-    def select_outpost_view(self, viewname=None, auto_play=False):
-        """Select a live outpost view"""
-        if not viewname:
-            viewname = self._current_view
+    def _load_viewer_source(self, viewname):
+        """Load an outpost view into the PlayerDaemon without changing page"""
         if viewname != self._current_view:
             self._current_view = viewname
         view = self.outpost_views[viewname]
         source_cmd = ((PlayerCommand.VIEWER, view.datapump, view.publisher, viewname), view.imgsize)
-        self.state_manager.request_transition(StateChange.LOAD, "app.select_outpost_view()", source_cmd)
-        self.auto_play = auto_play
-        self.eventIdx = view.event_count()
-        self.show_page(UserPage.PLAYER)
+        self.state_manager.request_transition(StateChange.LOAD, "app._load_viewer_source()", source_cmd)
         self.view = view
+
+    def select_outpost_view(self, viewname=None, auto_play=False):
+        """Select a live outpost view"""
+        if not viewname:
+            viewname = self._current_view
+        self._load_viewer_source(viewname)
+        self.auto_play = auto_play
+        self.eventIdx = self.outpost_views[viewname].event_count()
+        self.show_page(UserPage.PLAYER)
 
     def select_event(self, idx, move_next=False):
         """Select a specific event from the event list for the current view"""
         self.move_next = move_next  # user pressed next button, assume auto-advance after event
         if move_next:
             logger.debug(f"Selecting event {idx} with auto-advance enabled")
-            self.state_manager.request_transition(StateChange.AUTO, "app.select_event()", idx)
         (dt, date, event, size) = self.view.eventlist[idx]
         source_cmd = ((PlayerCommand.EVENT, self.view.datapump, self._current_view, date, event, size), size)
         self.state_manager.request_transition(StateChange.LOAD, "app.select_event()", source_cmd)
@@ -1631,6 +1662,7 @@ class Application(ttk.Frame):
         """Enter motion calibration mode for a view"""
         self.pages[UserPage.CALIBRATE].start_calibration(viewname)
         self.show_page(UserPage.CALIBRATE)
+        self.auto_play = True
 
     def export_event(self, viewname, date, event):
         """Queue an event for video export"""
@@ -1656,9 +1688,41 @@ class Application(ttk.Frame):
 
         # New image data is available from the player thread
         if self.dataReady.is_set():
-            self.player_panel.update_image(self.viewer.get_imgdata())
+            image = self.viewer.get_imgdata()
+            if self.current_page == UserPage.CALIBRATE:
+                self.pages[UserPage.CALIBRATE].on_frame(image)
+            else:
+                self.player_panel.update_image(image)
             self.dataReady.clear()
             _delay += 1
+
+        # Start history loader once EventListUpdater has finished initial setup
+        if self.history_loader is None and self.eventList_updater.initial_load_done:
+            logger.info("EventListUpdater initial load complete, starting HistoryLoader")
+            self.history_loading = True
+            view_configs = {
+                vn: {
+                    'node': v.node,
+                    'sinktag': v.sinktag,
+                    'datapump': v.datapump,
+                    'imgsize': v.imgsize,
+                    'max_events': v.max_events,
+                    'current_count': v.event_count()
+                } for vn, v in self.outpost_views.items()
+            }
+            self.history_loader = HistoryLoader(view_configs, self.historyQ)
+
+        # Drain history loader queue (non-blocking, process one batch per update cycle)
+        if self.history_loading:
+            try:
+                (viewname, batch) = self.historyQ.get_nowait()
+                if viewname is None:
+                    self.history_loading = False
+                    logger.info("History loading complete")
+                elif viewname in self.outpost_views:
+                    self.outpost_views[viewname].prepend_history(batch)
+            except queue.Empty:
+                pass
 
         # New event data is available from the sentinel subscriber
         if self.newEvent.is_set():
@@ -1682,9 +1746,10 @@ class Application(ttk.Frame):
 def quit(event=None):
     root.destroy()
 
-root = tk.Tk()
-root.overrideredirect(True)
-root.attributes("-fullscreen", True)
-app = Application(master=root)
-app.reset_inactivity()
-app.mainloop()
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.attributes("-fullscreen", True)
+    app = Application(master=root)
+    app.reset_inactivity()
+    app.mainloop()

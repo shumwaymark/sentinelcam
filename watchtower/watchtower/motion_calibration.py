@@ -33,7 +33,10 @@ class MotionCalibrator:
     """Motion detection parameter processor
 
     Applies MOG2 background subtraction with configurable parameters
-    and annotates frames with motion detection results.
+    and annotates frames with motion detection results. Supports ROI
+    (Region of Interest) specified as percentage-based coordinates
+    matching the outpost convention: (X1,Y1),(X2,Y2) in integer
+    percent values from 0 to 100.
     """
 
     def __init__(self):
@@ -46,6 +49,9 @@ class MotionCalibrator:
             'gaussianBlur': 5,
             'noMotionThreshold': 5
         }
+        # ROI as percentage-based coordinates: (x1,y1),(x2,y2)
+        # Default (0,0),(100,100) means full frame
+        self.roi_pct = (0, 0, 100, 100)
         self.mog = self._build_mog()
 
     def _build_mog(self):
@@ -56,6 +62,27 @@ class MotionCalibrator:
             detectShadows=self.params['detectShadows']
         )
 
+    def update_roi(self, x1, y1, x2, y2):
+        """Update ROI percentage coordinates
+
+        Args:
+            x1, y1: Top-left corner as integer percentages (0-100)
+            x2, y2: Bottom-right corner as integer percentages (0-100)
+        """
+        self.roi_pct = (x1, y1, x2, y2)
+
+    def _roi_is_default(self):
+        """Check if ROI covers the full frame"""
+        return self.roi_pct == (0, 0, 100, 100)
+
+    def _roi_pixels(self, frame_h, frame_w):
+        """Convert ROI percentages to pixel coordinates"""
+        x1 = self.roi_pct[0] * frame_w // 100
+        y1 = self.roi_pct[1] * frame_h // 100
+        x2 = self.roi_pct[2] * frame_w // 100
+        y2 = self.roi_pct[3] * frame_h // 100
+        return x1, y1, x2, y2
+
     def update_params(self, new_params):
         """Update parameters and rebuild MOG if necessary"""
         rebuild = any(k in new_params for k in ['varThreshold', 'history'])
@@ -64,45 +91,82 @@ class MotionCalibrator:
             self.mog = self._build_mog()
 
     def process_frame(self, frame):
-        """Apply motion detection and return annotated frame
+        """Apply motion detection within the ROI and return annotated frame
+
+        Motion detection is applied only within the configured ROI region.
+        Contour coordinates are offset back to full-frame position for display.
+        When the ROI is not the full frame, a translucent overlay is rendered
+        over the excluded area.
 
         Args:
             frame: Input BGR image
 
         Returns:
             tuple: (annotated_frame, mask, has_motion)
-                - annotated_frame: Frame with motion rectangles overlaid
-                - mask: Binary motion mask
+                - annotated_frame: Frame with ROI overlay and motion rectangles
+                - mask: Binary motion mask (ROI-sized)
                 - has_motion: Boolean indicating if valid motion was detected
         """
-        # Convert and blur
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame_h, frame_w = frame.shape[:2]
+        rx1, ry1, rx2, ry2 = self._roi_pixels(frame_h, frame_w)
+
+        # Extract ROI sub-region for motion detection
+        roi = frame[ry1:ry2, rx1:rx2]
+
+        # Convert and blur within ROI only
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         ksize = self.params['gaussianBlur']
         gray = cv2.GaussianBlur(gray, (ksize, ksize), 0)
 
-        # Apply MOG
+        # Apply MOG to ROI
         mask = self.mog.apply(gray)
 
-        # Find contours
+        # Find contours within ROI
         cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
                                cv2.CHAIN_APPROX_SIMPLE)
         cnts = cnts[0] if len(cnts) == 2 else cnts[1]
 
-        # Annotate
+        # Build annotated result on full frame
         result = frame.copy()
+
+        # Draw translucent ROI overlay when not full-frame
+        if not self._roi_is_default():
+            overlay = result.copy()
+            # Fill excluded regions with a light bluish-gray tint
+            # by drawing filled rectangles over the areas outside the ROI
+            tint_color = (200, 190, 170)  # light bluish-gray in BGR
+            # Top strip
+            if ry1 > 0:
+                cv2.rectangle(overlay, (0, 0), (frame_w, ry1), tint_color, -1)
+            # Bottom strip
+            if ry2 < frame_h:
+                cv2.rectangle(overlay, (0, ry2), (frame_w, frame_h), tint_color, -1)
+            # Left strip (between top and bottom)
+            if rx1 > 0:
+                cv2.rectangle(overlay, (0, ry1), (rx1, ry2), tint_color, -1)
+            # Right strip (between top and bottom)
+            if rx2 < frame_w:
+                cv2.rectangle(overlay, (rx2, ry1), (frame_w, ry2), tint_color, -1)
+            # Blend: 70% overlay, 30% original for translucent effect
+            cv2.addWeighted(overlay, 0.35, result, 0.65, 0, result)
+
+        # Annotate contours — offset coordinates from ROI back to full frame
         valid_count = 0
 
         for c in cnts:
-            (x, y, w, h) = cv2.boundingRect(c)
+            (cx, cy, cw, ch) = cv2.boundingRect(c)
+            # Offset to full-frame coordinates
+            x = cx + rx1
+            y = cy + ry1
 
-            if (w >= self.params['minContourW'] and
-                h >= self.params['minContourH']):
+            if (cw >= self.params['minContourW'] and
+                ch >= self.params['minContourH']):
                 # Valid motion - green
-                cv2.rectangle(result, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.rectangle(result, (x, y), (x + cw, y + ch), (0, 255, 0), 2)
                 valid_count += 1
             else:
                 # Too small - red
-                cv2.rectangle(result, (x, y), (x + w, y + h), (0, 0, 255), 1)
+                cv2.rectangle(result, (x, y), (x + cw, y + ch), (0, 0, 255), 1)
 
         # Status overlay
         status = f"MOTION: {valid_count} objects" if valid_count > 0 else "NO MOTION"
@@ -175,6 +239,48 @@ class MotionCalibrationPage(tk.Canvas):
                                     length=150, command=self.on_param_change)
         self.create_window(380, control_y, window=self.blur_slider, anchor="w")
 
+        # ROI controls (next row)
+        control_y += 40
+        self.create_text(20, control_y, text="ROI:", anchor="w",
+                        fill="white", font=('TkDefaultFont', 10))
+
+        # ROI corner sliders — percentage-based (0-100)
+        self.roi_x1 = tk.IntVar(value=0)
+        self.roi_y1 = tk.IntVar(value=0)
+        self.roi_x2 = tk.IntVar(value=100)
+        self.roi_y2 = tk.IntVar(value=100)
+
+        lbl_font = ('TkDefaultFont', 8)
+        slider_len = 80
+
+        self.create_text(60, control_y, text="X1:", anchor="w",
+                        fill="#AAAAAA", font=lbl_font)
+        roi_x1_slider = tk.Scale(self, from_=0, to=95, orient=tk.HORIZONTAL,
+                                  variable=self.roi_x1, length=slider_len,
+                                  command=self.on_roi_change)
+        self.create_window(85, control_y, window=roi_x1_slider, anchor="w")
+
+        self.create_text(190, control_y, text="Y1:", anchor="w",
+                        fill="#AAAAAA", font=lbl_font)
+        roi_y1_slider = tk.Scale(self, from_=0, to=95, orient=tk.HORIZONTAL,
+                                  variable=self.roi_y1, length=slider_len,
+                                  command=self.on_roi_change)
+        self.create_window(215, control_y, window=roi_y1_slider, anchor="w")
+
+        self.create_text(320, control_y, text="X2:", anchor="w",
+                        fill="#AAAAAA", font=lbl_font)
+        roi_x2_slider = tk.Scale(self, from_=5, to=100, orient=tk.HORIZONTAL,
+                                  variable=self.roi_x2, length=slider_len,
+                                  command=self.on_roi_change)
+        self.create_window(345, control_y, window=roi_x2_slider, anchor="w")
+
+        self.create_text(450, control_y, text="Y2:", anchor="w",
+                        fill="#AAAAAA", font=lbl_font)
+        roi_y2_slider = tk.Scale(self, from_=5, to=100, orient=tk.HORIZONTAL,
+                                  variable=self.roi_y2, length=slider_len,
+                                  command=self.on_roi_change)
+        self.create_window(475, control_y, window=roi_y2_slider, anchor="w")
+
         # Action buttons (right side)
         button_x = 680
 
@@ -244,6 +350,22 @@ class MotionCalibrationPage(tk.Canvas):
         self.current_image = convert_tkImage(annotated)
         self.itemconfig(self.image, image=self.current_image)
 
+    def on_roi_change(self, value):
+        """Handle ROI slider changes, enforcing x1<x2 and y1<y2"""
+        if self.calibrator:
+            x1 = self.roi_x1.get()
+            y1 = self.roi_y1.get()
+            x2 = self.roi_x2.get()
+            y2 = self.roi_y2.get()
+            # Enforce minimum separation
+            if x2 <= x1:
+                x2 = min(x1 + 5, 100)
+                self.roi_x2.set(x2)
+            if y2 <= y1:
+                y2 = min(y1 + 5, 100)
+                self.roi_y2.set(y2)
+            self.calibrator.update_roi(x1, y1, x2, y2)
+
     def on_param_change(self, value):
         """Handle slider changes"""
         if self.calibrator:
@@ -310,11 +432,13 @@ class MotionCalibrationPage(tk.Canvas):
 
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
+        roi = self.calibrator.roi_pct
         config = {
             'viewname': view.view,
             'node': view.node,
             'size': view.imgsize,
             'motion_params': self.calibrator.params,
+            'ROI': f"({roi[0]},{roi[1]}),({roi[2]},{roi[3]})",
             'calibrated_at': datetime.now().isoformat()
         }
 
@@ -335,4 +459,9 @@ class MotionCalibrationPage(tk.Canvas):
         self.min_contour.set(21)
         self.no_motion_thresh.set(5)
         self.blur_size.set(5)
+        self.roi_x1.set(0)
+        self.roi_y1.set(0)
+        self.roi_x2.set(100)
+        self.roi_y2.set(100)
         self.on_param_change(None)
+        self.on_roi_change(None)
