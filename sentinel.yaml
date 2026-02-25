@@ -74,6 +74,14 @@ task_list:
         config: /home/ops/sentinel/tasks/MeasureRingLatency.yaml
         class: 1
 
+# Engine health heuristics for automatic degradation detection
+health:
+  low_frame_threshold: 5       # frames below this count flag a low-frame completion
+  strike_limit: 3              # consecutive low-frame jobs before triggering restart
+  fail_strike_limit: 5         # consecutive outright failures before restart
+  restart_cooldown: 300        # seconds between automatic restarts per engine
+  max_auto_restarts: 10        # lifetime limit before giving up
+
 # Configure logging publication over 0MQ
 logconfig:
     version: 1

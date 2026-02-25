@@ -80,6 +80,14 @@ face_detection_confidence:
 # Debug mode flag
 debug_mode: false
 
+# Engine health heuristic configuration
+sentinel_health:
+  low_frame_threshold: 5       # frames below this count flag a low-frame completion
+  strike_limit: 3              # consecutive low-frame jobs before triggering restart
+  fail_strike_limit: 5         # consecutive outright failures before restart
+  restart_cooldown: 300        # seconds between automatic restarts per engine
+  max_auto_restarts: 10        # lifetime limit before giving up
+
 # Ring buffer models - image sizes and buffer lengths
 sentinel_ring_buffer_models:
   default:

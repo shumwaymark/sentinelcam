@@ -16,6 +16,7 @@ import asyncio
 import multiprocessing
 from multiprocessing import sharedctypes
 from zmq.asyncio import Context as AsyncContext
+from collections import deque
 from datetime import datetime
 from ast import literal_eval
 import cv2
@@ -486,6 +487,15 @@ class JobTasking:
         #                         End of TaskEngine
         # ----------------------------------------------------------------------
 
+class EngineHealth:
+    def __init__(self, cooldown=300):
+        self.recent_jobs = deque(maxlen=10)  # (task, images, rate, status, elapsed)
+        self.consecutive_failures = 0
+        self.consecutive_low_frames = 0
+        self.last_restart = None        # datetime
+        self.total_restarts = 0
+        self.restart_cooldown = cooldown  # seconds between automatic restarts
+
 class TaskEngine:
 
     FAIL_LIMIT = 3
@@ -509,6 +519,8 @@ class TaskEngine:
         self.taskCFG = taskCFG
         self._asyncSUB = asyncSUB
         self.restart_count = 0
+        _hcfg = CFG.get('health', {})
+        self.health = EngineHealth(cooldown=_hcfg.get('restart_cooldown', 300))
         self.taskQ = multiprocessing.Queue()
         self.wire = RingWire(SOCKDIR, engineName)
         ringmodel = ringCFG[config["ring_buffers"]]
@@ -678,6 +690,12 @@ class JobManager:
         self.datafeeds = {}
         self._default_pump = default_pump
         self._asyncSUB = _asyncSUB
+        # Health heuristic configuration
+        _hcfg = CFG.get('health', {})
+        self._low_frame_threshold = _hcfg.get('low_frame_threshold', 5)
+        self._strike_limit = _hcfg.get('strike_limit', 3)
+        self._fail_strike_limit = _hcfg.get('fail_strike_limit', 5)
+        self._max_auto_restarts = _hcfg.get('max_auto_restarts', 10)
         for engine in engineCFG:
             self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, default_pump, _asyncSUB)
             for jobclass in self.engines[engine].getClasses():
@@ -711,6 +729,44 @@ class JobManager:
             logging.critical(f"TaskEngine '{engineName}' exceeded restart limit ({TaskEngine.FAIL_LIMIT}), removing engine.")
         # Restart failed or limit exceeded — remove from engine pool
         del self.engines[engineName]
+
+    def _check_engine_health(self, engine, engineName) -> None:
+        """Evaluate engine health counters and trigger restart if thresholds exceeded."""
+        # Check consecutive low-frame completions (Coral degradation signature)
+        if engine.health.consecutive_low_frames >= self._strike_limit:
+            if engine.health.total_restarts >= self._max_auto_restarts:
+                logging.critical(f"Engine '{engineName}' exceeded lifetime auto-restart "
+                                 f"limit ({self._max_auto_restarts}), no further restarts")
+                engine.health.consecutive_low_frames = 0
+                return
+            if engine.health.last_restart is None or \
+               (datetime.now() - engine.health.last_restart).total_seconds() > engine.health.restart_cooldown:
+                logging.warning(f"Engine '{engineName}' health alert: "
+                                f"{engine.health.consecutive_low_frames} consecutive low-frame "
+                                f"completions, triggering restart")
+                if engine.restart(self._default_pump):
+                    engine.health.last_restart = datetime.now()
+                    engine.health.total_restarts += 1
+                engine.health.consecutive_low_frames = 0
+                engine.health.consecutive_failures = 0
+            return
+        # Check consecutive outright failures
+        if engine.health.consecutive_failures >= self._fail_strike_limit:
+            if engine.health.total_restarts >= self._max_auto_restarts:
+                logging.critical(f"Engine '{engineName}' exceeded lifetime auto-restart "
+                                 f"limit ({self._max_auto_restarts}), no further restarts")
+                engine.health.consecutive_failures = 0
+                return
+            if engine.health.last_restart is None or \
+               (datetime.now() - engine.health.last_restart).total_seconds() > engine.health.restart_cooldown:
+                logging.warning(f"Engine '{engineName}' health alert: "
+                                f"{engine.health.consecutive_failures} consecutive failures, "
+                                f"triggering restart")
+                if engine.restart(self._default_pump):
+                    engine.health.last_restart = datetime.now()
+                    engine.health.total_restarts += 1
+                engine.health.consecutive_failures = 0
+                engine.health.consecutive_low_frames = 0
 
     def _releaseJob(self, jobid, engine) -> None:
         logging.debug(f"Release job {jobid}")
@@ -865,6 +921,20 @@ class JobManager:
                             if tag == TaskEngine.TaskDONE:
                                 engine.restart_count = 0  # reset on successful completion
                             logging.debug(f"Engine {engine.getName()} gone idle.")
+                            # Update engine health counters
+                            engineName = engine.getName()
+                            elapsed = jobreq.jobEndTime - jobreq.jobStartTime if jobreq.jobStartTime else None
+                            engine.health.recent_jobs.append(
+                                (jobreq.jobTask, task_stats[0], task_stats[1], tag, elapsed))
+                            if tag == TaskEngine.TaskFAIL:
+                                engine.health.consecutive_failures += 1
+                            else:
+                                engine.health.consecutive_failures = 0
+                            if engine.accelerator == 'coral' and task_stats[0] <= self._low_frame_threshold:
+                                engine.health.consecutive_low_frames += 1
+                            else:
+                                engine.health.consecutive_low_frames = 0
+                            self._check_engine_health(engine, engineName)
                         if self.ondeck[jobreq.jobClass] == jobreq:
                             self.ondeck[jobreq.jobClass] = None
 
