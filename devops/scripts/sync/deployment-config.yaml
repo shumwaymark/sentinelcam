@@ -15,6 +15,7 @@ deployment:
     - "*.rst"
     - "*.md"
     - "*.png"
+    - "*.jpg"
     - "*.txt"
     - "*.service"
     - "*.timer"
@@ -53,7 +54,7 @@ components:
       - imagenode/docs
       - imagenode/tests
       - imagenode/yaml
-    ansible_playbook: deploy-outpost-code-only.yaml
+    ansible_playbook: deploy-outpost.yaml
 
   - name: sentinel
     description: Sentinel monitoring and event detection service
@@ -64,7 +65,7 @@ components:
     exclude_patterns:
       - sentinel/tasks
       - sentinel/outpost
-    ansible_playbook: deploy-sentinel-code-only.yaml
+    ansible_playbook: deploy-sentinel.yaml
 
   - name: watchtower
     description: Watchtower outpost viewer and wall console
@@ -72,7 +73,7 @@ components:
       - watchtower/watchtower/
     required_files:
       - watchtower/watchtower/watchtower.py
-    ansible_playbook: deploy-watchtower-code-only.yaml
+    ansible_playbook: deploy-watchtower.yaml
 
   - name: camwatcher
     description: outpost subscriber and data pump
@@ -80,7 +81,7 @@ components:
       - camwatcher/camwatcher/
     required_files:
       - camwatcher/camwatcher/camwatcher.py
-    ansible_playbook: deploy-camwatcher-code-only.yaml
+    ansible_playbook: deploy-camwatcher.yaml
 
   - name: datapump
     description: Data pump service for event processing
@@ -88,7 +89,7 @@ components:
       - camwatcher/datapump/
     required_files:
       - camwatcher/datapump/datapump.py
-    ansible_playbook: deploy-datapump-code-only.yaml
+    ansible_playbook: deploy-datapump.yaml
 
   - name: imagehub
     description: Hub node imagenode receiver and storage service
