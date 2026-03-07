@@ -546,10 +546,12 @@ class DailyCleanup(Task):
                 pass
 
         # Check for face detection without recognition (fd1 but no fr1)
-        # These are less valuable, only count if within retention period
+        # Pipeline fail-safe: if fd1/trk ratio is LOW, face detection may not
+        # have been running properly — keep these events so they can be
+        # reprocessed once the pipeline is healthy again. If the ratio is
+        # healthy, the pipeline was operational and recognition simply didn't
+        # produce results for this event — low value, allow normal aging.
         if 'fd1' in data_types and 'fr1' not in data_types and not has_valuable_data:
-            # Has faces but no recognition attempted - borderline valuable
-            # Apply face detection ratio safety check
             if strategy == 'face_quality':
                 types = node_events['type'].value_counts()
                 trk_cnt = types.get('trk', 0)
@@ -557,11 +559,10 @@ class DailyCleanup(Task):
                 if trk_cnt > 0:
                     face_ratio = faces_cnt / trk_cnt
                     min_face_ratio = profile.get('min_face_ratio', 0.15)
-                    if face_ratio > min_face_ratio:
-                        # Face detection appears operational, but no recognition
-                        # Only valuable if very recent
-                        if event_age_days <= (retention_days * 0.5):
-                            has_valuable_data = True
+                    if face_ratio < min_face_ratio:
+                        # Low ratio — pipeline may have failed. Protect these
+                        # events from deletion until processing can be retried.
+                        has_valuable_data = True
 
         # Future: Add checks for other data types here
         # if 'pet' in data_types:
