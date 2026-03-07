@@ -8,7 +8,7 @@ node:
   REP_watcher: False
   queuemax: 50
   send_type: jpg
-  send_threading: True
+  send_threading: False
   print_settings: False
 
 {% set datasink = sentinelcam_outposts[inventory_hostname].datasink | default('data1') %}
