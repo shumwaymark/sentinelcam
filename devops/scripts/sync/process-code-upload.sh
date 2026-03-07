@@ -48,7 +48,7 @@ if ssh "$DATA1_USER@$DATA1_HOST" "mkdir -p /home/ops/sentinelcam/staging/incomin
     # Use rsync to preserve timestamps from ZIP extraction
     # The trailing slash on source ensures contents are transferred, not the directory itself
     if command -v rsync >/dev/null 2>&1; then
-        if rsync -az --checksum --progress \
+        if rsync -az --checksum \
            "$EXTRACT_DIR/" "$DATA1_USER@$DATA1_HOST:/home/ops/sentinelcam/staging/incoming/"; then
             log "[+] Transfer to data1 successful ($(find "$EXTRACT_DIR" -type f | wc -l) files)"
         else

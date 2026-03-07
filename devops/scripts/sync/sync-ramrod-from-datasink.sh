@@ -48,7 +48,7 @@ rsync -az --checksum --delete --itemize-changes --ignore-errors \
       grep -E '^[>.]f' | sed 's/^[>.]f[^ ]* /  /' | while read file; do
           log "Updated: $file"
       done
-    
+
 log "[+] Complete devops structure synced (ansible + scripts)"
 
 # Verify the ansible structure is complete
@@ -60,7 +60,7 @@ fi
 # Verify we have the expected current playbooks
 EXPECTED_PLAYBOOKS=(
     "deploy-datapump.yaml"
-    "deploy-outpost.yaml" 
+    "deploy-outpost.yaml"
     "deploy-camwatcher.yaml"
     "deploy-watchtower.yaml"
     "deploy-sentinel.yaml"
@@ -87,19 +87,6 @@ fi
 
 log "[+] Ansible structure verification complete"
 
-# Run production validation before deployment
-log "Running production validation..."
-if [ -f "$SENTINELCAM_HOME/devops/scripts/deployment/production-validation.sh" ]; then
-    if "$SENTINELCAM_HOME/devops/scripts/deployment/production-validation.sh"; then
-        log "[+] Production validation passed"
-    else
-        log "ERROR: Production validation failed"
-        exit 1
-    fi
-else
-    log "WARNING: Production validation script not found at expected location"
-fi
-
 # Determine what components need deployment based on deploy flags
 log "Checking deployment flags from datasink..."
 deploy_components=()
@@ -117,17 +104,41 @@ if [ ${#deploy_components[@]} -eq 0 ]; then
     deploy_components=("datapump" "camwatcher" "outpost" "watchtower" "sentinel")
 fi
 
+# Determine which Ansible host groups are actually needed for this deployment
+validation_groups=()
+for component in "${deploy_components[@]}"; do
+    case $component in
+        "datapump"|"camwatcher")
+            [[ " ${validation_groups[*]} " =~ " datasinks " ]] || validation_groups+=("datasinks")
+            ;;
+        "outpost")
+            [[ " ${validation_groups[*]} " =~ " outposts " ]] || validation_groups+=("outposts")
+            ;;
+        "watchtower")
+            [[ " ${validation_groups[*]} " =~ " watchtowers " ]] || validation_groups+=("watchtowers")
+            ;;
+        "sentinel")
+            [[ " ${validation_groups[*]} " =~ " sentinels " ]] || validation_groups+=("sentinels")
+            ;;
+    esac
+done
+
+# Run production validation against only the groups we're deploying to
+log "Running production validation for groups: ${validation_groups[*]}..."
+if [ -f "$SENTINELCAM_HOME/devops/scripts/deployment/production-validation.sh" ]; then
+    if "$SENTINELCAM_HOME/devops/scripts/deployment/production-validation.sh" ${validation_groups[*]}; then
+        log "[+] Production validation passed"
+    else
+        log "ERROR: Production validation failed"
+        exit 1
+    fi
+else
+    log "WARNING: Production validation script not found - skipping validation"
+fi
+
 # Execute deployments using current ansible implementation
 log "Executing deployments using current playbook structure..."
 cd "$ANSIBLE_HOME"
-
-# Check ansible connectivity first
-if ansible all -i inventory/production.yaml -m ping --one-line > /dev/null 2>&1; then
-    log "[+] Ansible connectivity verified"
-else
-    log "ERROR: Ansible connectivity check failed"
-    exit 1
-fi
 
 # Deploy each flagged component using appropriate code-only playbook
 deployment_success=true
@@ -136,7 +147,7 @@ for component in "${deploy_components[@]}"; do
         "datapump")
             playbook="playbooks/deploy-datapump.yaml"
             ;;
-        "camwatcher") 
+        "camwatcher")
             playbook="playbooks/deploy-camwatcher.yaml"
             ;;
         "outpost")
@@ -153,10 +164,10 @@ for component in "${deploy_components[@]}"; do
             continue
             ;;
     esac
-    
+
     if [ -f "$playbook" ]; then
         log "Deploying $component using $playbook..."
-        
+
         if ansible-playbook -i inventory/production.yaml "$playbook" --tags deploy; then
             log "[+] $component deployment completed successfully"
         else
