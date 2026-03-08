@@ -1736,7 +1736,8 @@ class Application(ttk.Frame):
                 # Only reset eventIdx if not actively browsing history
                 if viewname == self._current_view and not self.is_browsing_history():
                     self.eventIdx = self.view.event_count()
-                if self.state_manager.current_state in [PlayerState.PAUSED, PlayerState.READY, PlayerState.IDLE]:
+                if self.current_page == UserPage.PLAYER and \
+                        self.state_manager.current_state in [PlayerState.PAUSED, PlayerState.READY, PlayerState.IDLE]:
                     self.select_outpost_view(viewname, auto_play=False)
                     self.player_panel.update_image(image)
             self.newEvent.clear()
