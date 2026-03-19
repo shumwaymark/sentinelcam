@@ -4,6 +4,7 @@ import json
 import logging
 import logging.config
 import pickle
+import time
 import zlib
 import zmq
 import numpy as np
@@ -138,6 +139,65 @@ def load_storage_report(sentinelcam_root):
     except Exception:
         return None
 
+class RequestMetrics:
+    """Tracks request volume and response time for DataPump health reporting."""
+    WINDOW = 100  # sliding window size for response time averaging
+
+    def __init__(self):
+        self.start_time = datetime.now()
+        self.requests_served = 0
+        self.requests_since_hc = 0
+        self.last_request_time = None
+        self._response_times = ([],[])  # sliding window of recent elapsed seconds for (images, others)
+        self._req_start = None
+        self._req_start_cmd = ''
+
+    def begin(self, cmd=''):
+        """Call at the top of each request, before processing."""
+        self._req_start = time.monotonic()
+        self._req_start_cmd = cmd
+
+    def end(self):
+        """Call after the response has been sent for every request."""
+        self.requests_served += 1
+        self.requests_since_hc += 1
+        self.last_request_time = datetime.now()
+        if self._req_start is not None:
+            elapsed = time.monotonic() - self._req_start
+            if self._req_start_cmd == 'pic':  # image request
+                self._response_times[0].append(elapsed)
+                if len(self._response_times[0]) > self.WINDOW:
+                    self._response_times = (self._response_times[0][-self.WINDOW:], self._response_times[1])
+            else:
+                self._response_times[1].append(elapsed)
+                if len(self._response_times[1]) > self.WINDOW:
+                    self._response_times = (self._response_times[0], self._response_times[1][-self.WINDOW:])
+            self._req_start = None
+
+    def build_hc_response(self) -> dict:
+        """Build the HC response payload and reset the since-last-HC counter."""
+        now = datetime.now()
+        uptime = now - self.start_time
+        avg_ms = 0.0
+        if self._response_times:
+            avg_ms = round(sum(self._response_times[0] + self._response_times[1]) / (len(self._response_times[0]) + len(self._response_times[1])) * 1000, 3)
+            avg_ms_img = round(sum(self._response_times[0]) / len(self._response_times[0]) * 1000, 3) if self._response_times[0] else 0.0
+            avg_ms_other = round(sum(self._response_times[1]) / len(self._response_times[1]) * 1000, 3) if self._response_times[1] else 0.0
+        result = {
+            "flag": "HC",
+            "component": "datapump",
+            "timestamp": now.isoformat(),
+            "uptime": str(uptime).split('.')[0],
+            "requests_served": self.requests_served,
+            "requests_since_last_hc": self.requests_since_hc,
+            "avg_response_ms": avg_ms,
+            "avg_response_ms_img": avg_ms_img,
+            "avg_response_ms_other": avg_ms_other,
+            "last_request": self.last_request_time.isoformat() if self.last_request_time else None
+        }
+        self.requests_since_hc = 0
+        return result
+
 def main():
     CFG = readConfig(os.path.join(os.path.expanduser("~"), "datapump.yaml"))
     logging.config.dictConfig(CFG['logconfig'])
@@ -152,6 +212,7 @@ def main():
     # datafolder is .../sentinelcam/camwatcher, root is one level up
     sentinelcam_root = os.path.dirname(CFG['datafolder'])
     log.info("datapump response loop starting")
+    metrics = RequestMetrics()
     # TODO: Graceful shutdown / termination handling needed.
     # Need a policy for sending meaningful response codes back to the DataFeed.
     while True:
@@ -159,14 +220,17 @@ def main():
         request = msgpack.loads(msg)
         reply = 'OK'
         if 'cmd' in request:
+            metrics.begin(request['cmd'])
             try:
                 if request['cmd'] == 'dat':  # retrieve list of date folders
                     pump.pickle_and_send(reply, cData.get_date_list())
+                    metrics.end()
                     continue
                 elif request['cmd'] == 'idx':  # retrieve event index
                     cData.set_date(request['date'])
                     indx = cData.get_index()
                     pump.send_DataFrame(reply, indx)
+                    metrics.end()
                     continue
                 elif request['cmd'] == 'evt':  # retrieve event data
                     cData.set_date(request['date'])
@@ -177,6 +241,7 @@ def main():
                         _trk = 'trk'
                     evtData = cData.get_event_data(_trk)
                     pump.send_DataFrame(reply, evtData)
+                    metrics.end()
                     continue
                 elif request['cmd'] == 'img':  # retrieve list of image timestamps
                     cData.set_date(request['date'])
@@ -185,6 +250,7 @@ def main():
                     timestamps = [datetime.strptime(imageframe[-30:-4],"%Y-%m-%d_%H.%M.%S.%f")
                         for imageframe in image_list]
                     pump.pickle_and_send(reply, timestamps)
+                    metrics.end()
                     continue
                 elif request['cmd'] == 'pic':  # retrieve image frame
                     jpegfile = os.path.join(CFG['imagefolder'], request['date'],
@@ -196,6 +262,7 @@ def main():
                     else:
                         jpeg = tinyJPG
                     pump.send_jpg(reply, jpeg)
+                    metrics.end()
                     continue
                 elif request['cmd'] == 'del':  # delete event data
                     (date, event) = (request['date'], request['evt'])
@@ -210,14 +277,15 @@ def main():
                         camwatcher.send(json.dumps(camwatcher_control).encode('ascii'))
                         reply = camwatcher.recv()
                         log.debug(f"camwatcher delete response {reply}")
-                elif request['cmd'] == 'HC':  # health checkcd
-                    reply = b'OK'
+                elif request['cmd'] == 'HC':  # health check
+                    reply = json.dumps(metrics.build_hc_response()).encode('ascii')
                 elif request['cmd'] == 'str':  # storage report
                     report = load_storage_report(sentinelcam_root)
                     if report is not None:
                         pump.pickle_and_send(reply, report)
                     else:
                         pump.pickle_and_send('NoReport', None)
+                    metrics.end()
                     continue
                 else:
                     log.error(f"Unrecognized command: {str(request)}")
@@ -229,8 +297,10 @@ def main():
                 log.exception(f'Unexpected exception [{request}] command: {str(e)}')
                 reply = b'Exception'
         else:
+            metrics.begin()
             log.error(f"Invalid request: {request}")
             reply = b'Error'
+        metrics.end()
         pump.send_reply(reply)   # TypeError: not all arguments converted during string formatting
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import json
 import logging
 import logging.config
 import multiprocessing
+import shutil
 import subprocess
 import threading
 import traceback
@@ -27,10 +28,34 @@ from sentinelcam.utils import ImageSubscriber, readConfig
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "camwatcher.yaml"))
 
 outposts = {}                        # outpost image subscribers by (node,view)
+outpost_health = {}                  # per-outpost health tracking by node name
 threadLock = threading.Lock()        # coordinate updates to list of outpost subscribers
 dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer
 dateIndxQ = multiprocessing.Queue()  # for creating new camwatcher index entries
 sentinel_alertQ = multiprocessing.Queue()  # for sending alerts to sentinel
+
+_start_time = datetime.now()         # process start time for uptime tracking
+_events_today = multiprocessing.Value('L', 0)  # event counter for current date
+
+class OutpostHealth:
+    """Tracks heartbeat health for an individual outpost node."""
+    def __init__(self, node_name, expected_interval=300):
+        self.node = node_name
+        self.expected_interval = expected_interval  # heartbeat every 5 min
+        self.last_heartbeat = None      # datetime
+        self.last_fps = None
+        self.missed_heartbeats = 0      # consecutive missed
+        self.events_today = 0
+
+    def record_heartbeat(self, fps=None):
+        self.last_heartbeat = datetime.now()
+        self.last_fps = fps
+        self.missed_heartbeats = 0
+
+    def age_seconds(self):
+        if self.last_heartbeat is None:
+            return None
+        return (datetime.now() - self.last_heartbeat).total_seconds()
 
 # multiprocessing class implementing a subprocess image writer
 class ImageStreamWriter:
@@ -38,9 +63,10 @@ class ImageStreamWriter:
     def __init__(self, node_view, publisher, imagedir):
         self.node_view = node_view
         self._writeImages = multiprocessing.Value('i', 0)
+        self._frames_written = multiprocessing.Value('L', 0)  # monotonic frame counter for HC
         self._eventQueue = multiprocessing.Queue()
         self.process = multiprocessing.Process(target=self._image_subscriber, args=(
-            self._writeImages, self._eventQueue, publisher, node_view[1], imagedir))
+            self._writeImages, self._frames_written, self._eventQueue, publisher, node_view[1], imagedir))
         self.process.start()
         logging.debug(f"ImageStreamWriter started for {node_view} pid {self.process.pid} in {imagedir}")
 
@@ -52,7 +78,7 @@ class ImageStreamWriter:
             pass
         return path
 
-    def _image_subscriber(self, writeImages, eventQueue, publisher, view, outdir):
+    def _image_subscriber(self, writeImages, frames_written, eventQueue, publisher, view, outdir):
         receiver = ImageSubscriber(publisher, view)
         while True:
             eventID = eventQueue.get()
@@ -72,6 +98,7 @@ class ImageStreamWriter:
                     jpegfile = os.path.join(date_directory, jpegframe)
                     with open(jpegfile,"wb") as f:
                         f.write(frame)
+                    frames_written.value += 1
                     if writeImages.value:
                         dt, frame = receiver.receive()
                     else:
@@ -517,11 +544,70 @@ async def process_logs(loggers, sentinel_agent):
                 await dispatch_ote(topics[0], message[3:], sentinel_agent)
                 logging.debug(message)
             elif category == 'fps':  # Outpost image publishing heartbeat
-                logging.info(f"Outpost health '{topics[0]}' {message[3:]}")
+                node_name = topics[0]
+                # Parse FPS from heartbeat: fps(tick_count, looks, events, tick_rate, measured_fps)
+                try:
+                    fps_data = message[3:].strip()
+                    # Extract measured_fps from the last comma-separated value in parens
+                    parts = fps_data.strip('()').split(',')
+                    measured_fps = float(parts[-1].strip()) if len(parts) >= 5 else None
+                except (ValueError, IndexError):
+                    measured_fps = None
+                if node_name not in outpost_health:
+                    outpost_health[node_name] = OutpostHealth(node_name)
+                outpost_health[node_name].record_heartbeat(measured_fps)
+                logging.info(f"Outpost health '{node_name}' {message[3:]}")
             else:  # pass everything else along to the logger
                 await dispatch_logger(topics, message)
         else:
             await dispatch_logger(topics, message)
+
+def _build_hc_response():
+    """Build health check response from CamWatcher internal state."""
+    now = datetime.now()
+    uptime = now - _start_time
+    # Writer status
+    writers = {}
+    with threadLock:
+        for nv, writer in outposts.items():
+            key = f"{nv[0]}/{nv[1]}"
+            alive = writer.process.is_alive()
+            writers[key] = {
+                "alive": alive,
+                "pid": writer.process.pid if alive else None,
+                "frames_written": writer._frames_written.value
+            }
+    # CSVindex and SentinelAgent are checked indirectly — they're child processes
+    # started in main(). We track them by name if accessible via the config.
+    # Heartbeat status
+    heartbeats = {}
+    for node_name, health in outpost_health.items():
+        heartbeats[node_name] = {
+            "last_seen": health.last_heartbeat.isoformat() if health.last_heartbeat else None,
+            "fps": health.last_fps,
+            "age_seconds": round(health.age_seconds()) if health.age_seconds() is not None else None
+        }
+    # Disk usage
+    disk = {}
+    try:
+        data_path = CFG['data']['images']
+        usage = shutil.disk_usage(data_path)
+        disk = {
+            "total_gb": round(usage.total / (1024**3), 1),
+            "used_gb": round(usage.used / (1024**3), 1),
+            "percent": round(usage.used / usage.total * 100, 1)
+        }
+    except Exception:
+        pass
+    return {
+        "flag": "HC",
+        "component": "camwatcher",
+        "timestamp": now.isoformat(),
+        "uptime": str(uptime).split('.')[0],
+        "writers": writers,
+        "heartbeats": heartbeats,
+        "disk": disk
+    }
 
 async def control_loop(control_socket, log_socket):
     logging.info("camwatcher control loop started")
@@ -558,6 +644,8 @@ async def control_loop(control_socket, log_socket):
                 elif request['cmd'] == 'DelEvt':
                     # TODO: This code not currently restricted by FaceList.event_locked() control
                     dateIndxQ.put((CSVindex.CSV_delete, (request['date'], request['event'])))
+                elif request['cmd'] == 'HC':
+                    result = json.dumps(_build_hc_response())
                 else:
                     result = 'Error'
                     logging.error(f"Unknown control command: {request['cmd']}")

@@ -17,7 +17,7 @@ import multiprocessing
 from multiprocessing import sharedctypes
 from zmq.asyncio import Context as AsyncContext
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from ast import literal_eval
 import cv2
 import numpy as np
@@ -71,6 +71,8 @@ class JobRequest:
         self.priority = priority
         self.image_cnt = 0
         self.image_rate = 0.0
+        self.ring_start_avg = 0.0
+        self.ring_next_avg = 0.0
         logging.info(str(self.start_Message('SUBMIT')))
         with jobLock:
             taskList[self.jobID] = self
@@ -150,14 +152,15 @@ class JobRequest:
             'event': self.eventID,
             'jobid': self.jobID,
             'images': self.image_cnt,
-            'rate': self.image_rate
+            'rate': self.image_rate,
+            'ring_start_avg': round(self.ring_start_avg, 6),
+            'ring_next_avg': round(self.ring_next_avg, 6)
         })
 
     def full_history_report() -> None:
-        with jobLock:
-            logging.info("Start of history.")
-            for jobreq in taskList.values():
-                logging.info(jobreq.summary_JSON())
+        logging.info("Start of history.")
+        for jobreq in taskList.values():
+            logging.info(jobreq.summary_JSON())
         logging.info("End of history.")
 
 class RingWire:
@@ -267,12 +270,13 @@ class JobTasking:
         appropriate NumPy array by the child process.
     """
 
-    def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff) -> None:
+    def __init__(self, engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff, ringLatency) -> None:
         self._engine = engineName
         self._taskQ = taskQ
         self._rawRingBuffer = rawRingbuff
+        self._ringLatency = ringLatency
         self.process = multiprocessing.Process(target=self.taskHost, args=(
-            engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff))
+            engineName, pump, taskCFG, accelerator, taskQ, rawRingbuff, ringLatency))
         self.process.start()
 
     def terminate(self) -> None:
@@ -281,9 +285,10 @@ class JobTasking:
             self.process.join()
 
     # --------------------------------------------------------------------------------------------------
-    def taskHost(self, engineName, pump, taskCFG, accelerator, taskQ, _ringbuff):
+    def taskHost(self, engineName, pump, taskCFG, accelerator, taskQ, _ringbuff, ringLatency):
     # --------------------------------------------------------------------------------------------------
         try:
+            ring_start_sum, ring_start_max, ring_start_count, ring_next_sum, ring_next_max, ring_next_count = ringLatency
             taskpump = pump
             feed = DataFeed(taskpump)                        # useful for task-specific datapump access
             ringWire = feed.zmq_context.socket(zmq.REQ)      # IPC signaling for ring buffer control
@@ -312,6 +317,7 @@ class JobTasking:
                 self.frame_start = frametime.isoformat()
                 self.frame_offset = 0
                 _start_command = (JobManager.ReadSTART, (self.frame_start, newEvent, self.ringctrl, self.trktype))
+                t0 = time.monotonic()
                 ringWire.send(msgpack.packb(_start_command))
                 if newEvent:
                     # wait here for confirmation of ring buffer assignment
@@ -320,12 +326,23 @@ class JobTasking:
                         self.imagesize = self.jobreq.camsize
                         self.ringbuff = ringbuffers[self.imagesize]
                 bucket = msgpack.unpackb(ringWire.recv())
+                dt = time.monotonic() - t0
+                ring_start_sum.value += dt
+                ring_start_count.value += 1
+                if dt > ring_start_max.value:
+                    ring_start_max.value = dt
                 return bucket
 
             def ringNext() -> int:
                 self.frame_offset += 1
+                t0 = time.monotonic()
                 ringWire.send(msgpack.packb((JobManager.ReadNEXT, None)))
                 bucket = msgpack.unpackb(ringWire.recv())
+                dt = time.monotonic() - t0
+                ring_next_sum.value += dt
+                ring_next_count.value += 1
+                if dt > ring_next_max.value:
+                    ring_next_max.value = dt
                 return bucket
 
             def getRing() -> list:
@@ -489,6 +506,7 @@ class JobTasking:
 
 class EngineHealth:
     def __init__(self, cooldown=300):
+        self.job_count = 0
         self.recent_jobs = deque(maxlen=10)  # (task, images, rate, status, elapsed)
         self.consecutive_failures = 0
         self.consecutive_low_frames = 0
@@ -532,8 +550,19 @@ class TaskEngine:
         self.imagesize = (0,0)  # current image size
         self.ringBuffer = None  # current RingBuffer
         self.dataFeed = None    # current DataFeed
+        # Ring buffer latency tracking (child writes, parent reads at EOJ)
+        # ring_start: cost of ReadSTART (includes DataPump fetch — known high cost)
+        # ring_next: cost of ReadNEXT (pure _jobThread response time — the health signal)
+        self._ring_start_sum = multiprocessing.Value('d', 0.0)
+        self._ring_start_max = multiprocessing.Value('d', 0.0)
+        self._ring_start_count = multiprocessing.Value('L', 0)
+        self._ring_next_sum = multiprocessing.Value('d', 0.0)
+        self._ring_next_max = multiprocessing.Value('d', 0.0)
+        self._ring_next_count = multiprocessing.Value('L', 0)
+        self._ringLatency = (self._ring_start_sum, self._ring_start_max, self._ring_start_count,
+                             self._ring_next_sum, self._ring_next_max, self._ring_next_count)
         # Ready to fork() the child subprocess for this task engine:
-        self._engine = JobTasking(engineName, pump, taskCFG, self.accelerator, self.taskQ, self.rawBuffers)
+        self._engine = JobTasking(engineName, pump, taskCFG, self.accelerator, self.taskQ, self.rawBuffers, self._ringLatency)
         # establish handshake with child, connect to result publisher before continuing
         handshake = self.wire.recv()
         asyncSUB.connect(f"ipc://{SOCKDIR}/{engineName}.PUB")
@@ -571,8 +600,15 @@ class TaskEngine:
             logging.debug(f"{jobreq.engine}: starting job {jobreq.jobID}")
             self.jobreq = jobreq
             self.taskQ.put(jobreq)
-            self.task_start = time.time()
+            self.task_start = time.monotonic()
             self.image_cnt = 0
+            # Reset ring latency accumulators for this job
+            self._ring_start_sum.value = 0.0
+            self._ring_start_max.value = 0.0
+            self._ring_start_count.value = 0
+            self._ring_next_sum.value = 0.0
+            self._ring_next_max.value = 0.0
+            self._ring_next_count.value = 0
         return confirm_start
 
     def have_request(self) -> bool:
@@ -589,7 +625,15 @@ class TaskEngine:
         return self.image_cnt
 
     def get_image_rate(self) -> float:
-        return round((self.get_image_cnt() / (time.time() - self.task_start)), 2)
+        return round((self.get_image_cnt() / (time.monotonic() - self.task_start)), 2)
+
+    def get_ring_latency(self) -> tuple:
+        """Read ring latency from shared memory. Returns (start_avg, start_max, next_avg, next_max)."""
+        sc = self._ring_start_count.value
+        nc = self._ring_next_count.value
+        start_avg = self._ring_start_sum.value / sc if sc > 0 else 0.0
+        next_avg = self._ring_next_sum.value / nc if nc > 0 else 0.0
+        return (start_avg, self._ring_start_max.value, next_avg, self._ring_next_max.value)
 
     def is_alive(self) -> bool:
         return self._engine.process.is_alive()
@@ -644,6 +688,14 @@ class TaskEngine:
         self.ringBuffer = None
         self.dataFeed = None
 
+        # Step 5.5: Reset ring latency accumulators
+        self._ring_start_sum.value = 0.0
+        self._ring_start_max.value = 0.0
+        self._ring_start_count.value = 0
+        self._ring_next_sum.value = 0.0
+        self._ring_next_max.value = 0.0
+        self._ring_next_count.value = 0
+
         # Step 6: Create fresh multiprocessing.Queue
         self.taskQ = multiprocessing.Queue()
 
@@ -653,7 +705,7 @@ class TaskEngine:
         # Step 8: Fork new JobTasking child process
         self._engine = JobTasking(
             engineName, pump, self.taskCFG, self.accelerator,
-            self.taskQ, self.rawBuffers)
+            self.taskQ, self.rawBuffers, self._ringLatency)
 
         # Step 9: Complete handshake with timeout guard (10 seconds)
         poller = zmq.Poller()
@@ -672,12 +724,25 @@ class TaskEngine:
         logging.warning(f"TaskEngine '{engineName}' restarted successfully")
         return True
 
+class SnapshotRequest:
+    """Thread-safe state snapshot mechanism for the JobManager. Used for STATUS,
+    MAINTENANCE, and SHUTDOWN requests. The task_loop async coroutine creates a
+    SnapshotRequest, puts it on taskFeed, and awaits the event via run_in_executor.
+    The JobManager thread processes the request safely within its own context, populates
+    the result, and sets the event.
+    """
+    def __init__(self, kind):
+        self.kind = kind       # 'STATUS', 'MAINTENANCE', 'SHUTDOWN'
+        self.event = threading.Event()
+        self.result = None
+
 class JobManager:
 
     JobSTATUS = 0
     JobSUBMIT = 1
     JobSTART = 2
     JobCANCEL = 3
+    JobSNAPSHOT = 20
 
     ReadSTART = 10
     ReadNEXT = 11
@@ -696,10 +761,27 @@ class JobManager:
         self._strike_limit = _hcfg.get('strike_limit', 3)
         self._fail_strike_limit = _hcfg.get('fail_strike_limit', 5)
         self._max_auto_restarts = _hcfg.get('max_auto_restarts', 10)
+        self._queue_depth = 0
+        self._queue_hwm = 0
+        self._queue_latency = 0.0
+        self._queue_latency_hwm = 0.0
+        self._running_jobs = 0
+        self._jobs_completed = 0
+        self._jobs_failed = 0
+        self._start_time = datetime.now()
+        # --- Queue diagnostics ---
+        self._depth_hwm_snapshots = deque(maxlen=10)
+        self._latency_hwm_snapshots = deque(maxlen=10)
+        self._queue_by_class = {}
+        self._queue_by_class_hwm = {}
+        self._submission_times = deque()
+        self._submission_window = 300
+        self._engine_busy_start = {}
+        self._engine_busy_total = {}
         for engine in engineCFG:
             self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, default_pump, _asyncSUB)
-            for jobclass in self.engines[engine].getClasses():
-                self.ondeck[jobclass] = None
+            self.ondeck[engine] = None
+            self._engine_busy_total[engine] = 0.0
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -768,6 +850,127 @@ class JobManager:
                 engine.health.consecutive_failures = 0
                 engine.health.consecutive_low_frames = 0
 
+    def _build_status(self) -> dict:
+        """Build a STATUS snapshot from JobManager thread context.
+
+        Called safely within _jobThread — all state reads are single-threaded.
+        Returns dict suitable for JSON serialization.
+        """
+        now = datetime.now()
+        uptime = now - self._start_time
+        engine_status = {}
+        for name, engine in self.engines.items():
+            # Compute per-engine aggregate stats from recent_jobs deque
+            recent = list(engine.health.recent_jobs)
+            completed = sum(1 for r in recent if r[3] == TaskEngine.TaskDONE)
+            failed = sum(1 for r in recent if r[3] == TaskEngine.TaskFAIL)
+            fps_vals = [r[2] for r in recent if r[2] > 0]
+            elapsed_vals = [r[4].total_seconds() for r in recent if r[4] is not None]
+            ring_start_vals = [r[5] for r in recent if len(r) > 5 and r[5] > 0]
+            ring_next_vals = [r[6] for r in recent if len(r) > 6 and r[6] > 0]
+            current_job = None
+            status = "idle"
+            cur_ring_start_avg, cur_ring_start_max, cur_ring_next_avg, cur_ring_next_max = engine.get_ring_latency()
+            if engine.jobreq is not None:
+                status = "running"
+                current_job = engine.jobreq.jobTask
+            engine_status[name] = {
+                "alive": engine.is_alive(),
+                "accelerator": engine.accelerator,
+                "status": status,
+                "job_count": engine.health.job_count,
+                "current_task": current_job,
+                "recent_completed": completed,
+                "recent_failed": failed,
+                "avg_fps": round(sum(fps_vals) / len(fps_vals), 2) if fps_vals else 0.0,
+                "avg_elapsed_sec": round(sum(elapsed_vals) / len(elapsed_vals), 1) if elapsed_vals else 0.0,
+                "health": {
+                    "consecutive_low_frames": engine.health.consecutive_low_frames,
+                    "consecutive_failures": engine.health.consecutive_failures,
+                    "total_restarts": engine.health.total_restarts,
+                    "ring_start_avg": round(sum(ring_start_vals) / len(ring_start_vals), 6) if ring_start_vals else 0.0,
+                    "ring_start_max": round(max(ring_start_vals), 6) if ring_start_vals else 0.0,
+                    "ring_next_avg": round(sum(ring_next_vals) / len(ring_next_vals), 6) if ring_next_vals else 0.0,
+                    "ring_next_max": round(max(ring_next_vals), 6) if ring_next_vals else 0.0
+                }
+            }
+        queue_info = {
+            "queued": self._queue_depth,
+            "running": self._running_jobs,
+            "high_water_mark": self._queue_hwm,
+            "latency_sec": round(self._queue_latency, 2),
+            "latency_hwm_sec": round(self._queue_latency_hwm, 2)
+        }
+        # Engine utilization
+        wall_clock = (now - self._start_time).total_seconds()
+        utilization = {}
+        for name in self.engines:
+            busy = self._engine_busy_total.get(name, 0.0)
+            if name in self._engine_busy_start:
+                busy += (now - self._engine_busy_start[name]).total_seconds()
+            utilization[name] = round((busy / wall_clock) * 100, 1) if wall_clock > 0 else 0.0
+        # Submission rate
+        cutoff = now - timedelta(seconds=self._submission_window)
+        recent_submissions = sum(1 for t in self._submission_times if t >= cutoff)
+        return {
+            "flag": "HC",
+            "component": "sentinel",
+            "timestamp": now.isoformat(),
+            "uptime": str(uptime).split('.')[0],  # trim microseconds
+            "engines": engine_status,
+            "queue": queue_info,
+            "jobs_completed": self._jobs_completed,
+            "jobs_failed": self._jobs_failed,
+            # --- Queue diagnostics ---
+            "queue_by_class": dict(self._queue_by_class),
+            "queue_by_class_hwm": dict(self._queue_by_class_hwm),
+            "utilization_pct": utilization,
+            "submissions_5min": recent_submissions,
+            "depth_hwm_snapshots": list(self._depth_hwm_snapshots),
+            "latency_hwm_snapshots": list(self._latency_hwm_snapshots),
+        }
+
+    def _capture_queue_snapshot(self, trigger) -> dict:
+        """Capture a lightweight snapshot of queue and engine state.
+
+        Called from _jobThread when a queue HWM is broken. All state reads
+        are safe — we're in the JobManager thread context.
+        """
+        now = datetime.now()
+        engine_snapshot = {}
+        for name, engine in self.engines.items():
+            if engine.jobreq is not None:
+                jreq = engine.jobreq
+                elapsed = (now - jreq.jobStartTime).total_seconds() if jreq.jobStartTime else 0
+                engine_snapshot[name] = {
+                    "task": jreq.jobTask,
+                    "class": jreq.jobClass,
+                    "event": jreq.eventID[:8] if jreq.eventID else None,
+                    "elapsed_sec": round(elapsed, 1),
+                    "status": "running",
+                    "images": engine.get_image_cnt(),
+                    "rate": engine.get_image_rate(),
+                }
+            else:
+                engine_snapshot[name] = {"task": None, "status": "idle"}
+        with jobLock:
+            queued = [r for r in taskList.values() if r.jobStatus == JobRequest.Status_QUEUED]
+        task_breakdown = {}
+        for r in queued:
+            task_breakdown[r.jobTask] = task_breakdown.get(r.jobTask, 0) + 1
+        cutoff = now - timedelta(seconds=self._submission_window)
+        recent_submissions = sum(1 for t in self._submission_times if t >= cutoff)
+        return {
+            "trigger": trigger,
+            "timestamp": now.isoformat(),
+            "queue_depth": self._queue_depth,
+            "queue_latency_sec": round(self._queue_latency, 1),
+            "by_class": dict(self._queue_by_class),
+            "by_task": task_breakdown,
+            "engines": engine_snapshot,
+            "submissions_5min": recent_submissions,
+        }
+
     def _releaseJob(self, jobid, engine) -> None:
         logging.debug(f"Release job {jobid}")
         jreq = taskList[jobid]
@@ -777,7 +980,7 @@ class JobManager:
             jreq.camsize = self._getFrameDimensons(jreq)
         if not self.engines[engine].start_job(jreq):
             jreq.deregisterJOB(TaskEngine.TaskFAIL, (0,0))
-            self.ondeck[jreq.jobClass] = None
+            self.ondeck[engine] = None
 
     def _chainJob(self, jobid, task):
         logging.debug(f"Job {jobid} requested chain to {task}")
@@ -883,6 +1086,8 @@ class JobManager:
         return now_ondeck
 
     def _jobThread(self) -> None:
+        _diag_interval = 50
+        _diag_counter = 0
         logging.info("Job Manager thread ready")
         while not self._stop:
             if not taskFeed.empty():
@@ -892,18 +1097,33 @@ class JobManager:
                     tag_name = JobRequest.Status[tag] if 0 <= tag < len(JobRequest.Status) else f"Tag({tag})"
                     logging.debug(f"Job Manager has queue entry {(tag_name, msg)}")
 
-                    if tag == TaskEngine.TaskSUBMIT:
-                        # New task request received
+                    if tag == JobManager.JobSNAPSHOT:
+                        # Thread-safe snapshot request
+                        snapshot_req = msg
+                        if snapshot_req.kind == 'STATUS':
+                            snapshot_req.result = self._build_status()
+                        elif snapshot_req.kind == 'HISTORY':
+                            JobRequest.full_history_report()
+                            snapshot_req.result = True
+                        snapshot_req.event.set()
+
+                    elif tag == TaskEngine.TaskSUBMIT:
+                        # New task request received — find first idle engine that handles this class
                         jobreq = taskList[msg]
                         jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
-                        if jobreq.jobClass in self.ondeck:
-                            if self.ondeck[jobreq.jobClass] is None:
-                                self.ondeck[jobreq.jobClass] = jobreq
+                        self._submission_times.append(datetime.now())
+                        for engineName, engine in self.engines.items():
+                            if jobreq.jobClass in engine.getClasses():
+                                if self.ondeck[engineName] is None:
+                                    self.ondeck[engineName] = jobreq
+                                    break
 
                     elif tag == TaskEngine.TaskSTARTED:
                         # Task start confirmed
                         jobreq = taskList[msg]
-                        self.ondeck[jobreq.jobClass] = None
+                        if jobreq.engine in self.ondeck:
+                            self.ondeck[jobreq.engine] = None
+                        self._engine_busy_start[jobreq.engine] = datetime.now()
 
                     elif tag == TaskEngine.TaskCHAIN:
                         # Handle task chaining request
@@ -916,7 +1136,16 @@ class JobManager:
                         engine = self.engines.get(jobreq.engine)
                         if engine and engine.jobreq and engine.jobreq.jobID == msg:
                             engine.jobreq = None
+                            # Accumulate engine busy time
+                            busy_start = self._engine_busy_start.pop(jobreq.engine, None)
+                            if busy_start:
+                                self._engine_busy_total[jobreq.engine] = \
+                                    self._engine_busy_total.get(jobreq.engine, 0.0) + \
+                                    (datetime.now() - busy_start).total_seconds()
                             task_stats = (engine.get_image_cnt(), engine.get_image_rate())
+                            ring_start_avg, ring_start_max, ring_next_avg, ring_next_max = engine.get_ring_latency()
+                            jobreq.ring_start_avg = ring_start_avg
+                            jobreq.ring_next_avg = ring_next_avg
                             jobreq.deregisterJOB(tag, task_stats)
                             if tag == TaskEngine.TaskDONE:
                                 engine.restart_count = 0  # reset on successful completion
@@ -924,8 +1153,9 @@ class JobManager:
                             # Update engine health counters
                             engineName = engine.getName()
                             elapsed = jobreq.jobEndTime - jobreq.jobStartTime if jobreq.jobStartTime else None
+                            engine.health.job_count += 1
                             engine.health.recent_jobs.append(
-                                (jobreq.jobTask, task_stats[0], task_stats[1], tag, elapsed))
+                                (jobreq.jobTask, task_stats[0], task_stats[1], tag, elapsed, ring_start_avg, ring_next_avg))
                             if tag == TaskEngine.TaskFAIL:
                                 engine.health.consecutive_failures += 1
                             else:
@@ -935,8 +1165,13 @@ class JobManager:
                             else:
                                 engine.health.consecutive_low_frames = 0
                             self._check_engine_health(engine, engineName)
-                        if self.ondeck[jobreq.jobClass] == jobreq:
-                            self.ondeck[jobreq.jobClass] = None
+                            # Update completion counters
+                            if tag == TaskEngine.TaskDONE:
+                                self._jobs_completed += 1
+                            elif tag == TaskEngine.TaskFAIL:
+                                self._jobs_failed += 1
+                        if jobreq.engine in self.ondeck and self.ondeck[jobreq.engine] == jobreq:
+                            self.ondeck[jobreq.engine] = None
 
                     elif tag == TaskEngine.TaskBOMB:
                         # Handle engine failure — attempt restart
@@ -972,7 +1207,7 @@ class JobManager:
                             elif cmd == JobManager.ReadNEXT:
                                 engine.ringBuffer.frame_complete()
                                 engine.send_response(engine.ringBuffer.get())
-                        elif engine.cursor:
+                        if engine.cursor:
                             self._feedNext(engine)
                         # TODO: Need a mechanism to cleanly shutdown a
                         # running task in the event of DataFeed timeouts.
@@ -982,35 +1217,69 @@ class JobManager:
                 logging.error(f"TaskEngine '{engineName}' found dead, attempting restart.")
                 self._restart_engine(engineName)
 
-            # Assign jobs ondeck to available engines by class
+            # Assign jobs ondeck to available engines
             if runningTasks < len(self.engines):
-                for engine in self.engines.values():
+                for engineName, engine in self.engines.items():
                     if engine.getJobID() is None:
-                        for jobclass in engine.getClasses():
-                            jreq = self.ondeck.get(jobclass, None)
-                            if jreq is not None:
-                                # confirm that another engine has not already been assigned this request
-                                if jreq.jobID not in [e.getJobID() for e in self.engines.values()]:
-                                    logging.debug(f"Found on deck for class {jobclass}: {jreq.jobID}")
-                                    self._releaseJob(jreq.jobID, engine.getName())
-                                    break
+                        jreq = self.ondeck.get(engineName)
+                        if jreq is not None:
+                            logging.debug(f"Found on deck for engine {engineName}: {jreq.jobID}")
+                            self._releaseJob(jreq.jobID, engineName)
 
-                # Ventilate queued jobs to empty ondeck slots by priority
-                for jobclass in self.ondeck:
-                    if self.ondeck[jobclass] is None:
+                # Ventilate queued jobs to empty per-engine ondeck slots by priority
+                for engineName, engine in self.engines.items():
+                    if self.ondeck[engineName] is None:
+                        already_ondeck = {j.jobID for j in self.ondeck.values() if j is not None}
                         with jobLock:
                             pending = []
                             # Try each priority level in order
                             for priority in [1, 2, 3]:
-                                pending = [r.jobID for r in taskList.values()
+                                pending = [r for r in taskList.values()
                                     if r.jobStatus == JobRequest.Status_QUEUED
-                                    and r.jobClass == jobclass
+                                    and r.jobID not in already_ondeck
+                                    and r.jobClass in engine.getClasses()
                                     and r.priority == priority]
                                 if pending:
                                     break
                         if pending:
-                            taskFeed.put((TaskEngine.TaskSUBMIT, pending[0]))
-                            logging.debug(f"Ventilating job {pending[0]} to ondeck slot for class {jobclass}")
+                            jobreq = pending[0]
+                            self.ondeck[engineName] = jobreq
+                            logging.debug(f"Ventilating job {jobreq.jobID} to ondeck slot for engine {engineName}")
+
+            self._running_jobs = runningTasks
+            _diag_counter += 1
+            if _diag_counter >= _diag_interval:
+                _diag_counter = 0
+                with jobLock:
+                    queued_jobs = [r for r in taskList.values() if r.jobStatus == JobRequest.Status_QUEUED]
+                    self._queue_depth = len(queued_jobs)
+                    # Per-class breakdown (skip unclassified — transient pre-submit state)
+                    class_counts = {}
+                    for r in queued_jobs:
+                        if r.jobClass is not None:
+                            class_counts[r.jobClass] = class_counts.get(r.jobClass, 0) + 1
+                    self._queue_by_class = class_counts
+                    for c, n in class_counts.items():
+                        if n > self._queue_by_class_hwm.get(c, 0):
+                            self._queue_by_class_hwm[c] = n
+                    # Latency of oldest queued job
+                    self._queue_latency = (datetime.now() - min((r.jobSubmitTime for r in queued_jobs),
+                        default=datetime.now())).total_seconds() if self._queue_depth > 0 else 0.0
+                # HWM snapshot capture
+                if self._queue_depth > self._queue_hwm:
+                    self._queue_hwm = self._queue_depth
+                    self._depth_hwm_snapshots.append(self._capture_queue_snapshot("depth"))
+                else:
+                    self._queue_hwm = max(self._queue_hwm, self._queue_depth)
+                if self._queue_latency > self._queue_latency_hwm:
+                    self._queue_latency_hwm = self._queue_latency
+                    self._latency_hwm_snapshots.append(self._capture_queue_snapshot("latency"))
+                else:
+                    self._queue_latency_hwm = max(self._queue_latency_hwm, self._queue_latency)
+                # Trim submission rate window
+                cutoff = datetime.now() - timedelta(seconds=self._submission_window)
+                while self._submission_times and self._submission_times[0] < cutoff:
+                    self._submission_times.popleft()
 
             if taskFeed.empty() and runningTasks == 0:
                 time.sleep(0.05)
@@ -1030,14 +1299,20 @@ async def task_loop(asyncREP, taskCFG):
             if 'task' in request:
                 task = request['task']
                 if task == 'HISTORY':
-                    #  TODO:  put this on a background thread
-                    JobRequest.full_history_report()
+                    snapshot = SnapshotRequest('HISTORY')
+                    taskFeed.put((JobManager.JobSNAPSHOT, snapshot))
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, snapshot.event.wait, 5.0)
                 elif task == 'STATUS':
-                    pass
-                    #   Stats:  Job Count, Failures, average run time
-                    #   Pending jobs,  Running, Queued, Failures?
-                    #       Task, Status, start time, elapsed, sink, date, event
-                    #       stats grouped by task?  sink?
+                    snapshot = SnapshotRequest('STATUS')
+                    taskFeed.put((JobManager.JobSNAPSHOT, snapshot))
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, snapshot.event.wait, 5.0)
+                    if snapshot.result:
+                        logging.info(json.dumps(snapshot.result))
+                        reply = json.dumps(snapshot.result)
+                    else:
+                        reply = 'Error'
                 elif task == 'ALERT':
                     # Re-broadcast alert payload as lifecycle event for all subscribers
                     if 'payload' in request:
