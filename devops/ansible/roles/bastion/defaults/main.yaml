@@ -24,6 +24,9 @@ bastion_wireguard:
   startup_delay: 30
   autoconnect: false  # Manual control for timing
 
+# WireGuard NM connection UUID — must NOT collide with any interface UUID
+bastion_wireguard_uuid: "62a1dd42-825c-45a0-8cd3-30b5c0af26ae"
+
 # Network Interface Configuration
 # Interface names can be overridden via:
 #   1. Site variables (bastion_interface_external/internal)

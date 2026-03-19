@@ -10,9 +10,18 @@
   ansible.builtin.debug:
     var: existing_connections.stdout_lines
 
+- name: "Find active connection for external interface ({{ bastion_interfaces.external.name }})"
+  ansible.builtin.shell: >
+    nmcli -t -f NAME,DEVICE con show --active
+    | grep ':{{ bastion_interfaces.external.name }}$'
+    | head -1 | cut -d: -f1
+  register: external_con_name
+  changed_when: false
+  failed_when: external_con_name.stdout == ''
+
 - name: "Configure external interface ({{ bastion_interfaces.external.name }}) for WAN"
   ansible.builtin.shell: |
-    nmcli connection modify "{{ bastion_interfaces.external.uuid }}" \
+    nmcli connection modify "{{ external_con_name.stdout }}" \
       connection.interface-name {{ bastion_interfaces.external.name }} \
       ipv4.addresses "{{ bastion_interfaces.external.ip }}" \
       ipv4.gateway "{{ bastion_interfaces.external.gateway }}" \
@@ -26,9 +35,18 @@
   failed_when: wan_config.rc not in [0, 10]
   notify: restart networkmanager
 
+- name: "Find active connection for internal interface ({{ bastion_interfaces.internal.name }})"
+  ansible.builtin.shell: >
+    nmcli -t -f NAME,DEVICE con show --active
+    | grep ':{{ bastion_interfaces.internal.name }}$'
+    | head -1 | cut -d: -f1
+  register: internal_con_name
+  changed_when: false
+  failed_when: internal_con_name.stdout == ''
+
 - name: "Configure internal interface ({{ bastion_interfaces.internal.name }}) for LAN"
   ansible.builtin.shell: |
-    nmcli connection modify "{{ bastion_interfaces.internal.uuid }}" \
+    nmcli connection modify "{{ internal_con_name.stdout }}" \
       connection.interface-name {{ bastion_interfaces.internal.name }} \
       ipv4.addresses "{{ bastion_interfaces.internal.ip }}" \
       ipv4.method manual \

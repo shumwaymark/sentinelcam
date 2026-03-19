@@ -1,5 +1,10 @@
 ---
 # Configure delayed WireGuard startup to ensure network is ready
+#
+# NOTE: wireguard.yaml already deploys the templated service and timer.
+# This task only deploys the convenience management script.
+# Do NOT redeploy the systemd service here — it would overwrite
+# the templated version from wireguard.yaml.
 
 - name: "Create WireGuard startup delay script"
   ansible.builtin.copy:
@@ -8,41 +13,14 @@
       #!/bin/bash
       # Wait for NetworkManager to fully initialize
       sleep 10
-      
+
       # Check if WAN interface is up
-      while ! nmcli device status | grep -q "enp2s0.*connected"; do
+      while ! nmcli device status | grep -q "{{ bastion_interfaces.external.name }}.*connected"; do
         sleep 2
       done
-      
+
       # Bring up WireGuard connection
       nmcli connection up wg0
     mode: '0755'
     owner: root
     group: root
-
-- name: "Create systemd service for delayed WireGuard startup"
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/wireguard-delayed-start.service
-    content: |
-      [Unit]
-      Description=WireGuard Delayed Startup
-      After=NetworkManager.service
-      Wants=NetworkManager.service
-      
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/local/bin/wireguard-delayed-start.sh
-      RemainAfterExit=yes
-      
-      [Install]
-      WantedBy=multi-user.target
-    mode: '0644'
-    owner: root
-    group: root
-  notify: reload systemd
-
-- name: "Enable delayed WireGuard startup service"
-  ansible.builtin.systemd:
-    name: wireguard-delayed-start.service
-    enabled: yes
-    daemon_reload: yes

@@ -3,7 +3,7 @@
 
 [connection]
 id={{ bastion_wireguard.interface }}
-uuid={{ bastion_interfaces.external.uuid | default('62a1dd42-825c-45a0-8cd3-30b5c0af26ae') }}
+uuid={{ bastion_wireguard_uuid | default('62a1dd42-825c-45a0-8cd3-30b5c0af26ae') }}
 type=wireguard
 autoconnect=no
 interface-name={{ bastion_wireguard.interface }}
