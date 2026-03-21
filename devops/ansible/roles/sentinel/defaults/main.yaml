@@ -88,6 +88,16 @@ sentinel_health:
   restart_cooldown: 300        # seconds between automatic restarts per engine
   max_auto_restarts: 10        # lifetime limit before giving up
 
+# State maintenance configuration
+sentinel_maintenance:
+  retention_hours: 48          # completed job records older than this are trimmed
+  state_file: "{{ sentinel_install_path }}/state.json"
+  checkpoint_interval: 50      # job completions between incremental checkpoints
+
+# Graceful shutdown configuration
+sentinel_shutdown:
+  drain_timeout: 60            # seconds to wait for running tasks before force-exit
+
 # Ring buffer models - image sizes and buffer lengths
 sentinel_ring_buffer_models:
   default:

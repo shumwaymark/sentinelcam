@@ -62,6 +62,16 @@ health:
   restart_cooldown: {{ sentinel_health.restart_cooldown }}
   max_auto_restarts: {{ sentinel_health.max_auto_restarts }}
 
+# State maintenance: daily summaries, checkpointing, and history trimming
+maintenance:
+  retention_hours: {{ sentinel_maintenance.retention_hours }}
+  state_file: {{ sentinel_maintenance.state_file }}
+  checkpoint_interval: {{ sentinel_maintenance.checkpoint_interval }}
+
+# Graceful shutdown configuration
+shutdown:
+  drain_timeout: {{ sentinel_shutdown.drain_timeout }}
+
 # Configure logging publication over 0MQ
 logconfig:
     version: 1

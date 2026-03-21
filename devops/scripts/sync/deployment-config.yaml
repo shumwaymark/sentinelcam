@@ -59,7 +59,7 @@ components:
   - name: sentinel
     description: Sentinel monitoring and event detection service
     paths:
-      - sentinel/sentinel/
+      - sentinel/
     required_files:
       - sentinel/sentinel/sentinel.py
     exclude_patterns:
@@ -107,11 +107,6 @@ components:
       - devops/ansible/
       - devops/scripts/
 
-  - name: requirements
-    description: Python package dependencies
-    paths:
-      - requirements.txt
-
   - name: docs
     description: Documentation files
     paths:
@@ -134,7 +129,6 @@ scenarios:
       - camwatcher
       - imagehub
       - devops
-      - requirements
       - config
 
   services:
@@ -150,13 +144,11 @@ scenarios:
     description: Infrastructure and operations
     components:
       - devops
-      - requirements
 
   outpost:
     description: Outpost/imagenode focused deployment
     components:
       - imagenode
-      - requirements
 
   datasink:
     description: Data sink components (imagehub, camwatcher)
@@ -164,11 +156,9 @@ scenarios:
       - imagehub
       - camwatcher
       - datapump
-      - requirements
 
   monitoring:
     description: Monitoring services (sentinel, watchtower)
     components:
       - sentinel
       - watchtower
-      - requirements

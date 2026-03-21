@@ -12,6 +12,7 @@ WorkingDirectory={{ sentinel_install_path }}/sentinel
 User={{ sentinelcam_user }}
 Restart=always
 RestartSec=5
+TimeoutStopSec=90
 ExecStart={{ sentinelcam_services.python_executable }} -u {{ sentinel_install_path }}/sentinel/sentinel.py
 
 [Install]

@@ -19,15 +19,8 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - Aditional refinements for the **sentinel** module. 
   - Provide an abstraction to support a reusable design pattern for ring buffer control 
     based on an object detection result filter.
-  - Implement internal housekeeping to periodically purge oldest job history. This is 
-    needed to avoid an obvious memory leak. Perform as a routine task during quiet periods.
-    Incorporate a job history report of statistics and performance metrics as an output. This
-    could ultimately fuel a **sentinel** health check, perhaps built to support agency based on 
-    self-diagnosis. 
   - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
     based on the queue length for tasks waiting in that job class.  
-- Add missing health-check monitor from the **camwatcher** to detect and restart a stalled
-  **imagenode**. 
 - Begin to explore capitalizing on the functionality of the **librarian**  and its design 
   philosophy as a vehicle to centralize knowledge and state.
 
@@ -38,80 +31,125 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.6-alpha - 2026-03-21
+
+### Added
+
+- Added internal task engine health heuristics to the **sentinel**. Each engine now tracks ring buffer 
+  latency, consecutive failure counts, and a low-frame completion pattern specific to Google Coral USB 
+  accelerator degradation — where jobs technically "complete" having processed almost no frames. When an 
+  engine triggers the strike limit for repeated low-frame completions, the `JobManager` initiates a 
+  proactive restart with an enforced cooldown period. Ring latency is measured child-side to capture the 
+  true round-trip stall, including time the request sat unnoticed while the `JobManager` was servicing 
+  other engines. Configurable thresholds for strike limits, cooldown intervals, and lifetime restart caps.
+- Meaningful health check responses added to **camwatcher**, **datapump**, and **sentinel**. The 
+  `STATUS` command on the sentinel, previously a stub, now returns a substantive JSON snapshot of engine 
+  state, queue depth, health counters, and per-engine ring buffer latency statistics. This required 
+  solving the thread-safe snapshot problem: the data lives in the `JobManager` thread, but requests 
+  arrive on the async event loop. A `SnapshotRequest` pattern routes requests through the existing 
+  `taskFeed` queue with a `threading.Event` for synchronization — consistent with the established 
+  architecture where all state mutations flow through that single queue. CamWatcher and DataPump health 
+  checks similarly report on child process liveness, frame counts, outpost heartbeat status, and 
+  request volume. The outpost heartbeat tracker in CamWatcher monitors the 5-minute heartbeat interval 
+  and flags missed heartbeats.
+- Added queue diagnostics instrumentation to the **sentinel**. Beyond a simple depth counter, this 
+  captures high-water mark context snapshots at the moment each peak occurs, per-class queue depth 
+  tracking, a rolling 5-minute submission rate window, and per-engine utilization as cumulative busy 
+  time. These accumulators feed both the STATUS response and the daily maintenance summaries, providing 
+  the operational data needed to understand queue behavior under load.
+- Added a daily maintenance cycle to the **sentinel**. A `MAINTENANCE` control command, triggered by 
+  a systemd timer at 01:00, runs within the `JobManager` thread to compute daily summaries by engine 
+  and task class, publish HEALTH-flagged records to the log transport, reset diagnostic accumulators 
+  for the new period, checkpoint state to disk, and trim completed job records past the retention 
+  window. This reuses the `SnapshotRequest` mechanism established by the STATUS command.
+- Added state serialization and startup recovery to the **sentinel**. A `sentinel_state` module 
+  provides atomic file writes (temp file + rename) for checkpoint persistence of the job dictionary, 
+  queue state, and engine health counters. The state file is written during daily maintenance and 
+  incrementally every 50 job completions, bounding crash recovery loss to roughly 30 minutes of 
+  history. On startup, the sentinel restores job history for the HISTORY command and seeds engine 
+  health counters. Queue recovery from stale checkpoints is intentionally limited — jobs likely 
+  completed normally after the checkpoint was taken. Full queue preservation is deferred to the 
+  graceful shutdown work.
+- The `SentinelAgent` in the **camwatcher** now captures HEALTH-flagged records from sentinel log 
+  publishing, writing them as JSONL files on the data sink. This provides the persistent historical 
+  health record, organized by date, that will later be served through the **datapump** for operational 
+  dashboard use.
+- Added custom desktop wallpaper to the **watchtower** kiosk.
+- Added graceful shutdown to the **sentinel**. A `SHUTDOWN` control command initiates an orderly
+  drain: the `JobManager` stops ventilating new jobs to engines while continuing to service ring
+  buffers for tasks already running. Once all engines go idle (or a configurable timeout expires),
+  the full job dictionary, queue state, and engine health counters are serialized to disk. Timed-out
+  jobs are reset to Queued and re-execute from frame 1 on the next startup — input data on the
+  datasink is immutable, so no work is lost. SIGTERM triggers the same sequence, so `systemctl stop`,
+  `systemctl restart`, and Ansible-triggered deploys all preserve state automatically.
+
+### Fixed
+
+- Configured TCP keepalives, with generously patient reconnects, on the **camwatcher** async SUB 
+  sockets.
+
+### Changed
+
+- Jobs are now placed on-deck by task engine rather than by job class in the **sentinel**. The previous 
+  approach maintained a per-class on-deck slot, which could leave engines idle when multiple jobs 
+  arrived for classes already represented on-deck. Placing on-deck by engine is simpler and avoids the 
+  imbalance conditions previously witnessed across a single job class.
+- Motion detector calibration tool now includes ROI settings.
+
 ## 0.2.5-alpha - 2026-02-22
 
 ### Added
 
 - Added `TaskEngine.restart()` to the **sentinel** to recover from child process failures without 
-  restarting the entire service. The ten-step teardown-and-rebuild sequence: fail any in-flight job, 
-  terminate the child process, tear down parent-side IPC (`RingWire.close()`, `asyncSUB.disconnect()`), 
-  clean up stale `ipc://` socket files on disk, reset ring buffer indices (shared memory stays allocated), 
-  create a fresh `RingWire` REP socket, fork a new `JobTasking` child process reusing existing shared 
-  memory references, complete the handshake with a 10-second timeout guard, and reconnect `asyncSUB` to 
-  the new child's PUB endpoint. The `JobManager` detects dead engines via `is_alive()` and triggers 
-  restart automatically, with a configurable failure limit per engine before removal from the pool. 
-  Successful job completions reset the failure counter. A `RESTART_ENGINE` command is also available on 
-  the **sentinel** control port for manual intervention. Fixed a companion bug in the `task_feedback` 
-  coroutine where the `TaskBOMB` handler was calling `taskFeed.put()` with two arguments instead of a 
-  tuple — bomb messages from failed engines were being silently dropped and never reaching the `JobManager`.
+  restarting the entire service. The critical design point is that shared memory stays allocated across 
+  the restart — only the child process is torn down and re-forked, reusing existing ring buffer 
+  references. The `JobManager` detects dead engines automatically and triggers restart with a 
+  configurable failure limit per engine before permanent removal from the pool. Successful completions 
+  reset the failure counter. A `RESTART_ENGINE` control command is also available for manual 
+  intervention. This also fixed a companion bug where `TaskBOMB` messages from failed engines were 
+  being silently dropped due to an incorrect `taskFeed.put()` call — bomb messages now properly reach 
+  the `JobManager` for cleanup.
 - Replaced the flat hourly time-slot event list in the **watchtower** with a full calendar-based event 
-  history browser. The new `CalendarPage` presents a month-view grid showing event density per day, with 
-  color-coded cells: dark for no events, green for populated days, amber for the selected date, and 
-  white-outlined for today. All 42 day cells are pre-allocated canvas items updated via `itemconfig()` — 
-  no widget creation or destruction on refresh. Tapping a day drills down to hourly time slots via a 
-  scrollable `MenuPanel` with touch-drag support for the Pi 7" touchscreen. Previous and next month 
-  navigation is bounded by the earliest and latest dates in the event cache.
+  history browser. A month-view grid shows event density per day with color-coded cells indicating 
+  activity levels. Tapping a day drills down to hourly time slots via a scrollable touch-friendly menu. 
+  Month navigation is bounded by the earliest and latest dates in the event cache.
 - Added a `HistoryLoader` subprocess to the **watchtower** that populates multi-day event history from 
-  the **datapump** at startup. The `EventListUpdater` loads only today's events for immediate 
-  responsiveness; `HistoryLoader` then walks backward through all available dates via 
-  `DataFeed.get_date_list()`, one REQ/REP round-trip per date. Results feed through a 
-  `multiprocessing.Queue` and are drained progressively in `Application.update()`, one batch per cycle. 
-  The kiosk is usable immediately while older dates fill in behind the scenes. A per-view `max_events` 
-  cap (default 1500) limits memory consumption. Must be a subprocess rather than a thread because 
-  `DataFeed` creates ZMQ sockets that cannot be shared across a fork.
-- Added a storage analysis reporting pipeline. A new `storage_analysis` module on the **datapump** walks 
-  the sentinelcam filesystem to produce a pre-computed report of disk capacity, daily image intake, and 
-  per-view storage breakdowns. The report is serialized as a pickle file and served on demand through a 
-  new `get_storage_report()` request on the `DataFeed`. A new `StoragePage` on the **watchtower** 
-  presents the results in a three-level drill-down: sink overview with capacity gauge and runway 
-  estimate, daily intake trend as a bar chart, and per-camera storage breakdown. Designed to run 
-  nightly via systemd timer after `DailyCleanup` completes. This is a read-only reporting tool — it 
-  does not delete anything.
+  the **datapump** at startup. Today's events load first for immediate responsiveness; the subprocess 
+  then walks backward through all available dates in the background. The kiosk is usable right away 
+  while older history fills in progressively. A per-view `max_events` cap limits memory consumption. 
+  This must be a subprocess rather than a thread because `DataFeed` creates ZMQ sockets that cannot 
+  safely cross a fork boundary.
+- Added a storage analysis reporting pipeline. A `storage_analysis` module on the **datapump** walks the 
+  sentinelcam filesystem to produce a pre-computed report of disk capacity, daily image intake, and 
+  per-view breakdowns. A new `StoragePage` on the **watchtower** presents the results in a three-level 
+  drill-down: sink overview with capacity gauge and runway estimate, daily intake as a bar chart, and 
+  per-camera breakdown. Designed to run nightly via systemd timer after `DailyCleanup`. This is a 
+  read-only reporting tool — it does not delete anything.
 
 ### Changed
 
-- Redesigned motion calibration tool in the **watchtower** as a player overlay instead of an independent 
-  viewer. The original `MotionCalibrationPage` created its own `ImageSubscriber`, running a second 
-  subscription to the outpost's PUB socket alongside the `PlayerDaemon`. ZMQ PUB/SUB distributes 
-  messages round-robin when multiple subscribers connect to the same endpoint — each subscriber saw 
-  roughly half the published frames, producing choppy feeds for both. Calibration now receives frames 
-  through the existing player pipeline via a page-aware dispatch in `Application.update()`. No 
-  `self.after()` polling loop, no blocking `receive()` call that was freezing the Tk event loop for up 
-  to one second per frame. Frames arrive at the natural rate of the player thread. Extracted 
-  `_load_viewer_source()` from `select_outpost_view()` to allow loading a view into the `PlayerDaemon` 
-  without forcing a page switch or resetting `eventIdx`. This establishes the standard integration 
-  pattern for future feature modules: receive frames through the `update()` dispatch, never create an 
-  independent `ImageSubscriber`.
+- Redesigned the motion calibration tool in the **watchtower** as a player overlay instead of an 
+  independent viewer. The original design created its own `ImageSubscriber` alongside the 
+  `PlayerDaemon`, but ZMQ PUB/SUB distributes messages round-robin across multiple subscribers on the 
+  same endpoint — each saw roughly half the frames, producing choppy feeds for both. Calibration now 
+  receives frames through the existing player pipeline. This establishes the standard integration 
+  pattern for future feature modules: use the player's frame dispatch, never create an independent 
+  subscriber.
 
 ### Fixed
 
 - Addressed a state machine deadlock in the **watchtower** where rapid button presses during event 
   browsing could lock the UI, requiring a service restart. The root cause was synchronous blocking 
-  calls inside `PlayerStateManager.process_transitions()`, which runs on the main Tk event thread. 
-  `PlayerDaemon.start()` and `.stop()` blocked on unbounded `stateQueue.get()`, and `Player.stop()` 
-  blocked on `idle.wait()` — rapid TOGGLE requests caused acknowledgment mismatch where a STOPPED 
-  message from a prior stop was consumed by a subsequent start. Added timeouts to all `PlayerDaemon` 
-  stateQueue interactions and `Player.stop()` idle wait, converting potential infinite hangs into 
-  recoverable error states. Added a re-entrant guard on TOGGLE processing as defense-in-depth.
-- Corrected an auto-advance defect in the **watchtower** event reviewer where the `PlayerDaemon` would 
-  wedge during sequential event playback. When an event ended, the EOF handler queued a LOAD transition 
-  followed by EOF. The LOAD changed state from PLAYING to LOADING, so when EOF processed next it found 
-  `current_state != PLAYING` and skipped `player_daemon.stop()` — leaving the daemon running in its 
-  inner service loop, deaf to `commandQueue`. The fix moves daemon lifecycle management into the LOAD 
-  handler at processing time when the actual state is known, rather than inserting compensating TOGGLE 
-  commands at queue time when state may change before processing. Also unified event position tracking 
-  by eliminating `cursor_event_idx` from `PlayerStateManager` — auto-advance now increments 
-  `app.eventIdx` directly, so previous/next navigation always reflects the actual viewing position.
+  calls on the main Tk event thread — unbounded queue waits and idle event waits that could hang 
+  indefinitely when rapid toggles caused acknowledgment mismatch between start and stop sequences. 
+  Added timeouts to all blocking interactions, converting potential hangs into recoverable error 
+  states, with a re-entrant guard on TOGGLE processing as defense-in-depth.
+- Corrected an auto-advance defect in the **watchtower** where the `PlayerDaemon` would wedge during 
+  sequential event playback. The issue was that state transitions were being queued with compensating 
+  commands based on assumed state, but by the time they processed, the state had already changed — 
+  leaving the daemon running but deaf to commands. The fix moves daemon lifecycle management to 
+  processing time when the actual state is known. Also unified event position tracking so auto-advance 
+  and manual navigation share the same index.
 
 
 ## 0.2.4-alpha - 2026-01-17

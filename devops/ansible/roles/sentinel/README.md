@@ -5,8 +5,9 @@ Deploys and configures **sentinel**, the AI processing engine for SentinelCam.
 ## Purpose
 
 Sentinel consumes event data from datasinks and applies AI models for face detection, face recognition,
-object classification, and vehicle speed analysis. It operates as a multi-threaded task engine with
-priority-based job scheduling and configurable hardware accelerators.
+object classification, and vehicle speed analysis. It operates as a multi-processing task engine with
+priority-based job scheduling, configurable hardware accelerators, engine health monitoring, and
+state persistence across restarts.
 
 ```
 Outposts → CamWatcher (datasink) → Sentinel → Task Results → DataPump/Watchtower
@@ -75,6 +76,54 @@ sentinel_task_engines:
 Task configuration templates live in `templates/tasks/`. Sentinel reloads task configs dynamically —
 no service restart needed after config-only changes.
 
+### Engine Health Monitoring
+
+The sentinel tracks per-engine health heuristics and triggers automatic restarts when
+degradation is detected. Particularly relevant for Google Coral accelerators which can
+exhibit a pattern of completing jobs with near-zero frames processed.
+
+```yaml
+sentinel_health:
+  low_frame_threshold: 5       # frames below this flag a low-frame completion
+  strike_limit: 3              # consecutive low-frame jobs before restart
+  fail_strike_limit: 5         # consecutive failures before restart
+  restart_cooldown: 300        # seconds between restarts per engine
+  max_auto_restarts: 10        # lifetime limit before permanent removal
+```
+
+### State Maintenance
+
+A daily maintenance timer triggers summarization, state checkpointing, and history trimming.
+The state file is local to the sentinel node for crash recovery at startup.
+
+```yaml
+sentinel_maintenance:
+  retention_hours: 48          # completed records older than this are trimmed
+  state_file: "{{ sentinel_install_path }}/state.json"  # local to sentinel
+  checkpoint_interval: 50      # job completions between incremental checkpoints
+```
+
+Health summary records are published via ZMQ and captured by the SentinelAgent on the
+data sink into the existing camwatcher date directory structure.
+
+### Graceful Shutdown
+
+The sentinel supports orderly shutdown that preserves queue state and job history across
+restarts. SIGTERM (from `systemctl stop` or Ansible deploys) triggers the same drain
+sequence as the explicit `SHUTDOWN` control command.
+
+```yaml
+sentinel_shutdown:
+  drain_timeout: 60            # seconds to wait for running tasks before force-exit
+```
+
+During the drain, running tasks continue to completion while no new jobs are assigned.
+After all engines go idle (or timeout), state is serialized to disk. Jobs that don't
+finish within the timeout are reset to Queued and re-execute on the next startup.
+
+The systemd unit file uses `TimeoutStopSec=90` to allow the drain to complete before
+systemd sends SIGKILL.
+
 ### Data Retention (DailyCleanup)
 
 Configured via `templates/tasks/DailyCleanup.yaml.j2` with per-node retention profiles:
@@ -108,25 +157,30 @@ ansible-playbook playbooks/deploy-models.yaml --limit sentinel
 | `tasks` | Task configuration files only |
 | `coral` | Coral EdgeTPU package provisioning |
 | `status` | Check service state |
+| `maintenance` | Maintenance timer and trigger script |
 
 ## File Structure (on target)
 
 ```
 /home/<sentinelcam_user>/
-├── sentinel.yaml              # Main configuration
+├── sentinel.yaml               # Main configuration
 └── sentinel/
-    ├── sentinel/              # Python package
+    ├── sentinel/               # Python package
     │   ├── sentinel.py
-    │   └── sentinelcam/       # Core libraries (taskfactory, datafeed, facedata)
-    ├── sentinel_task.py       # External task injection tool
-    ├── sockets/               # IPC sockets
-    ├── models/                # Versioned model files
+    │   └── sentinelcam/        # Core libraries (taskfactory, datafeed, facedata)
+    ├── sentinel_task.py        # External task injection tool
+    ├── sentinel_maintenance.py # Maintenance trigger (systemd timer)
+    ├── sentinel_shutdown.py    # Graceful shutdown trigger script
+    ├── sentinel_adhoc.py       # Dynamically spawn a camwatcher agent for a sentinel
+    ├── state.json              # State checkpoint (transient, deleted on load)
+    ├── sockets/                # IPC sockets
+    ├── models/                 # Versioned model files
     │   ├── face_detection/
     │   ├── face_detection_edgetpu/
     │   ├── face_detection_blazeface/
     │   ├── face_recognition/
     │   └── openface_torch/
-    └── tasks/                 # Task config YAML files
+    └── tasks/                  # Task config YAML files
 ```
 
 ### Manual Task Injection

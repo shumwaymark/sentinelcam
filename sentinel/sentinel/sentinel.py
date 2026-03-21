@@ -6,6 +6,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 
 import os
 import json
+import signal
 import time
 import logging
 import logging.config
@@ -27,6 +28,7 @@ import zmq
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.taskfactory import TaskFactory
 from sentinelcam.utils import readConfig
+from sentinel_state import save_state, load_state
 import msgpack
 import simplejpeg
 
@@ -37,6 +39,7 @@ ctxAsync = AsyncContext.instance()
 ctxBlocking = zmq.Context.shadow(ctxAsync.underlying)
 jobLock = threading.Lock()
 taskFeed = queue.Queue()
+shutdown_event = None  # asyncio.Event, created in main()
 
 taskList = {}  # All JobRequest objects by JobID
 jobList = {}   # Those task requests which should currently be running
@@ -156,6 +159,68 @@ class JobRequest:
             'ring_start_avg': round(self.ring_start_avg, 6),
             'ring_next_avg': round(self.ring_next_avg, 6)
         })
+
+    def to_dict(self) -> dict:
+        """Export all serializable fields for state checkpoint."""
+        (start_time, end_time, elapsed_time) = self._timeVals()
+        return {
+            'node': self.sourceNode,
+            'date': self.eventDate,
+            'task': self.jobTask,
+            'class': self.jobClass,
+            'sink': self.dataSink,
+            'status': JobRequest.Status[self.jobStatus],
+            'submitted': self.jobSubmitTime.isoformat(),
+            'started': start_time,
+            'ended': end_time,
+            'elapsed': elapsed_time,
+            'engine': self.engine,
+            'priority': self.priority,
+            'images': self.image_cnt,
+            'rate': self.image_rate,
+            'event': self.eventID,
+            'pump': self.datapump,
+            'ring_start_avg': round(self.ring_start_avg, 6),
+            'ring_next_avg': round(self.ring_next_avg, 6),
+        }
+
+    @classmethod
+    def from_dict(cls, jobid, fields) -> 'JobRequest':
+        """Reconstruct a JobRequest from serialized fields.
+
+        Bypasses __init__ to avoid logging and taskList mutation.
+        Caller is responsible for inserting into taskList.
+        """
+        obj = object.__new__(cls)
+        obj.jobID = jobid
+        obj.jobTask = fields.get('task')
+        obj.jobClass = fields.get('class')
+        obj.sourceNode = fields.get('node')
+        obj.dataSink = fields.get('sink')
+        obj.eventDate = fields.get('date')
+        obj.eventID = fields.get('event')
+        obj.datapump = fields.get('pump')
+        obj.engine = fields.get('engine')
+        obj.priority = fields.get('priority', 2)
+        obj.image_cnt = fields.get('images', 0)
+        obj.image_rate = fields.get('rate', 0.0)
+        obj.ring_start_avg = fields.get('ring_start_avg', 0.0)
+        obj.ring_next_avg = fields.get('ring_next_avg', 0.0)
+        obj.camsize = (0, 0)
+        # Status: convert string back to int constant
+        status_str = fields.get('status', 'Undefined')
+        try:
+            obj.jobStatus = JobRequest.Status.index(status_str)
+        except ValueError:
+            obj.jobStatus = JobRequest.Status_UNDEFINED
+        # Datetime fields: already converted by deserialize_state
+        submitted = fields.get('submitted')
+        obj.jobSubmitTime = submitted if isinstance(submitted, datetime) else datetime.now()
+        started = fields.get('started')
+        obj.jobStartTime = started if isinstance(started, datetime) else None
+        ended = fields.get('ended')
+        obj.jobEndTime = ended if isinstance(ended, datetime) else None
+        return obj
 
     def full_history_report() -> None:
         logging.info("Start of history.")
@@ -749,7 +814,8 @@ class JobManager:
     ReadEOF = -1
     ReadNOP = 0
 
-    def __init__(self, engineCFG, ringCFG, taskCFG, default_pump, _asyncSUB) -> None:
+    def __init__(self, engineCFG, ringCFG, taskCFG, default_pump, _asyncSUB,
+                 recovered_health=None) -> None:
         self.ondeck = {}
         self.engines = {}
         self.datafeeds = {}
@@ -778,10 +844,31 @@ class JobManager:
         self._submission_window = 300
         self._engine_busy_start = {}
         self._engine_busy_total = {}
+        # --- State maintenance ---
+        _mcfg = CFG.get('maintenance', {})
+        self._state_filepath = os.path.expanduser(
+            _mcfg.get('state_file', '~/sentinel/state.json'))
+        self._checkpoint_interval = _mcfg.get('checkpoint_interval', 50)
+        self._retention_hours = _mcfg.get('retention_hours', 48)
+        self._checkpoint_counter = 0
+        # --- Graceful shutdown ---
+        _scfg = CFG.get('shutdown', {})
+        self._drain_timeout = _scfg.get('drain_timeout', 60)
+        self._draining = threading.Event()
         for engine in engineCFG:
             self.engines[engine] = TaskEngine(engine, engineCFG[engine], ringCFG, taskCFG, default_pump, _asyncSUB)
             self.ondeck[engine] = None
             self._engine_busy_total[engine] = 0.0
+        # Restore engine health counters from recovered state
+        if recovered_health:
+            for name, health_data in recovered_health.items():
+                if name in self.engines:
+                    eng = self.engines[name]
+                    eng.health.total_restarts = health_data.get('total_restarts', 0)
+                    lr = health_data.get('last_restart')
+                    eng.health.last_restart = lr if isinstance(lr, datetime) else None
+                    logging.info(f"Engine '{name}' health restored: "
+                                 f"{eng.health.total_restarts} prior restarts")
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -1085,6 +1172,363 @@ class JobManager:
                 now_ondeck[c] = self.ondeck[c].jobID
         return now_ondeck
 
+    # --- State snapshot helpers (all run in _jobThread context) ---
+
+    def _snapshot_job_records(self) -> dict:
+        """Package taskList into plain dicts for serialization."""
+        with jobLock:
+            return {jobid: jobreq.to_dict() for jobid, jobreq in taskList.items()}
+
+    def _snapshot_queue_records(self) -> list:
+        """Package queued and on-deck jobs for serialization."""
+        records = []
+        # On-deck jobs
+        for jreq in self.ondeck.values():
+            if jreq is not None:
+                records.append({
+                    'jobid': jreq.jobID,
+                    'event': jreq.eventID,
+                    'task': jreq.jobTask,
+                    'priority': jreq.priority,
+                    'sink': jreq.dataSink,
+                    'node': jreq.sourceNode,
+                    'date': jreq.eventDate,
+                    'pump': jreq.datapump,
+                })
+        # Queued jobs not already captured as on-deck
+        ondeck_ids = {r['jobid'] for r in records}
+        with jobLock:
+            for jreq in taskList.values():
+                if (jreq.jobStatus == JobRequest.Status_QUEUED
+                        and jreq.jobID not in ondeck_ids):
+                    records.append({
+                        'jobid': jreq.jobID,
+                        'event': jreq.eventID,
+                        'task': jreq.jobTask,
+                        'priority': jreq.priority,
+                        'sink': jreq.dataSink,
+                        'node': jreq.sourceNode,
+                        'date': jreq.eventDate,
+                        'pump': jreq.datapump,
+                    })
+        # Running jobs (for checkpoint — they restart from scratch on recovery)
+        for engine in self.engines.values():
+            jreq = engine.jobreq
+            if jreq is not None and jreq.jobID not in ondeck_ids:
+                records.append({
+                    'jobid': jreq.jobID,
+                    'event': jreq.eventID,
+                    'task': jreq.jobTask,
+                    'priority': jreq.priority,
+                    'sink': jreq.dataSink,
+                    'node': jreq.sourceNode,
+                    'date': jreq.eventDate,
+                    'pump': jreq.datapump,
+                })
+        return records
+
+    def _snapshot_engine_health(self) -> dict:
+        """Package engine health counters for serialization."""
+        result = {}
+        for name, engine in self.engines.items():
+            h = engine.health
+            result[name] = {
+                'total_restarts': h.total_restarts,
+                'consecutive_low_frames': h.consecutive_low_frames,
+                'consecutive_failures': h.consecutive_failures,
+                'last_restart': h.last_restart.isoformat() if h.last_restart else None,
+                'job_count': h.job_count,
+            }
+        return result
+
+    def _snapshot_diagnostics(self) -> dict:
+        """Package period accumulator values for serialization."""
+        now = datetime.now()
+        cutoff = now - timedelta(seconds=self._submission_window)
+        recent_submissions = sum(1 for t in self._submission_times if t >= cutoff)
+        return {
+            'start_time': self._start_time.isoformat(),
+            'engine_busy_total': dict(self._engine_busy_total),
+            'queue_hwm': self._queue_hwm,
+            'queue_latency_hwm': round(self._queue_latency_hwm, 2),
+            'queue_by_class_hwm': dict(self._queue_by_class_hwm),
+            'submissions_peak_5min': recent_submissions,
+            'depth_hwm_snapshot_count': len(self._depth_hwm_snapshots),
+            'latency_hwm_snapshot_count': len(self._latency_hwm_snapshots),
+        }
+
+    def _run_maintenance(self) -> dict:
+        """Execute daily maintenance. Called from _jobThread via snapshot mechanism."""
+        now = datetime.now()
+        logging.info("Maintenance started")
+
+        # Step 1: Compute daily summaries from taskList
+        date_summaries = {}
+        with jobLock:
+            all_jobs = list(taskList.values())
+        for jreq in all_jobs:
+            d = jreq.eventDate or 'unknown'
+            if d not in date_summaries:
+                date_summaries[d] = []
+            date_summaries[d].append(jreq)
+
+        for date_key, jobs in date_summaries.items():
+            # Per-engine rollup
+            engine_stats = {}
+            for jreq in jobs:
+                eng = jreq.engine or 'unassigned'
+                if eng not in engine_stats:
+                    engine_stats[eng] = {
+                        'jobs': 0, 'failed': 0, 'restarts': 0,
+                        'rates': [], 'elapsed_vals': [],
+                        'ring_start_vals': [], 'ring_next_vals': [],
+                    }
+                es = engine_stats[eng]
+                es['jobs'] += 1
+                if jreq.jobStatus == JobRequest.Status_FAILED:
+                    es['failed'] += 1
+                if jreq.image_rate > 0:
+                    es['rates'].append(jreq.image_rate)
+                if jreq.jobStartTime and jreq.jobEndTime:
+                    es['elapsed_vals'].append(
+                        (jreq.jobEndTime - jreq.jobStartTime).total_seconds())
+                if jreq.ring_start_avg > 0:
+                    es['ring_start_vals'].append(jreq.ring_start_avg)
+                if jreq.ring_next_avg > 0:
+                    es['ring_next_vals'].append(jreq.ring_next_avg)
+
+            # Finalize engine rollup
+            engines_summary = {}
+            for eng, es in engine_stats.items():
+                entry = {
+                    'jobs': es['jobs'],
+                    'failed': es['failed'],
+                }
+                if es['rates']:
+                    entry['rate_mean'] = round(sum(es['rates']) / len(es['rates']), 2)
+                if es['elapsed_vals']:
+                    entry['elapsed_mean'] = round(
+                        sum(es['elapsed_vals']) / len(es['elapsed_vals']), 1)
+                if es['ring_start_vals']:
+                    entry['ring_start_avg'] = round(
+                        sum(es['ring_start_vals']) / len(es['ring_start_vals']), 6)
+                if es['ring_next_vals']:
+                    entry['ring_next_avg'] = round(
+                        sum(es['ring_next_vals']) / len(es['ring_next_vals']), 6)
+                # Add utilization for real engines
+                if eng in self.engines:
+                    wall_clock = (now - self._start_time).total_seconds()
+                    busy = self._engine_busy_total.get(eng, 0.0)
+                    if eng in self._engine_busy_start:
+                        busy += (now - self._engine_busy_start[eng]).total_seconds()
+                    entry['utilization_pct'] = round(
+                        (busy / wall_clock) * 100, 1) if wall_clock > 0 else 0.0
+                    entry['restarts'] = self.engines[eng].health.total_restarts
+                engines_summary[eng] = entry
+
+            # Per-task rollup
+            task_stats = {}
+            for jreq in jobs:
+                t = jreq.jobTask or 'unknown'
+                if t not in task_stats:
+                    task_stats[t] = {'jobs': 0, 'failed': 0, 'elapsed_vals': []}
+                ts = task_stats[t]
+                ts['jobs'] += 1
+                if jreq.jobStatus == JobRequest.Status_FAILED:
+                    ts['failed'] += 1
+                if jreq.jobStartTime and jreq.jobEndTime:
+                    ts['elapsed_vals'].append(
+                        (jreq.jobEndTime - jreq.jobStartTime).total_seconds())
+            tasks_summary = {}
+            for t, ts in task_stats.items():
+                entry = {'jobs': ts['jobs'], 'failed': ts['failed']}
+                if ts['elapsed_vals']:
+                    entry['elapsed_mean'] = round(
+                        sum(ts['elapsed_vals']) / len(ts['elapsed_vals']), 1)
+                tasks_summary[t] = entry
+
+            # System totals
+            total_jobs = len(jobs)
+            total_failed = sum(1 for j in jobs if j.jobStatus == JobRequest.Status_FAILED)
+
+            # Step 2: Publish daily summary as HEALTH record
+            cutoff = now - timedelta(seconds=self._submission_window)
+            recent_submissions = sum(1 for t in self._submission_times if t >= cutoff)
+            health_record = json.dumps({
+                'flag': 'HEALTH',
+                'type': 'daily_summary',
+                'date': date_key,
+                'engines': engines_summary,
+                'tasks': tasks_summary,
+                'system': {
+                    'total_jobs': total_jobs,
+                    'total_failed': total_failed,
+                    'queue_hwm': self._queue_hwm,
+                    'queue_by_class_hwm': dict(self._queue_by_class_hwm),
+                    'queue_latency_hwm_sec': round(self._queue_latency_hwm, 1),
+                    'submissions_peak_5min': recent_submissions,
+                    'depth_hwm_snapshot_count': len(self._depth_hwm_snapshots),
+                    'latency_hwm_snapshot_count': len(self._latency_hwm_snapshots),
+                },
+            })
+            logging.info(health_record)
+
+        # Step 3: Reset HWM and utilization accumulators
+        self._queue_hwm = self._queue_depth
+        self._queue_latency_hwm = self._queue_latency
+        self._queue_by_class_hwm = dict(self._queue_by_class)
+        self._depth_hwm_snapshots.clear()
+        self._latency_hwm_snapshots.clear()
+        self._start_time = now
+        for name in self._engine_busy_total:
+            self._engine_busy_total[name] = 0.0
+        self._engine_busy_start.clear()
+
+        # Step 4: Checkpoint
+        save_state(self._state_filepath,
+                   now, now - self._start_time,
+                   self._snapshot_job_records(),
+                   self._snapshot_queue_records(),
+                   self._snapshot_engine_health(),
+                   self._snapshot_diagnostics())
+
+        # Step 5: Trim completed records older than retention period
+        trim_cutoff = now - timedelta(hours=self._retention_hours)
+        trimmed = 0
+        terminal_statuses = {
+            JobRequest.Status_DONE,
+            JobRequest.Status_FAILED,
+            JobRequest.Status_CHAINED,
+            JobRequest.Status_CANCELED,
+        }
+        with jobLock:
+            to_remove = [jobid for jobid, jreq in taskList.items()
+                         if jreq.jobStatus in terminal_statuses
+                         and jreq.jobSubmitTime < trim_cutoff]
+            for jobid in to_remove:
+                del taskList[jobid]
+                trimmed += 1
+
+        # Step 6: Return summary
+        result = {
+            'status': 'OK',
+            'dates_processed': list(date_summaries.keys()),
+            'total_jobs_reviewed': len(all_jobs),
+            'trimmed_records': trimmed,
+            'remaining_records': len(taskList),
+        }
+        logging.info(f"Maintenance complete: {result}")
+        return result
+
+    def _run_shutdown(self) -> dict:
+        """Execute graceful shutdown sequence. Called from _jobThread via snapshot mechanism.
+
+        Sets draining flag, waits for running tasks to complete (with timeout),
+        serializes state, and signals the main loop to exit.
+        """
+        logging.warning("Graceful shutdown initiated")
+
+        # Step 1: Set draining flag — stops new job ventilation
+        self._draining.set()
+
+        # Step 2: Wait for running engines to go idle
+        deadline = time.monotonic() + self._drain_timeout
+        engines_drained = []
+        engines_timed_out = []
+        while time.monotonic() < deadline:
+            all_idle = True
+            for engineName, engine in self.engines.items():
+                if engine.getJobID() is not None:
+                    all_idle = False
+                    # Continue servicing ring buffers so running tasks can complete
+                    if engine.is_alive() and engine.have_request():
+                        (cmd, key) = engine.get_request()
+                        if cmd == JobManager.ReadSTART:
+                            self._feedStart(engine, key)
+                            engine.send_response(engine.ringBuffer.get())
+                        elif cmd == JobManager.ReadNEXT:
+                            engine.ringBuffer.frame_complete()
+                            engine.send_response(engine.ringBuffer.get())
+                    if engine.cursor:
+                        self._feedNext(engine)
+            # Also drain taskFeed so completions get processed
+            while not taskFeed.empty():
+                try:
+                    (tag, msg) = taskFeed.get()
+                    if tag in [TaskEngine.TaskDONE, TaskEngine.TaskFAIL,
+                               TaskEngine.TaskCANCELED, TaskEngine.TaskCHAIN]:
+                        if tag == TaskEngine.TaskCHAIN:
+                            # During drain, don't chain — mark as done
+                            (jobid, _task) = msg
+                            jreq = taskList.get(jobid)
+                            if jreq:
+                                eng = self.engines.get(jreq.engine)
+                                if eng:
+                                    task_stats = (eng.get_image_cnt(), eng.get_image_rate())
+                                    jreq.deregisterJOB(TaskEngine.TaskDONE, task_stats)
+                                    eng.jobreq = None
+                        else:
+                            jreq = taskList.get(msg)
+                            if jreq:
+                                eng = self.engines.get(jreq.engine)
+                                if eng and eng.jobreq and eng.jobreq.jobID == msg:
+                                    task_stats = (eng.get_image_cnt(), eng.get_image_rate())
+                                    jreq.deregisterJOB(tag, task_stats)
+                                    eng.jobreq = None
+                    taskFeed.task_done()
+                except Exception:
+                    logging.exception("Exception draining taskFeed during shutdown")
+            if all_idle:
+                break
+            time.sleep(0.02)
+
+        # Classify engines
+        for engineName, engine in self.engines.items():
+            if engine.getJobID() is None:
+                engines_drained.append(engineName)
+            else:
+                engines_timed_out.append(engineName)
+                # Reset still-running jobs to Queued so they re-execute on recovery
+                jreq = engine.getJobRequest()
+                if jreq:
+                    logging.warning(f"Engine '{engineName}' timed out during drain, "
+                                    f"resetting job {jreq.jobID} to Queued")
+                    jreq.jobStatus = JobRequest.Status_QUEUED
+                    jreq.jobStartTime = None
+                    jreq.engine = None
+
+        logging.warning(f"Drain complete: {len(engines_drained)} drained, "
+                        f"{len(engines_timed_out)} timed out: {engines_timed_out}")
+
+        # Step 3: Serialize state
+        now = datetime.now()
+        save_state(self._state_filepath,
+                   now, now - self._start_time,
+                   self._snapshot_job_records(),
+                   self._snapshot_queue_records(),
+                   self._snapshot_engine_health(),
+                   self._snapshot_diagnostics())
+        logging.warning("State checkpoint saved for shutdown")
+
+        # Step 4: Terminate TaskEngine children
+        for engineName, engine in list(self.engines.items()):
+            try:
+                engine._engine.terminate()
+                engine._engine.join(timeout=5)
+                logging.info(f"Engine '{engineName}' terminated")
+            except Exception:
+                logging.exception(f"Error terminating engine '{engineName}'")
+
+        # Step 5: Signal the main loop to exit
+        self._stop = True
+
+        return {
+            'status': 'SHUTDOWN',
+            'engines_drained': engines_drained,
+            'engines_timed_out': engines_timed_out,
+            'state_file': self._state_filepath,
+        }
+
     def _jobThread(self) -> None:
         _diag_interval = 50
         _diag_counter = 0
@@ -1105,6 +1549,10 @@ class JobManager:
                         elif snapshot_req.kind == 'HISTORY':
                             JobRequest.full_history_report()
                             snapshot_req.result = True
+                        elif snapshot_req.kind == 'MAINTENANCE':
+                            snapshot_req.result = self._run_maintenance()
+                        elif snapshot_req.kind == 'SHUTDOWN':
+                            snapshot_req.result = self._run_shutdown()
                         snapshot_req.event.set()
 
                     elif tag == TaskEngine.TaskSUBMIT:
@@ -1168,6 +1616,17 @@ class JobManager:
                             # Update completion counters
                             if tag == TaskEngine.TaskDONE:
                                 self._jobs_completed += 1
+                                # Incremental checkpoint
+                                self._checkpoint_counter += 1
+                                if self._checkpoint_counter >= self._checkpoint_interval:
+                                    save_state(self._state_filepath,
+                                               datetime.now(),
+                                               datetime.now() - self._start_time,
+                                               self._snapshot_job_records(),
+                                               self._snapshot_queue_records(),
+                                               self._snapshot_engine_health(),
+                                               self._snapshot_diagnostics())
+                                    self._checkpoint_counter = 0
                             elif tag == TaskEngine.TaskFAIL:
                                 self._jobs_failed += 1
                         if jobreq.engine in self.ondeck and self.ondeck[jobreq.engine] == jobreq:
@@ -1227,24 +1686,25 @@ class JobManager:
                             self._releaseJob(jreq.jobID, engineName)
 
                 # Ventilate queued jobs to empty per-engine ondeck slots by priority
-                for engineName, engine in self.engines.items():
-                    if self.ondeck[engineName] is None:
-                        already_ondeck = {j.jobID for j in self.ondeck.values() if j is not None}
-                        with jobLock:
-                            pending = []
-                            # Try each priority level in order
-                            for priority in [1, 2, 3]:
-                                pending = [r for r in taskList.values()
-                                    if r.jobStatus == JobRequest.Status_QUEUED
-                                    and r.jobID not in already_ondeck
-                                    and r.jobClass in engine.getClasses()
-                                    and r.priority == priority]
-                                if pending:
-                                    break
-                        if pending:
-                            jobreq = pending[0]
-                            self.ondeck[engineName] = jobreq
-                            logging.debug(f"Ventilating job {jobreq.jobID} to ondeck slot for engine {engineName}")
+                if not self._draining.is_set():
+                    for engineName, engine in self.engines.items():
+                        if self.ondeck[engineName] is None:
+                            already_ondeck = {j.jobID for j in self.ondeck.values() if j is not None}
+                            with jobLock:
+                                pending = []
+                                # Try each priority level in order
+                                for priority in [1, 2, 3]:
+                                    pending = [r for r in taskList.values()
+                                        if r.jobStatus == JobRequest.Status_QUEUED
+                                        and r.jobID not in already_ondeck
+                                        and r.jobClass in engine.getClasses()
+                                        and r.priority == priority]
+                                    if pending:
+                                        break
+                            if pending:
+                                jobreq = pending[0]
+                                self.ondeck[engineName] = jobreq
+                                logging.debug(f"Ventilating job {jobreq.jobID} to ondeck slot for engine {engineName}")
 
             self._running_jobs = runningTasks
             _diag_counter += 1
@@ -1292,6 +1752,7 @@ async def task_loop(asyncREP, taskCFG):
     logging.info("Sentinel control loop running")
     while True:
         reply = 'OK'
+        reply_sent = False
         msg = await asyncREP.recv()
         payload = msg.decode("ascii")
         try:
@@ -1320,6 +1781,19 @@ async def task_loop(asyncREP, taskCFG):
                     else:
                         logging.error(f"ALERT request missing payload: {request}")
                         reply = 'Error'
+                elif task == 'MAINTENANCE':
+                    snapshot = SnapshotRequest('MAINTENANCE')
+                    taskFeed.put((JobManager.JobSNAPSHOT, snapshot))
+                    loop = asyncio.get_event_loop()
+                    timed_out = not await loop.run_in_executor(
+                        None, snapshot.event.wait, 30.0)
+                    if timed_out:
+                        logging.error("MAINTENANCE request timed out")
+                        reply = 'Error'
+                    elif snapshot.result:
+                        reply = json.dumps(snapshot.result)
+                    else:
+                        reply = 'Error'
                 elif task == 'RESTART_ENGINE':
                     if 'engine' in request:
                         taskFeed.put((TaskEngine.TaskRESTART, request['engine']))
@@ -1327,6 +1801,21 @@ async def task_loop(asyncREP, taskCFG):
                     else:
                         logging.error(f"RESTART_ENGINE request missing engine name: {request}")
                         reply = 'Error'
+                elif task == 'SHUTDOWN':
+                    await asyncREP.send(b'DRAINING')
+                    reply_sent = True
+                    snapshot = SnapshotRequest('SHUTDOWN')
+                    taskFeed.put((JobManager.JobSNAPSHOT, snapshot))
+                    _scfg = CFG.get('shutdown', {})
+                    _timeout = _scfg.get('drain_timeout', 60) + 15
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, snapshot.event.wait, _timeout)
+                    if snapshot.result:
+                        logging.warning(f"Shutdown complete: {json.dumps(snapshot.result)}")
+                    else:
+                        logging.error("SHUTDOWN request timed out")
+                    shutdown_event.set()
+                    return  # Exit task_loop coroutine
                 else:
                     if task in taskCFG:
                         job = JobRequest(
@@ -1356,7 +1845,8 @@ async def task_loop(asyncREP, taskCFG):
             logging.exception("Unexpected exception processing task request")
             reply = 'Error'
         finally:
-            await asyncREP.send(reply.encode("ascii"))
+            if not reply_sent:
+                await asyncREP.send(reply.encode("ascii"))
 
 async def task_feedback(asyncSUB):
     while True:
@@ -1384,8 +1874,47 @@ async def task_feedback(asyncSUB):
             else:
                 logging.error(f"Unsupported task message: {msgTag}")
 
+async def _shutdown_waiter():
+    """Coroutine that waits for the shutdown_event and raises SystemExit."""
+    await shutdown_event.wait()
+    raise SystemExit('Graceful shutdown')
+
 async def main():
+    global shutdown_event
     log = start_logging(CFG["logging_port"])
+    shutdown_event = asyncio.Event()
+
+    # SIGTERM handler — initiates graceful shutdown via the control path
+    def handle_sigterm():
+        log.warning("SIGTERM received, initiating graceful shutdown")
+        # Synthesize a SHUTDOWN command by putting it directly on taskFeed
+        snapshot = SnapshotRequest('SHUTDOWN')
+        taskFeed.put((JobManager.JobSNAPSHOT, snapshot))
+        # After _run_shutdown completes in _jobThread, it sets _stop.
+        # We need a way for the async loop to notice. Use a thread to
+        # wait on the snapshot event and then set the asyncio shutdown_event.
+        def _wait_and_signal():
+            _scfg = CFG.get('shutdown', {})
+            snapshot.event.wait(timeout=_scfg.get('drain_timeout', 60) + 15)
+            loop.call_soon_threadsafe(shutdown_event.set)
+        threading.Thread(target=_wait_and_signal, daemon=True).start()
+
+    loop = asyncio.get_event_loop()
+    loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
+
+    # State recovery — before creating engines or entering event loop
+    _mcfg = CFG.get('maintenance', {})
+    state_filepath = os.path.expanduser(
+        _mcfg.get('state_file', '~/sentinel/state.json'))
+    recovered = load_state(state_filepath)
+    recovered_health = None
+    if recovered:
+        # Seed taskList with historical records (history-only recovery)
+        for jobid, fields in recovered.get('jobs', {}).items():
+            taskList[jobid] = JobRequest.from_dict(jobid, fields)
+        recovered_health = recovered.get('engine_health')
+        log.info(f"Restored {len(recovered.get('jobs', {}))} history records")
+
     asyncREP = ctxAsync.socket(zmq.REP)  # task loop control socket
     asyncSUB = ctxAsync.socket(zmq.SUB)  # subscriptions for job result publishers
     asyncREP.bind(f"tcp://*:{CFG['control_port']}")
@@ -1394,11 +1923,13 @@ async def main():
                          CFG["ring_buffer_models"],
                          CFG["task_list"],
                          CFG["default_pump"],
-                         asyncSUB)
+                         asyncSUB,
+                         recovered_health=recovered_health)
     try:
         log.info("Sentinel started")
         await asyncio.gather(task_loop(asyncREP, CFG["task_list"]),
-                             task_feedback(asyncSUB))
+                             task_feedback(asyncSUB),
+                             _shutdown_waiter())
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
     except Exception as e:  # traceback will appear in log

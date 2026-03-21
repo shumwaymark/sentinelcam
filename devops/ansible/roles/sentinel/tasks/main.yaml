@@ -108,6 +108,21 @@
     - service
     - cleanup
 
+- name: "Deploy maintenance service and timer"
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: '0644'
+    backup: yes
+  loop:
+    - sentinel_maintenance.service
+    - sentinel_maintenance.timer
+  notify:
+    - reload systemd
+  tags:
+    - service
+    - maintenance
+
 - name: "Enable and start Sentinel service"
   ansible.builtin.systemd:
     name: "{{ sentinel_service }}"
@@ -125,3 +140,13 @@
   tags:
     - service
     - cleanup
+
+- name: "Enable and start Sentinel maintenance timer"
+  ansible.builtin.systemd:
+    name: sentinel_maintenance.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags:
+    - service
+    - maintenance

@@ -1,0 +1,14 @@
+# sentinel maintenance timer unit file
+# SentinelCam Ansible Template
+
+[Unit]
+Description=Sentinel Daily Maintenance Timer
+Requires=sentinel_maintenance.service
+
+[Timer]
+Unit=sentinel_maintenance.service
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

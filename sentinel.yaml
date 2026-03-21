@@ -82,6 +82,16 @@ health:
   restart_cooldown: 300        # seconds between automatic restarts per engine
   max_auto_restarts: 10        # lifetime limit before giving up
 
+# State maintenance: daily summaries, checkpointing, and history trimming
+maintenance:
+  state_file: ~/sentinel/state.json
+  retention_hours: 48          # completed job records older than this are trimmed
+  checkpoint_interval: 50      # job completions between incremental checkpoints
+
+# Graceful shutdown configuration
+shutdown:
+  drain_timeout: 60            # seconds to wait for running tasks before force-exit
+
 # Configure logging publication over 0MQ
 logconfig:
     version: 1

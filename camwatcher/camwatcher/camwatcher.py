@@ -338,6 +338,19 @@ class SentinelAgent:
         self.process.start()
         logging.debug(f"Sentinel agent started, pid {self.process.pid}")
 
+    def _capture_health_record(self, record, csvpath):
+        """Write a HEALTH record to daily JSONL file on the datasink."""
+        date_key = record.get('date', datetime.now().strftime('%Y-%m-%d'))
+        health_dir = os.path.join(csvpath, date_key)
+        os.makedirs(health_dir, exist_ok=True)
+        filepath = os.path.join(health_dir, 'health.json')
+        try:
+            with open(filepath, 'a') as f:
+                f.write(json.dumps(record) + '\n')
+            logging.info(f"HEALTH record captured: {filepath}")
+        except OSError as e:
+            logging.error(f"Failed to write health record: {e}")
+
     def _agent_tasks(self, config, data, logcfg, dateIdxQ):
         runningJobs = {}
         # subscribe to Sentinel result publication
@@ -365,6 +378,9 @@ class SentinelAgent:
                         _flag = logdata['flag']
                         if _flag in ['SUBMIT', 'START','EOJ']:
                             _jobid = logdata['jobid']
+                        elif _flag == 'HEALTH':
+                            self._capture_health_record(logdata, data['csvfiles'])
+                            continue
                         else:
                             logging.debug(f"Sentinel alert received: {message}")
                             continue
