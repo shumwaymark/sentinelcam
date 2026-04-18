@@ -5,7 +5,7 @@
 # Node configuration - canonical names
 DATASINK_USER="ops"
 DATASINK_GROUP="ops"
-RAMROD_USER="pi"
+RAMROD_USER="ops"
 RAMROD_HOST="buzz"  # Hostname for ramrod node
 
 # Paths match current implementation
@@ -58,24 +58,25 @@ mkdir -p "$DEPLOY_FLAGS_DIR"
 declare -A COMPONENT_PATHS=(
     ["imagenode"]="imagenode"
     ["camwatcher"]="camwatcher"
-    ["datapump"]="camwatcher" 
+    ["datapump"]="camwatcher"
     ["sentinel"]="sentinel"
     ["watchtower"]="watchtower"
     ["imagehub"]="imagehub"
+    ["ramrod"]="ramrod"
 )
 
 for component in "${!COMPONENT_PATHS[@]}"; do
     staging_path="$STAGING_DIR/$component"
     deploy_path="$CURRENT_DEPLOYMENT/${COMPONENT_PATHS[$component]}"
-    
+
     if [ -d "$staging_path" ]; then
         log "Updating $component source at ${COMPONENT_PATHS[$component]}..."
         mkdir -p "$deploy_path"
-        
+
         # Sync with enhanced preservation for Ansible change detection
         if rsync -az --checksum "$staging_path/" "$deploy_path/"; then
             log "[+] $component source updated with timestamp preservation"
-            
+
             # Create deployment flag - use correct naming for current playbooks
             case $component in
                 "imagenode")
@@ -96,37 +97,37 @@ done
 # Process devops structure updates - ansible and scripts
 if [ -d "$STAGING_DIR/devops" ]; then
     log "Updating devops structure (ansible + scripts)..."
-    
+
     # Ensure devops directory structure exists
     mkdir -p "$DEVOPS_DIR"
-    
+
     # Sync entire devops structure with enhanced timestamp preservation
     if rsync -az --checksum "$STAGING_DIR/devops/" "$DEVOPS_DIR/"; then
         log "[+] DevOps structure updated with timestamp preservation (ansible + scripts)"
-        
+
         # CRITICAL: Fix permissions immediately after rsync from Windows source
         log "Fixing permissions from Windows filesystem extraction..."
-        
+
         # Set correct ownership for entire devops structure
         chown -R $DATASINK_USER:$DATASINK_GROUP "$DEVOPS_DIR/"
-        
+
         # Fix directory permissions (755 - executable for traversal)
         find "$DEVOPS_DIR/" -type d -exec chmod 755 {} \;
-        
+
         # Fix file permissions (644 - not executable)
         find "$DEVOPS_DIR/" -type f -exec chmod 644 {} \;
-        
+
         # Make shell scripts executable (755)
         find "$DEVOPS_DIR/" -name "*.sh" -exec chmod 755 {} \;
-        
+
         # Remove Windows carriage return characters from script files
         #find "$DEVOPS_DIR/scripts" -name "*.sh" | xargs sed -i 's/\r$//'
-        
+
         # Remove Windows carriage return characters from YAML files
         #find "$DEVOPS_DIR/ansible" -name "*.yaml" | xargs sed -i 's/\r$//'
 
         log "[+] Permissions fixed for Windows-sourced files"
-        
+
         # Verify critical playbooks are present
         expected_playbooks=(
             "deploy-datapump.yaml"
@@ -134,21 +135,22 @@ if [ -d "$STAGING_DIR/devops" ]; then
             "deploy-camwatcher.yaml"
             "deploy-watchtower.yaml"
             "deploy-sentinel.yaml"
+            "configure-ramrod.yaml"
         )
-        
+
         missing_playbooks=()
         for playbook in "${expected_playbooks[@]}"; do
             if [ ! -f "$DEVOPS_ANSIBLE/playbooks/$playbook" ]; then
                 missing_playbooks+=("$playbook")
             fi
         done
-        
+
         if [ ${#missing_playbooks[@]} -gt 0 ]; then
             log "WARNING: Missing expected playbooks: ${missing_playbooks[*]}"
         else
             log "[+] All expected current playbooks are present"
         fi
-        
+
         # Verify scripts directory exists
         if [ -d "$DEVOPS_SCRIPTS" ]; then
             script_count=$(find "$DEVOPS_SCRIPTS" -name "*.sh" | wc -l)
@@ -156,7 +158,20 @@ if [ -d "$STAGING_DIR/devops" ]; then
         else
             log "WARNING: DevOps scripts directory not found after sync"
         fi
-        
+
+        # Self-update: Copy pipeline scripts from deployed devops to ~/scripts/
+        # This ensures the running pipeline scripts stay current with the repo.
+        SCRIPTS_HOME="/home/$DATASINK_USER/scripts"
+        mkdir -p "$SCRIPTS_HOME"
+        for script in integrate-code-update.sh; do
+            src="$DEVOPS_SCRIPTS/sync/$script"
+            if [ -f "$src" ]; then
+                cp "$src" "$SCRIPTS_HOME/$script"
+                chmod 755 "$SCRIPTS_HOME/$script"
+                log "[+] Pipeline script self-updated: $script"
+            fi
+        done
+
         # Create deployment flag for ansible
         touch "$DEPLOY_FLAGS_DIR/ansible"
         log "[+] Deployment flag created for ansible"
@@ -168,7 +183,7 @@ fi
 # Legacy handling: Process old devops/ansible location for backward compatibility
 if [ -d "$STAGING_DIR/devops/ansible" ] && [ ! -d "$STAGING_DIR/devops/scripts" ]; then
     log "Processing legacy devops/ansible-only structure..."
-    
+
     # Convert legacy structure to current devops/ansible structure
     mkdir -p "$DEVOPS_ANSIBLE"
     if rsync -az --checksum "$STAGING_DIR/ansible/" "$DEVOPS_ANSIBLE/"; then
@@ -187,7 +202,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - TESTS_SKIPPED" >> "$DEPLOY_FLAGS_DIR/test_s
 if [ -d "$STAGING_DIR/configs" ]; then
     log "Updating configuration templates..."
     mkdir -p "$CONFIGS_DIR"
-    
+
     if rsync -az --checksum "$STAGING_DIR/configs/" "$CONFIGS_DIR/"; then
         log "[+] Configuration templates updated"
     else

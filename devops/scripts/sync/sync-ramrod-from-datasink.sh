@@ -1,9 +1,9 @@
 #!/bin/bash
 # Ramrod script: Sync ansible content from datasink and deploy
-# File: /home/pi/scripts/sync-from-datasink.sh
+# File: /home/ops/scripts/sync-from-datasink.sh
 
 # Node configuration - canonical names
-RAMROD_USER="pi"
+RAMROD_USER="ops"
 DATASINK_USER="ops"
 DATASINK_HOST="data1"  # Hostname for datasink node
 
@@ -50,6 +50,19 @@ rsync -az --checksum --delete --itemize-changes --ignore-errors \
       done
 
 log "[+] Complete devops structure synced (ansible + scripts)"
+
+# Sync ramrod source from datasink current_deployment
+log "Syncing ramrod source from datasink..."
+RAMROD_HOME="/home/$RAMROD_USER/ramrod"
+mkdir -p "$RAMROD_HOME"
+rsync -az --checksum --itemize-changes --ignore-errors \
+      --exclude='venv/' --exclude='logs/' --exclude='*.pyc' --exclude='__pycache__/' \
+      --exclude='ramrod.yaml' \
+      $DATASINK_USER@$DATASINK_HOST:$DATASINK_SOURCE/ramrod/ "$RAMROD_HOME/" | \
+      grep -E '^[>.]f' | sed 's/^[>.]f[^ ]* /  /' | while read file; do
+          log "Updated (ramrod): $file"
+      done
+log "[+] Ramrod source synced"
 
 # Verify the ansible structure is complete
 if [ ! -d "$ANSIBLE_HOME/playbooks" ] || [ ! -d "$ANSIBLE_HOME/roles" ]; then

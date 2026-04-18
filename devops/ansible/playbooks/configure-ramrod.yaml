@@ -1,0 +1,24 @@
+---
+# Configure Ramrod Health Observer
+#
+# Renders ramrod.yaml on localhost from inventory variables.
+# Run locally on buzz (ramrod):
+#   cd ~/sentinelcam/devops/ansible
+#   ansible-playbook playbooks/configure-ramrod.yaml --connection=local
+#
+# Since localhost is not in the sentinelcam inventory groups, we load
+# group_vars explicitly via vars_files to get outpost registry, ports, etc.
+
+- name: "Configure Ramrod Health Observer"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../inventory/group_vars/all/sentinelcam_standards.yaml
+    - ../inventory/group_vars/all/sentinelcam_ports.yaml
+    - ../inventory/group_vars/all/site.yaml
+
+  roles:
+    - role: ramrod
+      tags: [ramrod, config]

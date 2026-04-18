@@ -1,0 +1,20 @@
+# Ramrod Health Observer configuration
+# Rendered by Ansible from inventory variables — do not edit by hand.
+# Template: roles/ramrod/templates/ramrod.yaml.j2
+
+# Component endpoints (hostnames resolved by dnsmasq on the SentinelCam network)
+camwatcher_address: "tcp://{{ primary_datasink }}:{{ sentinelcam_ports.camwatcher_control }}"
+datapump_address: "tcp://{{ primary_datasink }}:{{ sentinelcam_ports.datapump_control }}"
+sentinel_address: "tcp://{{ sentinelcam_sentinel }}:{{ sentinelcam_ports.sentinel_control }}"
+
+# ZMQ request timeout (milliseconds)
+timeout_ms: {{ ramrod_hc_timeout_ms }}
+
+# Outpost names (derived from outpost registry)
+outposts:
+{% for outpost_name in sentinelcam_outposts %}
+  - {{ outpost_name }}
+{% endfor %}
+
+# Log file path
+log_file: "{{ ramrod_log_file }}"

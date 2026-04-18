@@ -1,0 +1,24 @@
+---
+# Ramrod Health Observer — render ramrod.yaml from inventory variables
+#
+# This role is config-only: it renders the ramrod.yaml configuration file
+# from inventory variables. No code deployment, no service management.
+# Intended to run locally on buzz via: ansible-playbook configure-ramrod.yaml --connection=local
+
+- name: "Ensure ramrod config directory exists"
+  ansible.builtin.file:
+    path: /home/ops/ramrod
+    state: directory
+    owner: ops
+    group: ops
+    mode: '0755'
+  tags: [ramrod, config]
+
+- name: "Render ramrod.yaml from inventory variables"
+  ansible.builtin.template:
+    src: ramrod.yaml.j2
+    dest: /home/ops/ramrod/ramrod.yaml
+    owner: ops
+    group: ops
+    mode: '0644'
+  tags: [ramrod, config]

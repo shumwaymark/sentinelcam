@@ -1,0 +1,10 @@
+---
+# Ramrod Health Observer — default variables
+#
+# These can be overridden in host_vars or group_vars as needed.
+
+# ZMQ request timeout in milliseconds
+ramrod_hc_timeout_ms: 3000
+
+# Log file location on ramrod (buzz)
+ramrod_log_file: "/home/ops/ramrod/logs/ramrod_health.log"

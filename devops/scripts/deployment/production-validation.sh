@@ -8,7 +8,7 @@
 #   production-validation.sh outposts sentinels # Validate specific groups
 
 # Configuration
-ANSIBLE_HOME="/home/pi/sentinelcam/devops/ansible"
+ANSIBLE_HOME="/home/ops/sentinelcam/devops/ansible"
 VALIDATION_LOG="$ANSIBLE_HOME/logs/production_validation_$(date +%Y%m%d_%H%M%S).log"
 INVENTORY="$ANSIBLE_HOME/inventory/production.yaml"
 

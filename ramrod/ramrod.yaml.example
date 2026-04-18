@@ -1,0 +1,20 @@
+# Ramrod Health Observer configuration
+# Deployed version is rendered by Ansible: configure-ramrod.yaml
+# This file is a reference example only.
+
+# Component endpoints
+camwatcher_address: "tcp://data1:5566"
+datapump_address: "tcp://data1:5556"
+sentinel_address: "tcp://sentinel:5566"
+
+# ZMQ request timeout (milliseconds)
+timeout_ms: 3000
+
+# Outpost names (for deriving outpost health from CamWatcher response)
+outposts:
+  - outpost
+  - east
+  - alpha5
+
+# Log file path
+log_file: "/home/ops/ramrod/logs/ramrod_health.log"

@@ -107,6 +107,14 @@ components:
       - devops/ansible/
       - devops/scripts/
 
+  - name: ramrod
+    description: Ramrod node scripts and configuration
+    paths:
+      - ramrod/
+    required_files:
+      - ramrod/ramrod_health.py
+    ansible_playbook: deploy-ramrod.yaml
+
   - name: docs
     description: Documentation files
     paths:
@@ -130,6 +138,7 @@ scenarios:
       - imagehub
       - devops
       - config
+      - ramrod
 
   services:
     description: All service components
@@ -144,6 +153,7 @@ scenarios:
     description: Infrastructure and operations
     components:
       - devops
+      - ramrod
 
   outpost:
     description: Outpost/imagenode focused deployment
