@@ -377,6 +377,37 @@ class CamData:
             imagePath = os.path.join(basePath, filename)
             yield imagePath
 
+    def get_health_summary(self, date) -> list:
+        """Return HEALTH records for the given date.
+
+        Reads the JSONL health file at {datafolder}/{date}/health.json
+        and returns a list of parsed JSON objects, one per line.
+
+        Parameters
+        ----------
+        date : str
+            Target date in "YYYY-MM-DD" format
+
+        Returns
+        -------
+        list
+            List of dicts (parsed HEALTH records), or empty list
+        """
+        import json
+        filepath = os.path.join(self._index_path, date, 'health.json')
+        if not os.path.isfile(filepath):
+            return []
+        records = []
+        try:
+            with open(filepath, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        records.append(json.loads(line))
+        except (OSError, json.JSONDecodeError) as e:
+            pass
+        return records
+
     def __init__(self, csvdir, imgdir, date = datetime.now().isoformat()[:10]):
         self._index_path = csvdir
         self._image_path = imgdir
