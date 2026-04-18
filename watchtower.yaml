@@ -29,6 +29,7 @@ outposts:
   alpha5:
     image_publisher: tcp://alpha5:5567
     datapump: data1
+
 # Every camera view is provided by an outpost node. Note that
 # each outpost can potentially support multiple views.
 outpost_views:
@@ -85,3 +86,11 @@ video_export:
     telegram:
       bot_token: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
       chat_id: XXXXXXXXXX
+
+# System health display (optional - thresholds for health page and heart icon)
+# health_display:
+#   syshealth_warning_age: 360    # seconds before "last check" turns amber (default: 360)
+#   syshealth_critical_age: 720   # seconds before "last check" turns red (default: 720)
+#   fps_warning: 20               # FPS below this shows amber (default: 20)
+#   fps_critical: 10              # FPS below this shows red (default: 10)
+#   max_alerts: 20                # alert feed history depth (default: 20)
