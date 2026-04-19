@@ -36,6 +36,7 @@ sentinel_alertQ = multiprocessing.Queue()  # for sending alerts to sentinel
 
 _start_time = datetime.now()         # process start time for uptime tracking
 _events_today = multiprocessing.Value('L', 0)  # event counter for current date
+_sentinel_agent = None               # SentinelAgent instance set in main()
 
 class OutpostHealth:
     """Tracks heartbeat health for an individual outpost node."""
@@ -593,8 +594,8 @@ def _build_hc_response():
                 "pid": writer.process.pid if alive else None,
                 "frames_written": writer._frames_written.value
             }
-    # CSVindex and SentinelAgent are checked indirectly — they're child processes
-    # started in main(). We track them by name if accessible via the config.
+    # SentinelAgent liveness
+    agent_alive = _sentinel_agent.process.is_alive() if _sentinel_agent is not None else None
     # Heartbeat status
     heartbeats = {}
     for node_name, health in outpost_health.items():
@@ -622,7 +623,8 @@ def _build_hc_response():
         "uptime": str(uptime).split('.')[0],
         "writers": writers,
         "heartbeats": heartbeats,
-        "disk": disk
+        "disk": disk,
+        "sentinel_agent": {"alive": agent_alive}
     }
 
 async def control_loop(control_socket, log_socket):
@@ -703,9 +705,11 @@ async def main():
     _data = CFG['data']
     logging.config.dictConfig(CFG['logconfigs']['camwatcher_internal'])
     log = logging.getLogger()
+    global _sentinel_agent
     _csvidx = CSVindex(dateIndxQ, sentinel_alertQ)
     csv = CSVwriter(_data['csvfiles'], dateIndxQ, dbLogMsgQ)
     agent = SentinelAgent(CFG['sentinel'], dateIndxQ)
+    _sentinel_agent = agent
     asyncCtx = AsyncContext.instance()
     asyncREP = asyncCtx.socket(zmq.REP)  # 0MQ async socket for control loop
     asyncSUB = asyncCtx.socket(zmq.SUB)  # 0MQ async socket for camwatcher log subscriptions
