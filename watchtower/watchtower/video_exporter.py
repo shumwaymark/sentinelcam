@@ -16,7 +16,7 @@ import requests
 import subprocess
 import simplejpeg
 import time
-from base64 import b64encode
+from base64 import urlsafe_b64encode
 from datetime import datetime, timedelta
 #from urllib import request, parse, error
 from sentinelcam.datafeed import DataFeed
@@ -606,10 +606,10 @@ class VideoExporter:
             expires = int(time.time()) + (expiry_hours * 3600)
             uri_path = f"/sentinelcam_exports/{filename}"
 
-            # Calculate MD5: expires + path + secret (base64-encoded for nginx secure_link)
+            # Calculate MD5: expires + path + secret (base64url for nginx secure_link)
             md5_input = f"{expires}{uri_path}{secret}"
             md5_binary = hashlib.md5(md5_input.encode()).digest()
-            md5_base64 = b64encode(md5_binary).decode().rstrip('=')  # nginx uses unpadded base64
+            md5_base64 = urlsafe_b64encode(md5_binary).decode().rstrip('=')
 
             # Build secure URL
             secure_url = f"{base_url}/{filename}?md5={md5_base64}&expires={expires}"
