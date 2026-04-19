@@ -112,6 +112,7 @@ class DataFeed(imagezmq.ImageSender):
     IMG_JPG = 4
     DEL_EVT = 5
     STG_RPT = 6
+    HTH_RPT = 7
     HEALTH = -1
 
     def __init__(self, connect_to, timeout=15.0):
@@ -126,6 +127,7 @@ class DataFeed(imagezmq.ImageSender):
             DataFeed.IMG_JPG: self.recv_jpg,
             DataFeed.DEL_EVT: self.recv,
             DataFeed.STG_RPT: self.recv_pickle,
+            DataFeed.HTH_RPT: self.recv_pickle,
             DataFeed.HEALTH: self.recv
         }
         self._cmdQ = queue.Queue()
@@ -157,8 +159,19 @@ class DataFeed(imagezmq.ImageSender):
             self._cmdQ.task_done()
             while not self._haveResult.is_set():
                 if self._haveResponse():
-                    (msg, result) = self._pumpResult[cmd]()
+                    try:
+                        (msg, result) = self._pumpResult[cmd]()
+                    except Exception as e:
+                        logging.error(f"DataFeed recv error for cmd {cmd} from {self._pump}: {e}")
+                        # Drain any remaining multipart frames
+                        while self.zmq_socket.getsockopt(zmq.RCVMORE):
+                            self.zmq_socket.recv()
+                        self._data = None
+                        self._recv_error = str(e)
+                        self._haveResult.set()
+                        break
                     self._data = result
+                    self._recv_error = None
                     self._haveResult.set()
                 else:
                     time.sleep(0.001)
@@ -167,6 +180,7 @@ class DataFeed(imagezmq.ImageSender):
 
     def pump_action(self, cmd, request) -> object:
         self._haveResult.clear()
+        self._recv_error = None
         self._cmdQ.put((cmd, request))
         flag = self._haveResult.wait(timeout=self._timeout)
         if not flag: # shutdown thread and attempt recovery
@@ -179,6 +193,8 @@ class DataFeed(imagezmq.ImageSender):
             self._registerPoller()
             self._startThread()
             raise TimeoutError(timedout)
+        if self._recv_error:
+            raise ConnectionError(f"DataPump error response from {self._pump}: {self._recv_error}")
         return self._data
 
     def get_date_list(self) -> list:
@@ -225,6 +241,22 @@ class DataFeed(imagezmq.ImageSender):
     def delete_event(self, date, event) -> str:
         request = {'cmd': 'del', 'date': date, 'evt': event}
         return self.pump_action(DataFeed.DEL_EVT, request)
+
+    def get_health_summary(self, date) -> list:
+        """Retrieve HEALTH summary records for a given date.
+
+        Parameters
+        ----------
+        date : str
+            Target date in "YYYY-MM-DD" format
+
+        Returns
+        -------
+        list
+            List of HEALTH record dicts, or empty list if none available
+        """
+        result = self.pump_action(DataFeed.HTH_RPT, {'cmd': 'hth', 'date': date})
+        return result if result else []
 
     def health_check(self) -> str:
         req = {'cmd': 'HC'}
