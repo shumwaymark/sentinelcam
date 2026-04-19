@@ -24,14 +24,17 @@ import PIL.Image, PIL.ImageTk
 import simplejpeg
 from ast import literal_eval
 import time
-from time import sleep
-from datetime import date, datetime
+from time import monotonic, sleep
+from datetime import date, datetime, timedelta
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.utils import FPS, ImageSubscriber, readConfig
 from video_exporter import VideoExporter
 from motion_calibration import MotionCalibrationPage
 from calendar_page import CalendarPage
 from storage_page import StoragePage
+from health_page import SystemHealthPage
+from sentinel_page import SentinelPerformancePage
+from heart_icon import HeartIcon
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "watchtower.yaml"))
 SOCKDIR = CFG["socket_dir"]
@@ -44,6 +47,8 @@ class UserPage(enum.IntEnum):
     SETTINGS = 3  # To be determined: settings, controls, and tools cafe
     CALIBRATE = 4  # Motion detector calibration tool
     STORAGE = 5   # Storage analysis report
+    HEALTH = 6    # System health dashboard
+    SENTINEL = 7  # Sentinel performance drill-down
 
 class PlayerCommand(enum.Enum):
     """Source command types for the Player subsystem"""
@@ -711,11 +716,13 @@ class PlayerStateManager:
 class SentinelSubscriber:
     def __init__(self, sentinel) -> None:
         self.eventQueue = multiprocessing.Queue()
+        self.healthQueue = multiprocessing.Queue()
+        self.jobQueue = multiprocessing.Queue()
         self.process = multiprocessing.Process(target=self._sentinel_reader, args=(
-            sentinel, self.eventQueue))
+            sentinel, self.eventQueue, self.healthQueue, self.jobQueue))
         self.process.start()
 
-    def _sentinel_reader(self, sentinel, eventQueue):
+    def _sentinel_reader(self, sentinel, eventQueue, healthQueue, jobQueue):
         daemon_logger = logging.getLogger("watchtower.SentinelSubscriber")
         # subscribe to Sentinel result publication
         sentinel_log = zmq.Context.instance().socket(zmq.SUB)
@@ -732,7 +739,12 @@ class SentinelSubscriber:
                 try:
                     logdata = json.loads(message)
                     if 'flag' in logdata:
-                        if logdata['flag'] == 'EOJ' and logdata['event'] is not None:
+                        if logdata['flag'] == 'SYSHEALTH':
+                            healthQueue.put(logdata)
+                            daemon_logger.debug("SYSHEALTH report received")
+                        elif logdata['flag'] == 'JOB':
+                            jobQueue.put(logdata)
+                        elif logdata['flag'] == 'EOJ' and logdata['event'] is not None:
                             viewkey = (logdata['from'][0], logdata['from'][1], logdata['sink'])
                             evtkey = (logdata['date'], logdata['event'], logdata['pump'])
                             task = logdata['task']
@@ -1317,6 +1329,16 @@ class PlayerPage(tk.Canvas):
         self.addtag_withtag('player_buttons', self.list_button)
         self.addtag_withtag('player_buttons', self.list_text)
 
+        # Heart icon — system health indicator (below LIST button)
+        self.heart_icon = HeartIcon()
+        self._heart_state = 'green'   # green, amber, red
+        self._heart_alarm = False     # True = keep heart visible when buttons hidden
+        self._heart_pulse_idx = 0
+        self.heart_img = self.create_image(750, 150, anchor="center",
+                                           image=self.heart_icon.green,
+                                           tags=('player_buttons', 'heart_icon'))
+        self.tag_bind(self.heart_img, "<Button-1>", self.show_health)
+
         self.toggle_pending = False
         self.auto_hide = None
         self.paused = True
@@ -1341,6 +1363,9 @@ class PlayerPage(tk.Canvas):
 
     def hide_buttons(self):
         self.itemconfig('player_buttons', state='hidden')
+        # In alarm mode, keep heart visible even when buttons are hidden
+        if self._heart_alarm:
+            self.itemconfig(self.heart_img, state='normal')
 
     def hide_buttons_now(self, event=None):
         self.after_cancel(self.auto_hide)
@@ -1472,6 +1497,39 @@ class PlayerPage(tk.Canvas):
             logger.exception(f"Error polling export progress: {str(e)}")
             self.hide_progress_overlay()
 
+    def show_health(self, event=None):
+        """Navigate to health page — clears alarm flag"""
+        logger.debug("PlayerPage heart icon pressed")
+        self._heart_alarm = False
+        self.pause()
+        app.show_page(UserPage.HEALTH)
+
+    def set_heart_state(self, state):
+        """Update heart icon color: 'green', 'amber', or 'red'.
+
+        When changing to red, sets alarm flag for persistent visibility.
+        """
+        self._heart_state = state
+        if state == 'green':
+            self.itemconfig(self.heart_img, image=self.heart_icon.green)
+        elif state == 'amber':
+            self.itemconfig(self.heart_img, image=self.heart_icon.amber)
+        elif state == 'red':
+            if not self._heart_alarm:
+                self._heart_alarm = True
+                # Ensure heart is visible immediately in alarm mode
+                self.itemconfig(self.heart_img, state='normal')
+
+    def clear_heart_alarm(self):
+        """Clear alarm flag (called when health page is visited)."""
+        self._heart_alarm = False
+
+    def animate_heart_pulse(self):
+        """Advance one frame of the red pulse animation."""
+        if self._heart_state == 'red':
+            self.itemconfig(self.heart_img, image=self.heart_icon.pulse(self._heart_pulse_idx))
+            self._heart_pulse_idx = self.heart_icon.next_pulse(self._heart_pulse_idx)
+
     def show_event_list(self, event=None):
         """Navigate to event list page"""
         logger.debug("PlayerPage LIST button pressed")
@@ -1512,6 +1570,15 @@ class Application(ttk.Frame):
         self.sentinel_subscriber = SentinelSubscriber(CFG['sentinel'])
         self.eventList_updater = EventListUpdater(self.sentinel_subscriber.eventQueue, self.newEvent, self.outpost_views)
 
+        # System health state
+        self._latest_syshealth = None
+        self._heart_anim_last = 0  # monotonic timestamp for pulse throttle
+
+        # JOB record accumulation for sentinel performance page
+        self._job_records = []
+        self._job_df = None
+        self._job_df_rebuild_timer = None
+
         # Background history loader — deferred until EventListUpdater finishes
         # initial load to avoid race where set_event_list() overwrites prepended history
         self.historyQ = multiprocessing.Queue()
@@ -1534,7 +1601,9 @@ class Application(ttk.Frame):
                       CalendarPage(self, self.outpost_views),
                       SettingsPage(),
                       MotionCalibrationPage(self, self.outpost_views),
-                      StoragePage(self, CFG['datapumps'])]
+                      StoragePage(self, CFG['datapumps']),
+                      SystemHealthPage(self, CFG.get('health_display')),
+                      SentinelPerformancePage(self, CFG['datapumps'])]
         self.auto_play = False
         self.auto_pause = None
         self.move_next = False
@@ -1598,6 +1667,19 @@ class Application(ttk.Frame):
             # Refresh storage report when navigating to it
             if page == UserPage.STORAGE:
                 self.pages[UserPage.STORAGE].refresh()
+            # Refresh health page and clear alarm when navigating to it
+            if page == UserPage.HEALTH:
+                self.pages[UserPage.HEALTH].refresh()
+                self.player_panel.clear_heart_alarm()
+            # Stop health page age timer when navigating away
+            if self.current_page == UserPage.HEALTH:
+                self.pages[UserPage.HEALTH].on_hide()
+            # Refresh sentinel performance page when navigating to it
+            if page == UserPage.SENTINEL:
+                self.pages[UserPage.SENTINEL].refresh()
+            # Stop sentinel page refresh timer when navigating away
+            if self.current_page == UserPage.SENTINEL:
+                self.pages[UserPage.SENTINEL].on_hide()
 
             self.pages[self.current_page].grid_remove()
             self.pages[page].grid(row=0, column=0)
@@ -1680,6 +1762,55 @@ class Application(ttk.Frame):
         logger.debug("Forced pause and reset to PlayerPage for inactivity")
         self.select_outpost_view(self._current_view, auto_play=False)
 
+    def _update_heart_state(self, report):
+        """Derive heart color from SYSHEALTH report and update PlayerPage heart."""
+        any_down = False
+        any_warn = False
+
+        # Check outposts
+        for info in report.get('outposts', {}).values():
+            if info.get('ok') is False:
+                any_down = True
+            elif info.get('stale'):
+                any_warn = True
+
+        # Check pipeline services
+        for svc in ('camwatcher', 'datapump', 'sentinel'):
+            svc_data = report.get(svc, {})
+            if svc_data.get('ok') is False:
+                any_down = True
+
+        if any_down:
+            self.player_panel.set_heart_state('red')
+        elif any_warn:
+            self.player_panel.set_heart_state('amber')
+        else:
+            self.player_panel.set_heart_state('green')
+
+    def _rebuild_job_dataframe(self, force=False):
+        """Rebuild the JOB records DataFrame from the accumulated list.
+
+        Trims to an 8-hour rolling window. Throttled to run at most every
+        30 seconds unless force=True or the sentinel page is visible.
+        """
+        now = datetime.now()
+        if not force and self._job_df_rebuild_timer is not None:
+            if (now - self._job_df_rebuild_timer).total_seconds() < 30:
+                return
+        self._job_df_rebuild_timer = now
+        if not self._job_records:
+            self._job_df = None
+            return
+        df = pd.DataFrame(self._job_records)
+        if 'submited' in df.columns:
+            df['submited'] = pd.to_datetime(df['submited'], errors='coerce')
+            df['started'] = pd.to_datetime(df['started'], errors='coerce')
+            df['ended'] = pd.to_datetime(df['ended'], errors='coerce')
+            cutoff = now - timedelta(hours=8)
+            df = df.loc[df['submited'] > cutoff]
+            self._job_records = df.to_dict('records')
+        self._job_df = df
+
     def update(self):
         _delay = 1
 
@@ -1723,6 +1854,41 @@ class Application(ttk.Frame):
                     self.outpost_views[viewname].prepend_history(batch)
             except queue.Empty:
                 pass
+
+        # Drain health queue from sentinel subscriber
+        try:
+            report = self.sentinel_subscriber.healthQueue.get_nowait()
+            self._latest_syshealth = report
+            self._update_heart_state(report)
+            # If health page is visible, push the update
+            if self.current_page == UserPage.HEALTH:
+                self.pages[UserPage.HEALTH].on_syshealth(report)
+            elif self.current_page == UserPage.SENTINEL:
+                self.pages[UserPage.SENTINEL].on_syshealth(report)
+            logger.debug("SYSHEALTH report processed")
+        except queue.Empty:
+            pass
+
+        # Drain JOB records from sentinel subscriber (non-blocking batch)
+        drained = 0
+        while drained < 20:
+            try:
+                job = self.sentinel_subscriber.jobQueue.get_nowait()
+                self._job_records.append(job)
+                drained += 1
+            except queue.Empty:
+                break
+        if drained > 0:
+            self._rebuild_job_dataframe(force=self.current_page == UserPage.SENTINEL)
+            if self.current_page == UserPage.SENTINEL:
+                self.pages[UserPage.SENTINEL].on_job_update()
+
+        # Animate heart pulse when in red state (~33ms per frame ≈ 30 FPS)
+        if self.player_panel._heart_state == 'red' and self.current_page == UserPage.PLAYER:
+            now_mono = monotonic()
+            if now_mono - self._heart_anim_last >= 0.033:
+                self._heart_anim_last = now_mono
+                self.player_panel.animate_heart_pulse()
 
         # New event data is available from the sentinel subscriber
         if self.newEvent.is_set():
