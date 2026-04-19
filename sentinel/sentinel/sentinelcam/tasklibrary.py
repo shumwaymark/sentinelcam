@@ -65,7 +65,13 @@ class MobileNetSSD:
             _, scale = self.common.set_resized_input(
                 self.net, image.size, lambda size: image.resize(size, PIL.Image.LANCZOS))
             self.net.invoke()
-            detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+            try:
+                detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+            except (ValueError, OverflowError):
+                # Coral EdgeTPU can return NaN bbox coordinates after USB reset;
+                # pycoral's BBox.map(int) raises ValueError on NaN. Skip frame.
+                logging.warning("MobileNetSSD: EdgeTPU returned invalid detection data, skipping frame")
+                return objs, labls
 
             for detection in detections:
                 # extract the bounding box coordinates
@@ -157,7 +163,13 @@ class FaceDetector:
             _, scale = self.common.set_resized_input(
                 self.net, image.size, lambda size: image.resize(size, PIL.Image.LANCZOS))
             self.net.invoke()
-            detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+            try:
+                detections = self.edgetpu_detect.get_objects(self.net, self.conf["confidence"], scale)
+            except (ValueError, OverflowError):
+                # Coral EdgeTPU can return NaN bbox coordinates after USB reset;
+                # pycoral's BBox.map(int) raises ValueError on NaN. Skip frame.
+                logging.warning("FaceDetector: EdgeTPU returned invalid detection data, skipping frame")
+                return rects, labls
 
             # DEBUG: Log detection count if excessive (per-frame threshold)
             if len(detections) > 5:
