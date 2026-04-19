@@ -217,9 +217,14 @@ def main():
     # Need a policy for sending meaningful response codes back to the DataFeed.
     while True:
         msg = pump.zmq_socket.recv()
-        request = msgpack.loads(msg)
+        try:
+            request = msgpack.loads(msg)
+        except Exception as e:
+            log.error(f'Malformed request (msgpack decode failed): {e}')
+            pump.send_reply(b'Error')
+            continue
         reply = 'OK'
-        if 'cmd' in request:
+        if isinstance(request, dict) and 'cmd' in request:
             metrics.begin(request['cmd'])
             try:
                 if request['cmd'] == 'dat':  # retrieve list of date folders
@@ -279,6 +284,11 @@ def main():
                         log.debug(f"camwatcher delete response {reply}")
                 elif request['cmd'] == 'HC':  # health check
                     reply = json.dumps(metrics.build_hc_response()).encode('ascii')
+                elif request['cmd'] == 'hth':  # health summary for date
+                    records = cData.get_health_summary(request['date'])
+                    pump.pickle_and_send(reply, records)
+                    metrics.end()
+                    continue
                 elif request['cmd'] == 'str':  # storage report
                     report = load_storage_report(sentinelcam_root)
                     if report is not None:
@@ -292,16 +302,37 @@ def main():
                     reply = b'Error'
             except KeyError as keyval:
                 log.error(f'Request field "{keyval}" missing for [{request["cmd"]}] command')
-                reply = b'Error'
+                # Send error in format matching what DataFeed expects for this command
+                cmd = request.get('cmd', '')
+                if cmd in ('idx', 'evt'):
+                    pump.send_DataFrame('Error', pandas.DataFrame())
+                elif cmd in ('dat', 'img', 'str', 'hth'):
+                    pump.pickle_and_send('Error', None)
+                elif cmd == 'pic':
+                    pump.send_jpg('Error', tinyJPG)
+                else:
+                    pump.send_reply(b'Error')
+                metrics.end()
+                continue
             except Exception as e:
                 log.exception(f'Unexpected exception [{request}] command: {str(e)}')
-                reply = b'Exception'
+                cmd = request.get('cmd', '')
+                if cmd in ('idx', 'evt'):
+                    pump.send_DataFrame('Error', pandas.DataFrame())
+                elif cmd in ('dat', 'img', 'str', 'hth'):
+                    pump.pickle_and_send('Error', None)
+                elif cmd == 'pic':
+                    pump.send_jpg('Error', tinyJPG)
+                else:
+                    pump.send_reply(b'Exception')
+                metrics.end()
+                continue
         else:
             metrics.begin()
             log.error(f"Invalid request: {request}")
             reply = b'Error'
         metrics.end()
-        pump.send_reply(reply)   # TypeError: not all arguments converted during string formatting
+        pump.send_reply(reply)
 
 if __name__ == "__main__":
     main()
