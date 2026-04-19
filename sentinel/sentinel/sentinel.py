@@ -94,6 +94,7 @@ class JobRequest:
         self.image_cnt = stats[0]
         self.image_rate = stats[1]
         logging.info(str(self.stop_Message()))
+        logging.info(self.summary_JSON())
         with jobLock:
             if self.jobID in jobList:
                 logging.debug(f"strike jobList[{self.jobID}], status now {JobRequest.Status[status]}")
@@ -864,11 +865,12 @@ class JobManager:
             for name, health_data in recovered_health.items():
                 if name in self.engines:
                     eng = self.engines[name]
-                    eng.health.total_restarts = health_data.get('total_restarts', 0)
                     lr = health_data.get('last_restart')
                     eng.health.last_restart = lr if isinstance(lr, datetime) else None
                     logging.info(f"Engine '{name}' health restored: "
                                  f"{eng.health.total_restarts} prior restarts")
+                    # Reset total_restarts from recovered state to avoid exceeding auto-restart limit
+                    eng.health.total_restarts = 0
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -1264,6 +1266,7 @@ class JobManager:
 
         # Step 1: Compute daily summaries from taskList
         date_summaries = {}
+        processed_dates = []
         with jobLock:
             all_jobs = list(taskList.values())
         for jreq in all_jobs:
@@ -1272,7 +1275,17 @@ class JobManager:
                 date_summaries[d] = []
             date_summaries[d].append(jreq)
 
+        # Daily maintenance is scheduled just after midnight, so summarize
+        # the prior day rather than the new calendar day that has just begun.
+        target_date_key = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+
         for date_key, jobs in date_summaries.items():
+            # Only emit HEALTH records for the maintenance target date.
+            # Older dates already have their definitive record from prior
+            # maintenance runs, and the new day is still incomplete.
+            if date_key != target_date_key:
+                continue
+            processed_dates.append(date_key)
             # Per-engine rollup
             engine_stats = {}
             for jreq in jobs:
@@ -1352,24 +1365,27 @@ class JobManager:
             total_failed = sum(1 for j in jobs if j.jobStatus == JobRequest.Status_FAILED)
 
             # Step 2: Publish daily summary as HEALTH record
+            system_stats = {
+                'total_jobs': total_jobs,
+                'total_failed': total_failed,
+            }
             cutoff = now - timedelta(seconds=self._submission_window)
             recent_submissions = sum(1 for t in self._submission_times if t >= cutoff)
+            system_stats.update({
+                'queue_hwm': self._queue_hwm,
+                'queue_by_class_hwm': dict(self._queue_by_class_hwm),
+                'queue_latency_hwm_sec': round(self._queue_latency_hwm, 1),
+                'submissions_peak_5min': recent_submissions,
+                'depth_hwm_snapshot_count': len(self._depth_hwm_snapshots),
+                'latency_hwm_snapshot_count': len(self._latency_hwm_snapshots),
+            })
             health_record = json.dumps({
                 'flag': 'HEALTH',
                 'type': 'daily_summary',
                 'date': date_key,
                 'engines': engines_summary,
                 'tasks': tasks_summary,
-                'system': {
-                    'total_jobs': total_jobs,
-                    'total_failed': total_failed,
-                    'queue_hwm': self._queue_hwm,
-                    'queue_by_class_hwm': dict(self._queue_by_class_hwm),
-                    'queue_latency_hwm_sec': round(self._queue_latency_hwm, 1),
-                    'submissions_peak_5min': recent_submissions,
-                    'depth_hwm_snapshot_count': len(self._depth_hwm_snapshots),
-                    'latency_hwm_snapshot_count': len(self._latency_hwm_snapshots),
-                },
+                'system': system_stats,
             })
             logging.info(health_record)
 
@@ -1379,7 +1395,6 @@ class JobManager:
         self._queue_by_class_hwm = dict(self._queue_by_class)
         self._depth_hwm_snapshots.clear()
         self._latency_hwm_snapshots.clear()
-        self._start_time = now
         for name in self._engine_busy_total:
             self._engine_busy_total[name] = 0.0
         self._engine_busy_start.clear()
@@ -1412,7 +1427,8 @@ class JobManager:
         # Step 6: Return summary
         result = {
             'status': 'OK',
-            'dates_processed': list(date_summaries.keys()),
+            'dates_processed': processed_dates,
+            'target_date': target_date_key,
             'total_jobs_reviewed': len(all_jobs),
             'trimmed_records': trimmed,
             'remaining_records': len(taskList),
@@ -1514,7 +1530,6 @@ class JobManager:
         for engineName, engine in list(self.engines.items()):
             try:
                 engine._engine.terminate()
-                engine._engine.join(timeout=5)
                 logging.info(f"Engine '{engineName}' terminated")
             except Exception:
                 logging.exception(f"Error terminating engine '{engineName}'")
@@ -1532,6 +1547,15 @@ class JobManager:
     def _jobThread(self) -> None:
         _diag_interval = 50
         _diag_counter = 0
+        # Classify any recovered jobs that were saved before TaskSUBMIT processing
+        with jobLock:
+            for jobreq in taskList.values():
+                if jobreq.jobStatus == JobRequest.Status_QUEUED and jobreq.jobClass is None:
+                    if jobreq.jobTask in self.taskmenu:
+                        jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
+                        logging.debug(f"Classified recovered job {jobreq.jobID} as class {jobreq.jobClass}")
+                    else:
+                        logging.warning(f"Cannot classify recovered job {jobreq.jobID}: unknown task '{jobreq.jobTask}'")
         logging.info("Job Manager thread ready")
         while not self._stop:
             if not taskFeed.empty():
@@ -1556,14 +1580,25 @@ class JobManager:
                         snapshot_req.event.set()
 
                     elif tag == TaskEngine.TaskSUBMIT:
-                        # New task request received — find first idle engine that handles this class
+                        # New task request received — classify and try fair ondeck placement
                         jobreq = taskList[msg]
                         jobreq.jobClass = self.taskmenu[jobreq.jobTask]['class']
                         self._submission_times.append(datetime.now())
+                        # Fast path: if an ondeck slot is available, place the OLDEST
+                        # queued job of this class (not necessarily the new one). This
+                        # keeps responsiveness while ensuring FIFO fairness.
                         for engineName, engine in self.engines.items():
                             if jobreq.jobClass in engine.getClasses():
                                 if self.ondeck[engineName] is None:
-                                    self.ondeck[engineName] = jobreq
+                                    already_ondeck = {j.jobID for j in self.ondeck.values() if j is not None}
+                                    with jobLock:
+                                        candidates = [r for r in taskList.values()
+                                            if r.jobStatus == JobRequest.Status_QUEUED
+                                            and r.jobID not in already_ondeck
+                                            and r.jobClass == jobreq.jobClass]
+                                    if candidates:
+                                        oldest = min(candidates, key=lambda r: r.jobSubmitTime)
+                                        self.ondeck[engineName] = oldest
                                     break
 
                     elif tag == TaskEngine.TaskSTARTED:
@@ -1673,6 +1708,8 @@ class JobManager:
                 else:
                     dead_engines.append(engineName)
             for engineName in dead_engines:
+                if self._stop or self._draining.is_set():
+                    break
                 logging.error(f"TaskEngine '{engineName}' found dead, attempting restart.")
                 self._restart_engine(engineName)
 
@@ -1780,6 +1817,13 @@ async def task_loop(asyncREP, taskCFG):
                         logging.info(json.dumps(request['payload']))
                     else:
                         logging.error(f"ALERT request missing payload: {request}")
+                        reply = 'Error'
+                elif task == 'HEALTH_REPORT':
+                    # Re-broadcast health report for all subscribers (same pattern as ALERT)
+                    if 'payload' in request:
+                        logging.info(json.dumps(request['payload']))
+                    else:
+                        logging.error(f"HEALTH_REPORT request missing payload: {request}")
                         reply = 'Error'
                 elif task == 'MAINTENANCE':
                     snapshot = SnapshotRequest('MAINTENANCE')
