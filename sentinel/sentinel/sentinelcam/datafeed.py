@@ -157,8 +157,19 @@ class DataFeed(imagezmq.ImageSender):
             self._cmdQ.task_done()
             while not self._haveResult.is_set():
                 if self._haveResponse():
-                    (msg, result) = self._pumpResult[cmd]()
+                    try:
+                        (msg, result) = self._pumpResult[cmd]()
+                    except Exception as e:
+                        logging.error(f"DataFeed recv error for cmd {cmd} from {self._pump}: {e}")
+                        # Drain any remaining multipart frames
+                        while self.zmq_socket.getsockopt(zmq.RCVMORE):
+                            self.zmq_socket.recv()
+                        self._data = None
+                        self._recv_error = str(e)
+                        self._haveResult.set()
+                        break
                     self._data = result
+                    self._recv_error = None
                     self._haveResult.set()
                 else:
                     time.sleep(0.001)
@@ -167,6 +178,7 @@ class DataFeed(imagezmq.ImageSender):
 
     def pump_action(self, cmd, request) -> object:
         self._haveResult.clear()
+        self._recv_error = None
         self._cmdQ.put((cmd, request))
         flag = self._haveResult.wait(timeout=self._timeout)
         if not flag: # shutdown thread and attempt recovery
@@ -179,6 +191,8 @@ class DataFeed(imagezmq.ImageSender):
             self._registerPoller()
             self._startThread()
             raise TimeoutError(timedout)
+        if self._recv_error:
+            raise ConnectionError(f"DataPump error response from {self._pump}: {self._recv_error}")
         return self._data
 
     def get_date_list(self) -> list:
