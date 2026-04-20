@@ -31,6 +31,45 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.7-alpha - 2026-04-19
+
+### Added
+
+- Added the **ramrod** health observer service. A lightweight cron-driven process (every 3 minutes) 
+  that queries **camwatcher**, **datapump**, and **sentinel** for health check responses, consolidates 
+  the results into a single `SYSHEALTH` report, and delivers it to the **sentinel** for re-broadcast 
+  to all log subscribers. Each invocation is stateless. The report includes per-outpost status (writer 
+  liveness, heartbeat age, FPS, stale detection), pipeline service health (CamWatcher disk and agent 
+  status, DataPump request metrics, Sentinel engine and queue state), and a top-level ok/degraded flag. 
+  Deployed via Ansible with its own role, systemd timer, and configuration template.
+- Added a system health display to the **watchtower**. A heart-shaped status icon on the player page 
+  reflects overall system health: green for nominal, amber for degraded, red with a pulsing animation 
+  for critical. The heart shows and hides with the player button bar normally, but in alarm mode (any 
+  service or outpost down) it remains persistently visible even after buttons auto-hide. Tapping the 
+  heart navigates to a new `SystemHealthPage` displaying outpost status cards, pipeline service cards 
+  (CamWatcher, DataPump, Sentinel), a ramrod liveness age indicator, and an alert feed. The heart icon 
+  frames are pre-computed at startup as PhotoImage objects to avoid per-frame allocation. Visiting the 
+  health page clears the alarm flag; heart color continues to reflect actual state. The Sentinel card 
+  now opens a performance drill-down page with Live, Charts, and History panels for engine status, 
+  queue depth, ring latency, recent job completions, multi-hour trend plots, and historical bottleneck
+  snapshots. Optional display thresholds are configurable via watchtower.yaml.
+
+### Fixed
+
+- Fixed a protocol mismatch between the **datapump** and `DataFeed` that caused an infinite 
+  thread crash-restart loop in watchtower and sentinel DataFeed clients. When the DataPump 
+  encountered an error processing a request (missing field, unexpected exception), it sent a 
+  single-frame reply (`b'Error'`) via `send_reply()`. But the DataFeed's `_cmdloop` dispatched to 
+  format-specific receivers (`recv_DataFrame`, `recv_pickle`) expecting multi-part messages — the 
+  first `recv_json()` call would receive the raw error bytes, fail with `JSONDecodeError`, and crash 
+  the thread. The timeout handler would then recreate the socket and spawn a new thread, which 
+  immediately hit the same error on the next request — producing the repeating ~15-second crash cycle 
+  visible in the journal. Fixed on both sides: the DataPump now sends error responses in the wire 
+  format matching the command type (DataFrame, pickle, or jpg), and the DataFeed `_cmdloop` catches 
+  recv exceptions, drains any remaining multipart frames, and signals the error to `pump_action()` 
+  which raises `ConnectionError` — keeping the thread alive for subsequent commands.
+
+
 ## 0.2.6-alpha - 2026-03-21
 
 ### Added
