@@ -31,6 +31,27 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.2.8-alpha - 2026-05-25
+
+### Added
+
+- Added `SpeedMontage`, a daily speed event montage generator for the **watchtower**.
+  Scans a single day's event index for `vsp` tracking records from a configured outpost
+  view, selects events exceeding a configurable MPH cutoff, and brackets each qualifying
+  speed event with the immediately preceding and following `trk` events to provide visual
+  contrast. The full cluster is rendered as an ffmpeg-encoded MP4 with bounding box overlays
+  and per-segment header frames. The output is optimized for web streaming, copied to the
+  datasink, and optionally delivered to the VPS with a Telegram notification — following
+  the same sharing protocol as the on-demand video export introduced in 0.2.4-alpha.
+  Intended to be driven by a daily systemd timer targeting the prior day's data.
+
+- Added a WireGuard watchdog to the **bastion** role. A systemd timer periodically inspects
+  the handshake age of all configured WireGuard peers and restarts the tunnel interface if
+  any peer is stale or has never completed a handshake. This recovers from post-power-failure
+  conditions where the WireGuard interface appears up but the tunnel is unresponsive — a
+  failure mode that previously required manual intervention on the bastion host.
+
+
 ## 0.2.7-alpha - 2026-04-19
 
 ### Added
