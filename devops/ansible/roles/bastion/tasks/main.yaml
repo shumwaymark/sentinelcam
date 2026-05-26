@@ -49,6 +49,11 @@
   when: vault_wireguard_private_key is defined
   tags: [bastion, wireguard, startup, secrets]
 
+- name: "Configure WireGuard tunnel watchdog"
+  ansible.builtin.include_tasks: wireguard_watchdog.yaml
+  when: vault_wireguard_private_key is defined and bastion_wireguard_watchdog.enabled
+  tags: [bastion, wireguard, watchdog]
+
 - name: "Validate configuration"
   ansible.builtin.include_tasks: validate.yaml
   tags: [bastion, validate, health]

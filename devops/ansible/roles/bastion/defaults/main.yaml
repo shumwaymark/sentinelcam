@@ -109,6 +109,13 @@ bastion_firewall:
       # Custom rules for MSS clamping - value will be templated dynamically
       mss_clamp_enabled: true
 
+# WireGuard Watchdog Configuration
+bastion_wireguard_watchdog:
+  enabled: true
+  boot_delay_s: 90        # first check fires 90s after boot (after delayed-start has run)
+  interval_s: 300         # recheck every 5 minutes
+  max_handshake_age_s: 300  # restart if most recent handshake is older than this
+
 # System Service Configuration
 bastion_services:
   networkmanager:

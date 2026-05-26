@@ -1,0 +1,12 @@
+[Unit]
+Description=WireGuard Tunnel Health Watchdog Timer
+Requires=wireguard-watchdog.service
+
+[Timer]
+OnBootSec={{ bastion_wireguard_watchdog.boot_delay_s }}s
+OnUnitActiveSec={{ bastion_wireguard_watchdog.interval_s }}s
+Unit=wireguard-watchdog.service
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,40 @@
+---
+# WireGuard tunnel health watchdog
+# Detects stale or absent tunnel after power cycles and restarts it automatically.
+
+- name: "Deploy WireGuard watchdog script"
+  ansible.builtin.template:
+    src: wireguard-watchdog.sh.j2
+    dest: /usr/local/bin/wireguard-watchdog.sh
+    mode: '0755'
+    owner: root
+    group: root
+  tags: [wireguard, watchdog]
+
+- name: "Deploy WireGuard watchdog systemd service"
+  ansible.builtin.template:
+    src: wireguard-watchdog.service.j2
+    dest: /etc/systemd/system/wireguard-watchdog.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart wireguard watchdog timer
+  tags: [wireguard, watchdog]
+
+- name: "Deploy WireGuard watchdog systemd timer"
+  ansible.builtin.template:
+    src: wireguard-watchdog.timer.j2
+    dest: /etc/systemd/system/wireguard-watchdog.timer
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart wireguard watchdog timer
+  tags: [wireguard, watchdog]
+
+- name: "Enable and start WireGuard watchdog timer"
+  ansible.builtin.systemd:
+    name: wireguard-watchdog.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags: [wireguard, watchdog]

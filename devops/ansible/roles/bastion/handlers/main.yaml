@@ -42,3 +42,10 @@
     state: restarted
     enabled: yes
   listen: "restart wireguard delayed start timer"
+
+- name: restart wireguard watchdog timer
+  ansible.builtin.systemd:
+    name: wireguard-watchdog.timer
+    state: restarted
+    enabled: yes
+  listen: "restart wireguard watchdog timer"

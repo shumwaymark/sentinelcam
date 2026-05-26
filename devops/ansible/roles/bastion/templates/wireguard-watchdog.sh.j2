@@ -1,0 +1,53 @@
+#!/bin/bash
+# WireGuard tunnel health watchdog
+# Checks handshake freshness and restarts the tunnel if stale or absent.
+# Deployed by Ansible — do not edit on the host directly.
+
+INTERFACE="{{ bastion_wireguard.interface }}"
+MAX_AGE={{ bastion_wireguard_watchdog.max_handshake_age_s }}
+LOG_TAG="wireguard-watchdog"
+
+log() {
+    logger -t "$LOG_TAG" "$*"
+    echo "$(date -Iseconds) $*"
+}
+
+restart_tunnel() {
+    log "restarting tunnel: $*"
+    nmcli connection down "$INTERFACE" 2>/dev/null || true
+    sleep 2
+    nmcli connection up "$INTERFACE"
+}
+
+# Interface absent — not even brought up yet.
+if ! ip link show "$INTERFACE" &>/dev/null; then
+    restart_tunnel "interface not present"
+    exit $?
+fi
+
+# Interface exists but no peers registered (wg show returns empty).
+peers=$(wg show "$INTERFACE" peers 2>/dev/null)
+if [ -z "$peers" ]; then
+    restart_tunnel "no peers registered"
+    exit $?
+fi
+
+# Check handshake age across all peers; take the most recent.
+now=$(date +%s)
+latest=0
+while IFS= read -r ts; do
+    [ "$ts" -gt "$latest" ] && latest=$ts
+done < <(wg show "$INTERFACE" latest-handshakes 2>/dev/null | awk '{print $2}')
+
+if [ "$latest" -eq 0 ]; then
+    restart_tunnel "no handshake recorded"
+    exit $?
+fi
+
+age=$(( now - latest ))
+if [ "$age" -gt "$MAX_AGE" ]; then
+    restart_tunnel "handshake age ${age}s exceeds ${MAX_AGE}s"
+    exit $?
+fi
+
+log "tunnel healthy (handshake ${age}s ago)"

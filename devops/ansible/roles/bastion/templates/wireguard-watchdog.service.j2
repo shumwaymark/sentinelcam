@@ -1,0 +1,10 @@
+[Unit]
+Description=WireGuard Tunnel Health Watchdog
+After=wireguard-delayed-start.service
+Wants=wireguard-delayed-start.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wireguard-watchdog.sh
+StandardOutput=journal
+StandardError=journal
