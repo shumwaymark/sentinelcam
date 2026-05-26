@@ -1,0 +1,101 @@
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# IDE and editor
+.vscode/
+.venv/
+workspace.code-workspace
+
+# SSH keys and secrets
+.ssh/
+chandler-vault.yaml
+
+# Experimental work areas and non-project components
+oak_benchmark/
+copilot_work/
+librarian-prototype/
+twister/
+# deployed as-is from Jeff Bass's imagenode project
+imagehub/
+# superseded by Ansible model deployment framework
+sentinel/outpost/
+
+# Third-party packages (installed separately, not source-controlled)
+coral_packages/
+coral_packages.zip
+depthai/
+depthai.zip
+openface_dnn_face/
+openface_torch/
+
+# Runtime and log files
+*.log
+sentinel.log
+
+# Old/working copies of component files in repo root
+sentinel-20230511.py
+sentinel_prod.py
+imagenode.service
+imagenode_ncs2.sh
+
+# Hardware no longer in use
+80-movidius.rules
+
+# Working operational configs (deployed versions are Ansible-generated)
+alpha5_outpost.yaml
+sentinel_coral.yaml
+speed_montage.yaml
+imagehub.yaml
+watchtower_new.yaml
+nginx.conf
+
+# Scratch / run data in repo root
+burn.txt
+HCtest.txt
+allevents.txt
+backup.sh
+mx1.txt
+mx1/
+*_mx1.py
+run1.csv
+run2.csv
+bastion-config-.txt
+
+# Binary and media outputs
+*.mp4
+speed_montage_plan.md
+
+# Working images in repo root (not docs/)
+20260412_*.jpg
+WhiteSwanOnGreenLake_*.jpg
+
+# Working notes in repo root (not formal docs)
+01_state_machine_bug_fix.md
+02_auto_advance_fix.md
+02_motion_calibration_redesign.md
+03_event_history_calendar.md
+BLAZEFACE_QUICKSTART.md
+HEALTH_MONITORING_PLAN.md
+JOBTHREAD_HOTPATH_PLAN.md
+MeasureRingLatency_comparison.md
+MeasureRingLatency_test_Mar2026.csv
+OAK_OUTPOST_REDESIGN_PLAN.md
+Outpost_health_check_gap.md
+STORAGE_ANALYSIS_PLAN.md
+TaskEngine_Restart.md
+heart_icon_design.md
+queue_diagnostics.md
+scene_state_addendum.md
+sentinel_state_module.md
+sentinelcam-mobile-outpost-wireguard.md
+
+# Watchtower working images and design files
+watchtower/buttons_draft.vsdx
+watchtower/buttons_test.png
+watchtower/menunew.png
+watchtower/pausenew.png
+watchtower/watchtower_buttons.png
+watchtower/watchtower_buttons2.png
+watchtower/watchtower_buttons2a.png
