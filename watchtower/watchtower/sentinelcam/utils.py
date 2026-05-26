@@ -3,6 +3,7 @@ import logging
 import time
 import threading
 import imagezmq
+import numpy as np
 from collections import deque
 from datetime import datetime
 from time import sleep
@@ -12,8 +13,8 @@ import zmq
 
 class FPS:
     def __init__(self, history=160) -> None:
-        # default allows for 5 seconds of history at 32 images/sec   
-        self._deque = deque(maxlen=history) 
+        # default allows for 5 seconds of history at 32 images/sec
+        self._deque = deque(maxlen=history)
 
     def update(self) -> None:
         # capture current timestamp
@@ -29,14 +30,14 @@ class FPS:
             return 0.0
         else:
             return (len(self._deque) / (self._deque[-1] - self._deque[0]))
-    
+
     def get_min(self) -> int:
         # return minute from the last timestamp
         return time.localtime(self._deque[-1]).tm_min
-        
+
     def lastStamp(self) -> datetime.timestamp:
          return datetime.fromtimestamp(self._deque[-1])
-    
+
 # Helper class implementing an IO deamon thread as an Outpost image subscriber
 class ImageSubscriber(imagezmq.ImageHub):
     def __init__(self, publisher, view):
@@ -55,7 +56,7 @@ class ImageSubscriber(imagezmq.ImageHub):
     def _setupPoller(self) -> None:
         self._poller = zmq.Poller()
         self._poller.register(self.zmq_socket, zmq.POLLIN)
-        
+
     def _startThread(self) -> None:
         self._thread = threading.Thread(daemon=True, target=self._receiver, args=())
         self._thread.start()
@@ -71,7 +72,7 @@ class ImageSubscriber(imagezmq.ImageHub):
         """Main receiver loop with connection management."""
         self._connection_attempts = 0  # Initialize outside both loops
         self._safe_disconnect()
-        
+
         while True:
             self._continue.wait()
             while self._connection_attempts < self._max_retries:
@@ -79,7 +80,7 @@ class ImageSubscriber(imagezmq.ImageHub):
                     self.connect(self.publisher)
                     self._stop = False
                     logging.debug(f"Connected to publisher {self.publisher}")
-                    
+
                     while not self._stop:
                         if self.msg_waiting():
                             try:
@@ -93,11 +94,11 @@ class ImageSubscriber(imagezmq.ImageHub):
                                 break
                         else:
                             sleep(0.0005)
-                    
+
                     # If we get here without error, reset attempts
                     self._connection_attempts = 0
                     break  # Exit retry loop on success
-                    
+
                 except zmq.error.ZMQError as e:
                     self._connection_attempts += 1
                     logging.error(f"Connection attempt {self._connection_attempts} failed: {e}")
@@ -105,10 +106,10 @@ class ImageSubscriber(imagezmq.ImageHub):
                         sleep(1)  # Wait before retry
                         continue
                     logging.error("Max connection retries reached")
-                    
+
                 finally:
                     self._safe_disconnect()
-            
+
             # Reset state before next iteration
             self._data_ready.clear()
             self._continue.clear()
@@ -124,7 +125,7 @@ class ImageSubscriber(imagezmq.ImageHub):
     def receive(self, timeout=15.0):
         flag = self._data_ready.wait(timeout=timeout)
         if not flag:
-            self.stop()            
+            self.stop()
             raise TimeoutError(f"Timed out reading from publisher {self.publisher}")
         self._data_ready.clear()
         return self._data
@@ -145,3 +146,23 @@ def readConfig(path):
 		with open(path) as f:
 			cfg = yaml.safe_load(f)
 	return cfg
+
+def adaptive_text_color(frame, region_y1, region_y2, region_x1=None, region_x2=None) -> tuple:
+    """Calculate optimal text color based on background brightness
+
+    Args:
+        frame: Image frame (BGR)
+        region_y1: Top y coordinate of region to sample
+        region_y2: Bottom y coordinate of region to sample
+        region_x1: Left x coordinate (default: 0)
+        region_x2: Right x coordinate (default: frame width)
+
+    Returns:
+        BGR tuple for text color (black or white)
+    """
+    region_x1 = region_x1 if region_x1 is not None else 0
+    region_x2 = region_x2 if region_x2 is not None else frame.shape[1]
+    region = frame[region_y1:region_y2, region_x1:region_x2]
+    avg_bgr = np.mean(region, axis=(0, 1))
+    luminance = ((avg_bgr[0] * 0.114) + (avg_bgr[1] * 0.587) + (avg_bgr[2] * 0.299)) / 255
+    return (0, 0, 0) if luminance > 0.5 else (255, 255, 255)
