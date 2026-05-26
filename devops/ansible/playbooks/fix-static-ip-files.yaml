@@ -1,0 +1,87 @@
+---
+# Fix static IP configuration files and clean up secondary DHCP addresses
+# This creates the correctly named config files and reboots for clean network state
+
+- name: Fix static IP configuration files
+  hosts: sentinelcam_nodes
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Check for incorrectly named config files
+      ansible.builtin.stat:
+        path: "/etc/systemd/network/{{ interface }}.network"
+      register: old_config
+
+    - name: Check for correctly named config files
+      ansible.builtin.stat:
+        path: "/etc/systemd/network/10-{{ interface }}.network"
+      register: new_config
+
+    - name: Display current configuration state
+      debug:
+        msg:
+          - "Old config ({{ interface }}.network): {{ 'EXISTS' if old_config.stat.exists else 'NOT FOUND' }}"
+          - "New config (10-{{ interface }}.network): {{ 'EXISTS' if new_config.stat.exists else 'NOT FOUND' }}"
+
+    - name: Create properly named static IP configuration
+      copy:
+        dest: "/etc/systemd/network/10-{{ interface }}.network"
+        content: |
+          [Match]
+          Name={{ interface }}
+
+          [Network]
+          Address={{ ansible_host }}/24
+          Gateway={{ gateway }}
+          DNS={{ dns_servers[0] }}
+          DNS={{ dns_servers[1] }}
+
+          [Link]
+          RequiredForOnline=yes
+        mode: '0644'
+      when: not new_config.stat.exists
+
+    - name: Remove old incorrectly named config file
+      ansible.builtin.file:
+        path: "/etc/systemd/network/{{ interface }}.network"
+        state: absent
+      when: old_config.stat.exists
+
+    - name: Ensure systemd-networkd is enabled
+      ansible.builtin.systemd:
+        name: systemd-networkd
+        enabled: yes
+
+    - name: Display reboot message
+      debug:
+        msg:
+          - "=== Configuration Updated ==="
+          - "Static IP file created: /etc/systemd/network/10-{{ interface }}.network"
+          - "Node will reboot to apply clean network configuration"
+          - "After reboot, only {{ ansible_host }} should be active"
+          - "DHCP secondary address will be gone"
+
+    - name: Reboot to apply clean network configuration
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+        msg: "Rebooting to apply clean static network configuration"
+
+    - name: Wait for node to come back online
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Verify final IP configuration
+      ansible.builtin.shell: |
+        echo "=== Final IP Configuration ==="
+        ip -4 addr show {{ interface }} | grep inet
+        echo ""
+        echo "=== Network Manager Status ==="
+        systemctl is-active systemd-networkd
+      register: final_check
+      changed_when: false
+
+    - name: Display final status
+      debug:
+        msg: "{{ final_check.stdout_lines }}"

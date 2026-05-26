@@ -1,0 +1,156 @@
+---
+# Complete fix for DNS and network configuration
+# 1. Clear DHCP leases on bastion
+# 2. Remove secondary DHCP IPs from nodes
+# 3. Stop systemd-resolved
+# 4. Reboot for clean state
+
+- name: Clear DHCP leases on bastion
+  hosts: infrastructure
+  become: yes
+  tasks:
+    - name: Stop dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        state: stopped
+
+    - name: Backup and clear DHCP lease file
+      ansible.builtin.shell: |
+        if [ -f /var/lib/misc/dnsmasq.leases ]; then
+          cp /var/lib/misc/dnsmasq.leases /var/lib/misc/dnsmasq.leases.backup.$(date +%s)
+          > /var/lib/misc/dnsmasq.leases
+          echo "Cleared /var/lib/misc/dnsmasq.leases"
+        elif [ -f /var/lib/dnsmasq/dnsmasq.leases ]; then
+          cp /var/lib/dnsmasq/dnsmasq.leases /var/lib/dnsmasq/dnsmasq.leases.backup.$(date +%s)
+          > /var/lib/dnsmasq/dnsmasq.leases
+          echo "Cleared /var/lib/dnsmasq/dnsmasq.leases"
+        else
+          echo "No lease file found"
+        fi
+      register: lease_clear
+
+    - name: Display lease clear result
+      debug:
+        msg: "{{ lease_clear.stdout_lines }}"
+
+    - name: Start dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        state: started
+
+    - name: Verify DNS now returns correct IPs
+      ansible.builtin.shell: |
+        echo "Testing DNS resolution after clearing leases:"
+        dig @localhost data1.local +short
+        dig @localhost alpha5.local +short
+        dig @localhost sentinel.local +short
+      register: dns_test
+      changed_when: false
+
+    - name: Display DNS test results
+      debug:
+        msg: "{{ dns_test.stdout_lines }}"
+
+- name: Fix nodes - remove secondary IPs and clean up
+  hosts: sentinelcam_nodes
+  become: yes
+  tasks:
+    - name: Stop and disable systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: stopped
+        enabled: no
+        masked: yes
+      failed_when: false
+
+    - name: Remove NetworkManager DNS management
+      ansible.builtin.lineinfile:
+        path: /etc/NetworkManager/NetworkManager.conf
+        regexp: '^dns='
+        line: 'dns=none'
+        insertafter: '^\[main\]'
+      failed_when: false
+
+    - name: Verify/create static IP config with correct naming
+      ansible.builtin.copy:
+        dest: "/etc/systemd/network/10-{{ interface }}.network"
+        content: |
+          [Match]
+          Name={{ interface }}
+
+          [Network]
+          Address={{ ansible_host }}/24
+          Gateway={{ gateway }}
+          DNS={{ dns_servers[0] }}
+          DNS={{ dns_servers[1] }}
+
+          [Link]
+          RequiredForOnline=yes
+        mode: '0644'
+
+    - name: Remove old incorrectly named config
+      ansible.builtin.file:
+        path: "/etc/systemd/network/{{ interface }}.network"
+        state: absent
+
+    - name: Manually remove secondary DHCP addresses
+      ansible.builtin.shell:
+        cmd: |
+          ip -4 addr show {{ interface }} | grep "inet " | grep "secondary" | while read -r line; do
+            secondary_ip=$(echo "$line" | cut -d' ' -f6)
+            echo "Removing secondary IP: $secondary_ip"
+            ip addr del $secondary_ip dev {{ interface }} || true
+          done
+      register: ip_cleanup
+      changed_when: "'Removing' in ip_cleanup.stdout"
+
+    - name: Display IP cleanup
+      debug:
+        msg: "{{ ip_cleanup.stdout_lines }}"
+
+    - name: Reboot to ensure clean network state
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+        msg: "Rebooting to apply clean network configuration"
+
+    - name: Wait for node to come back
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Verify final configuration
+      ansible.builtin.shell: |
+        echo "=== Final IP Configuration ==="
+        ip -4 addr show {{ interface }} | grep inet
+        echo ""
+        echo "=== DNS Configuration ==="
+        cat /etc/resolv.conf | grep -v "^#" | grep -v "^$"
+        echo ""
+        echo "=== Services ==="
+        echo -n "systemd-networkd: "; systemctl is-active systemd-networkd
+        echo -n "systemd-resolved: "; systemctl is-active systemd-resolved || echo "inactive (good)"
+        echo -n "NetworkManager: "; systemctl is-active NetworkManager || echo "inactive (good)"
+      register: final_check
+      changed_when: false
+
+    - name: Display final status
+      debug:
+        msg: "{{ final_check.stdout_lines }}"
+
+- name: Final DNS verification from bastion
+  hosts: infrastructure
+  become: yes
+  tasks:
+    - name: Test DNS resolution one more time
+      ansible.builtin.shell: |
+        echo "=== Final DNS Resolution Test ==="
+        for host in data1 alpha5 sentinel; do
+          echo -n "$host: "
+          dig @localhost ${host}.local +short
+        done
+      register: final_dns
+      changed_when: false
+
+    - name: Display final DNS results
+      debug:
+        msg: "{{ final_dns.stdout_lines }}"

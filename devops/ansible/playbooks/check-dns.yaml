@@ -1,0 +1,36 @@
+---
+# Check DNS configuration on all SentinelCam nodes
+# This verifies nodes are pointing to the bastion for DNS
+
+- name: Check DNS configuration on nodes
+  hosts: sentinelcam_nodes
+  gather_facts: no
+
+  tasks:
+    - name: Check resolv.conf
+      ansible.builtin.shell: |
+        echo "=== /etc/resolv.conf ==="
+        cat /etc/resolv.conf
+        echo ""
+        echo "=== DNS Test ==="
+        nslookup data1.local 2>/dev/null || echo "nslookup failed"
+        echo ""
+        echo "=== Can reach bastion DNS? ==="
+        ping -c 1 -W 1 192.168.10.254 >/dev/null 2>&1 && echo "✅ Bastion reachable" || echo "❌ Cannot reach bastion"
+      register: dns_check
+      changed_when: false
+
+    - name: Display DNS configuration
+      debug:
+        msg: "{{ dns_check.stdout_lines }}"
+
+    - name: Check if systemd-resolved is interfering
+      ansible.builtin.shell: |
+        systemctl is-active systemd-resolved 2>/dev/null || echo "systemd-resolved not active"
+      register: resolved_check
+      changed_when: false
+
+    - name: Warn if systemd-resolved is active
+      debug:
+        msg: "⚠️  WARNING: systemd-resolved is active - may override DNS settings"
+      when: "'active' in resolved_check.stdout"

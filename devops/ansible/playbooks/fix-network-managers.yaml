@@ -1,0 +1,105 @@
+---
+# Fix network manager conflicts on SentinelCam nodes
+# This playbook disables dhcpcd/NetworkManager and ensures systemd-networkd is active
+#
+# Usage:
+#   ansible-playbook -i inventory/production.yaml \
+#     playbooks/fix-network-managers.yaml \
+#     --limit sentinel,data1,east
+
+- name: Fix conflicting network managers
+  hosts: sentinelcam_nodes
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Check which network managers are running
+      ansible.builtin.shell: |
+        echo "=== Network Manager Status ==="
+        systemctl is-active dhcpcd 2>/dev/null || echo "dhcpcd: inactive"
+        systemctl is-active NetworkManager 2>/dev/null || echo "NetworkManager: inactive"
+        systemctl is-active systemd-networkd 2>/dev/null || echo "systemd-networkd: inactive"
+        echo ""
+        echo "=== Current IP Configuration ==="
+        ip -4 addr show {{ interface }} | grep inet || echo "No IPv4 address"
+        echo ""
+        echo "=== Static Config Exists? ==="
+        ls -la /etc/systemd/network/10-{{ interface }}.network 2>/dev/null || echo "No static config found"
+      register: network_status
+      changed_when: false
+
+    - name: Display current network status
+      debug:
+        msg: "{{ network_status.stdout_lines }}"
+
+    - name: Stop and disable dhcpcd
+      ansible.builtin.systemd:
+        name: dhcpcd
+        state: stopped
+        enabled: no
+        masked: yes
+      failed_when: false
+      register: dhcpcd_result
+
+    - name: Stop and disable NetworkManager
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: stopped
+        enabled: no
+        masked: yes
+      failed_when: false
+      register: nm_result
+
+    - name: Ensure systemd-networkd is enabled and started
+      ansible.builtin.systemd:
+        name: systemd-networkd
+        state: started
+        enabled: yes
+
+    - name: Verify static IP configuration file exists
+      ansible.builtin.stat:
+        path: "/etc/systemd/network/10-{{ interface }}.network"
+      register: static_config
+
+    - name: Display warning if static config missing
+      debug:
+        msg: |
+          WARNING: Static IP configuration file not found!
+          Expected: /etc/systemd/network/10-{{ interface }}.network
+          You need to run configure-static-network.yaml first.
+      when: not static_config.stat.exists
+
+    - name: Restart systemd-networkd to apply configuration
+      ansible.builtin.systemd:
+        name: systemd-networkd
+        state: restarted
+      when: static_config.stat.exists
+
+    - name: Wait for network to stabilize
+      ansible.builtin.wait_for:
+        timeout: 5
+
+    - name: Verify new IP configuration
+      ansible.builtin.shell: |
+        echo "=== Updated IP Configuration ==="
+        ip -4 addr show {{ interface }} | grep inet
+        echo ""
+        echo "=== Network Manager Status ==="
+        systemctl is-active dhcpcd 2>/dev/null || echo "dhcpcd: inactive/masked ✓"
+        systemctl is-active NetworkManager 2>/dev/null || echo "NetworkManager: inactive/masked ✓"
+        systemctl is-active systemd-networkd 2>/dev/null || echo "systemd-networkd: inactive"
+      register: final_status
+      changed_when: false
+
+    - name: Display final status
+      debug:
+        msg: "{{ final_status.stdout_lines }}"
+
+    - name: Display next steps
+      debug:
+        msg:
+          - "=== Next Steps ==="
+          - "1. Reboot the node to ensure clean network startup: sudo reboot"
+          - "2. After reboot, verify IP: ssh {{ ansible_user }}@{{ ansible_host }}"
+          - "3. Check that DHCP address is no longer active"
+      run_once: false
