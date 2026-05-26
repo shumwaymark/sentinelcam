@@ -1,0 +1,103 @@
+---
+# Example Sentinel Host Configuration
+# Copy to host_vars/<hostname>.yaml and customize
+
+# =============================================================================
+# Hardware Accelerator Configuration
+# =============================================================================
+# Choose accelerator type for AI inference
+sentinel_accelerator_type: coral  # [coral, cpu, ncs2]
+
+# Install Coral packages (auto-set based on accelerator, can override)
+# sentinel_install_coral_packages: true
+
+# =============================================================================
+# Face Detection Model Selection (EdgeTPU only)
+# =============================================================================
+# Choose face detection model when using Coral EdgeTPU
+# Options:
+#   - ssd_mobilenet: SSD MobileNet V2 (default, general purpose)
+#   - blazeface: BlazeFace from MediaPipe (recommended, fewer false positives)
+sentinel_face_detection_model: blazeface
+
+# Override confidence thresholds per model type (optional)
+face_detection_confidence:
+  cpu: 0.5
+  ncs2: 0.5
+  ssd_mobilenet: 0.5
+  blazeface: 0.6
+
+# =============================================================================
+# Model Version Overrides (optional)
+# =============================================================================
+# Override specific model versions for testing
+# Normally uses versions from group_vars/all/model_registry.yaml
+# model_version_overrides:
+#   face_detection: "2020-03-25"
+#   face_detection_edgetpu: "2025-12-19"
+#   face_detection_blazeface: "2026-01-02"
+#   face_recognition: "2025-02-25"
+
+# =============================================================================
+# Task Engine Configuration (optional)
+# =============================================================================
+# Override task engine accelerator settings per engine
+# sentinel_task_engines:
+#   Alpha:
+#     classes: [1]
+#     ring_buffers: default
+#     accelerator: coral  # Use EdgeTPU for face detection tasks
+#   Bravo1:
+#     classes: [2]
+#     ring_buffers: default
+#     accelerator: cpu    # Use CPU for face recognition
+#   Bravo2:
+#     classes: [2, 3]
+#     ring_buffers: default
+#     accelerator: cpu
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+
+# Example 1: High-performance sentinel with BlazeFace
+# ---------------------------------------------------
+# sentinel_accelerator_type: coral
+# sentinel_face_detection_model: blazeface
+# face_detection_confidence:
+#   blazeface: 0.6
+#
+# Result: Uses BlazeFace on EdgeTPU with 0.6 confidence
+# File generated: /home/ops/sentinel/tasks/GetFaces.yaml with:
+#   - edgetpu_model: .../face_detection_blazeface/.../face_detection_short_range_edgetpu.tflite
+#   - confidence: 0.6
+
+# Example 2: Testing new face detection model version
+# ---------------------------------------------------
+# sentinel_accelerator_type: coral
+# sentinel_face_detection_model: ssd_mobilenet
+# model_version_overrides:
+#   face_detection_edgetpu: "2026-01-15"
+#
+# Result: Uses SSD MobileNet from specific version
+# File generated: /home/ops/sentinel/tasks/GetFaces.yaml with:
+#   - edgetpu_model: .../face_detection_edgetpu/2026-01-15/ssd_mobilenet_v2_face_quant_postprocess_edgetpu.tflite
+
+# Example 3: CPU-only sentinel (no accelerator)
+# ---------------------------------------------------
+# sentinel_accelerator_type: cpu
+#
+# Result: Uses OpenCV DNN on CPU
+# File generated: /home/ops/sentinel/tasks/GetFaces.yaml with:
+#   - prototxt_path: .../face_detection/.../deploy.prototxt
+#   - model_path: .../face_detection/.../res10_300x300_ssd_iter_140000.caffemodel
+#   - target: cpu
+
+# Example 4: Legacy NCS2 sentinel
+# ---------------------------------------------------
+# sentinel_accelerator_type: ncs2
+# sentinel_venv_path: "{{ sentinel_venv_path_openvino }}"
+#
+# Result: Uses OpenCV DNN with Myriad target
+# File generated: /home/ops/sentinel/tasks/GetFaces.yaml with:
+#   - target: myriad
