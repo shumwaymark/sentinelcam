@@ -22,11 +22,15 @@ sentinelcam_models:
     current_version: "2020-12-06"
     previous_version: null
 
-  # Object Detection - MobileNet SSD (COCO classes) for DepthAI OAK cameras
-  # Deployed to: imagenodes
-  # Framework: OpenVINO (DepthAI blob)
+  # Object Detection - MobileNet SSD (300x300) for DepthAI OAK cameras
+  # Deployed to: imagenodes (OAK-equipped)
+  # Framework: DepthAI NN Archive (RVC2) — v3 pipeline
+  # File: mobilenet-ssd-300x300.rvc2.tar.xz
+  # Supersedes the retired OpenVINO blob (mobilenet-ssd_openvino_2021.4_6shave.blob,
+  # v2 2022-04-02); the DepthAI v2 path was removed in the OAK outpost redesign, so
+  # there is no v2 rollback — code+model deploy is lockstep (v3 code cannot load v2).
   mobilenet_ssd_depthai:
-    current_version: "2022-04-02"
+    current_version: "2026-06-07"
     previous_version: null
 
   # Object Detection - MobileNet SSD (COCO classes) for EdgeTPU

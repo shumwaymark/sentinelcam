@@ -17,12 +17,37 @@ imagenode_config:
         encoder: oak             # oak | cpu (JPEG encoding location)
         detectobjects: none      # SpyGlass not needed with DepthAI
         accelerator: none
-        depthai:                 # DepthAI-specific config
-          pipeline: MobileNetSSD
-          images: frames         # Image queue name
-          jpegs: jpegs           # JPEG queue name
-          neural_nets:
-            Q1: nn               # Neural network output queue
+        depthai:                 # OAK v3 event-plane config (redesign Phase 3/4)
+          # nn_archive (from model_registry) and crop_publish (from
+          # sentinelcam_ports) are injected by the template — not set here.
+          lookback_frames: 90    # EventSampler entry-phase lookback depth (~3s at 30fps)
+          oak_pipeline:
+            jpeg_quality: 90
+            detection_confidence: 0.5
+            rotate_180: true
+            camera_fps: 30
+            crop_profiles:        # absent keys fall back to oak_camera validated defaults
+              person:
+                width: 256
+                height: 384
+                padding: 0.15
+                max_area_fraction: 0.35
+                min_interval_s: 0.20
+                min_iou: 0.70
+                edge_margin: 0.05
+                max_aspect_deviation: 0.08
+              vehicle:
+                width: 512
+                height: 192
+                padding: 0.10
+                max_area_fraction: 0.25
+                min_interval_s: 0.15
+                min_iou: 0.50
+                edge_margin: 0.05
+                max_aspect_deviation: 0.15
+          # tracker:             # optional host_tracker §8 per-camera overrides; code defaults otherwise
+          #   match_iou: 0.30
+          #   gap_misses: 30
         interesting_objects: [person, vehicle, dog, motorcycle, car, truck, bird, cat]
         sentinel_tasks:
           person: GetFaces2

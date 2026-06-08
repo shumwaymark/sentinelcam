@@ -3,7 +3,7 @@
 opencv-contrib-python-headless==4.11.0.86
 imagezmq==1.2.0
 imutils==0.5.4
-depthai==2.29.0.0
+depthai>=3.5            # project standard: OAK outpost v3 NN-Archive pipeline (was 2.29.0.0)
 pandas==2.2.3
 h5py==3.12.1
 scikit-learn==1.6.1

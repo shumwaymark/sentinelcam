@@ -73,7 +73,10 @@ sentinelcam_outposts:
       P1:
         viewname: Front
         description: "Front Driveway"
-        resolution: [640, 360]
+        # OAK scene-publish size (VideoEncoder output), not the sensor/NN-input
+        # size. Downstream (watchtower ring buffers/view size, event index) keys
+        # on this; must match oak_camera.build_pipeline scene_out (768x432, 16:9).
+        resolution: [768, 432]
 
   alpha5:
     hostname: alpha5

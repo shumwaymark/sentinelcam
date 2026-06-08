@@ -66,14 +66,19 @@ cameras:
 {% endif %}
 {% if camera.detector.depthai is defined %}
             depthai:
-               pipeline: {{ camera.detector.depthai.pipeline }}
-               model: {{ mobilenet_depthai_model }}
-               images: {{ camera.detector.depthai.images }}
-               jpegs: {{ camera.detector.depthai.jpegs }}
-               neural_nets:
-{% for nn_id, nn_queue in camera.detector.depthai.neural_nets.items() %}
-                  {{ nn_id }}: {{ nn_queue }}
-{% endfor %}
+               nn_archive: {{ mobilenet_depthai_model }}
+               crop_publish: {{ sentinelcam_ports.imagenode_crops }}
+{% if camera.detector.depthai.lookback_frames is defined %}
+               lookback_frames: {{ camera.detector.depthai.lookback_frames }}
+{% endif %}
+{% if camera.detector.depthai.oak_pipeline is defined %}
+               oak_pipeline:
+{{ camera.detector.depthai.oak_pipeline | to_nice_yaml(indent=2) | indent(18, first=true) }}
+{% endif %}
+{% if camera.detector.depthai.tracker is defined %}
+               tracker:
+{{ camera.detector.depthai.tracker | to_nice_yaml(indent=2) | indent(18, first=true) }}
+{% endif %}
 {% endif %}
 {% if camera.detector.sentinel_tasks is defined %}
             sentinel_tasks:

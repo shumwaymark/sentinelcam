@@ -10,6 +10,7 @@ sentinelcam_ports:
   # ImageNode - Outpost camera nodes
   imagenode_publisher: 5567
   imagenode_logging: 5565
+  imagenode_crops: 5568        # OAK outposts: hi-res crop stream (Plane 2, re-ID), separate from the scene publisher
 
   # ImageHub - camera image and data collection from imagenode via REQ/REP socket
   imagehub_zmq: 5555
@@ -32,4 +33,5 @@ sentinelcam_ports:
 # 5556 - DataPump REQ/REP (data sinks only)
 # 5565 - Log publishers PUB/SUB (sentinel, imagenode outposts)
 # 5566 - Control interfaces REQ/REP (camwatcher on data sinks and also sentinels)
-# 5567 - Image publishers PUB/SUB (imagenode outposts)
+# 5567 - Image publishers PUB/SUB (imagenode outposts — scene)
+# 5568 - Crop publishers PUB/SUB (OAK outposts — hi-res re-ID crop stream)

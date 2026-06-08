@@ -70,7 +70,7 @@ mobilenet_edgetpu_path: "{{ imagenode_models_path }}/mobilenet_ssd_edgetpu/{{ mo
 # MobileNetSSD model files
 mobilenet_prototxt: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.prototxt"
 mobilenet_model: "{{ mobilenet_base_path }}/MobileNetSSD_deploy.caffemodel"
-mobilenet_depthai_model: "{{ mobilenet_depthai_path }}/mobilenet-ssd_openvino_2021.4_6shave.blob"
+mobilenet_depthai_model: "{{ mobilenet_depthai_path }}/mobilenet-ssd-300x300.rvc2.tar.xz"  # NN Archive (DepthAI v3, RVC2)
 mobilenet_edgetpu_model: "{{ mobilenet_edgetpu_path }}/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"
 mobilenet_edgetpu_labels: "{{ mobilenet_edgetpu_path }}/coco_labels.txt"
 mobilenet_confidence: 0.5

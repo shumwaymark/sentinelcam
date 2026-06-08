@@ -8,8 +8,11 @@
 refkey: vsp
 camwatcher_update: True
 
-# Vehicle classes to track (from MobileNetSSD)
-vehicle_classes: ['car', 'bus', 'truck', 'motorcycle']
+# Vehicle classes to track — VOC MobileNetSSD label names (NOT COCO): there is no
+# "truck"/"motorcycle"; large boxy vehicles (firetrucks, garbage trucks) classify
+# as "train", and two-wheelers as "motorbike". Matched against the trk classname
+# prefix "{class}:".
+vehicle_classes: ['car', 'bus', 'motorbike', 'train']
 
 # Marker configuration
 # markers_x: horizontal positions as % of frame width (left to right)

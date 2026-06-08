@@ -107,6 +107,9 @@ sentinel_ring_buffer_models:
     sd:
       size: [640, 360]
       buffer_length: 5
+    hd:
+      size: [768, 432]      # OAK scene-publish size (redesign); all engines use `default`
+      buffer_length: 5
 
 # Task engines configuration
 sentinel_task_engines:
