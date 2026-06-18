@@ -58,18 +58,28 @@ route (`allowed-ips 0.0.0.0/0`) sends NTP *into the dead tunnel*: a chicken-and-
 
 ```bash
 # /etc/chrony.conf — allow the bastion's WAN network. The bastion's post-NAT
-# public IP is not guaranteed static across ISP/power cycles, so allow its /24
-# rather than a single /32 (a new lease would otherwise silently re-break NTP
-# and re-arm the deadlock). Tighten to /32 only if the IP is known static.
-allow 173.47.238.0/24
+# public IP is DYNAMIC and observed to move across the ISP's range (seen at
+# both 173.47.238.203 and 173.47.130.192 after storms), so allow the ISP /16.
+# A /32 or /24 silently re-breaks NTP on the next lease change and re-arms the
+# deadlock — WireGuard survives an IP change (key-based, roaming endpoint) but
+# this IP-based ACL does not. Tighten only if the WAN IP is known static.
+allow 173.47.0.0/16
 sudo systemctl restart chronyd
 
-# Open UDP 123 ONLY from that network — do NOT use --add-service=ntp (that opens
+# Open UDP 123 ONLY from that range — do NOT use --add-service=ntp (that opens
 # 123 to the whole internet). chrony's own 'allow' is the real ACL; scope the
-# firewall to match for defense-in-depth and minimal public exposure.
-sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="173.47.238.0/24" port port="123" protocol="udp" accept'
+# firewall to match. chrony serves plain time only (no monlist/amplification),
+# so an ISP-/16 NTP allow is low-risk versus repeated outages.
+sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="173.47.0.0/16" port port="123" protocol="udp" accept'
 sudo firewall-cmd --reload
 ```
+
+> **Inherent fragility — and two escapes.** This IP-allowlist breaks whenever the
+> ISP hands the bastion a WAN IP outside the allowed range. Two ways to remove
+> the fragility entirely: (1) the **hardware RTC** below (makes NTP-at-boot
+> irrelevant — preferred); or (2) bootstrap time from cloud2's already-public
+> **HTTPS `Date` header** over the bypass route (no allowlist at all, ~1s
+> precision — enough to beat WireGuard's replay timestamp).
 
 > **Why not `--add-service=ntp`?** It exposes UDP 123 globally. The classic NTP
 > amplification risk comes from `ntpd`'s `monlist`/mode-6 control queries, which
