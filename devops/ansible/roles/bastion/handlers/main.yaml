@@ -17,6 +17,12 @@
     state: restarted
   listen: "restart dnsmasq"
 
+- name: restart chronyd
+  ansible.builtin.systemd:
+    name: chronyd
+    state: restarted
+  listen: "restart chronyd"
+
 - name: reload firewalld
   ansible.builtin.shell: firewall-cmd --reload
   listen: "reload firewalld"

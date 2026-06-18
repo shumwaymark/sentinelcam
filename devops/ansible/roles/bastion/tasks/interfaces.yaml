@@ -28,12 +28,18 @@
       ipv4.dns "{{ bastion_interfaces.external.dns | join(' ') }}" \
       ipv4.route-metric 200 \
       ipv4.method manual \
+      ipv4.routing-rules "priority 777 to {{ bastion_timesync.vps_ntp_server }}/32 table 254" \
       connection.autoconnect yes \
       connection.zone {{ bastion_interfaces.external.zone }}
   register: wan_config
   changed_when: wan_config.rc == 0
   failed_when: wan_config.rc not in [0, 10]
   notify: restart networkmanager
+  # The routing-rule sends ALL VPS-bound traffic out eth0 (the main table),
+  # not into the full-tunnel default route. This is what lets both the
+  # WireGuard handshake AND tunnel-independent NTP reach the VPS. Without it
+  # the tunnel cannot bootstrap and time can never be corrected after a
+  # power-loss clock reset. See bastion_timesync in defaults/main.yaml.
 
 - name: "Find active connection for internal interface ({{ bastion_interfaces.internal.name }})"
   ansible.builtin.shell: >

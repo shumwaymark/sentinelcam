@@ -27,6 +27,11 @@
   ansible.builtin.include_tasks: interfaces.yaml
   tags: [bastion, network, interfaces]
 
+- name: "Configure time synchronization (tunnel-independent NTP)"
+  ansible.builtin.include_tasks: timesync.yaml
+  when: bastion_timesync.enabled
+  tags: [bastion, timesync, ntp]
+
 - name: "Configure WireGuard VPN"
   ansible.builtin.include_tasks: wireguard.yaml
   when: vault_wireguard_private_key is defined

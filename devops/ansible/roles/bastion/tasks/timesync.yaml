@@ -1,0 +1,46 @@
+---
+# Time synchronization — breaks the NTP-needs-tunnel deadlock.
+#
+# See bastion_timesync in defaults/main.yaml for the full rationale. In short:
+# the bastion has no RTC, so power loss resets its clock to the past; WireGuard
+# then sends stale-timestamped handshakes the VPS drops as replays. We sync
+# directly to the VPS over eth0 (the priority-777 bypass in interfaces.yaml),
+# so the clock is correct before the tunnel comes up — no chicken-and-egg.
+
+- name: "Install chrony"
+  ansible.builtin.dnf:
+    name: chrony
+    state: present
+  tags: [timesync, packages]
+
+- name: "Configure chrony to sync from the VPS over eth0 and always step"
+  ansible.builtin.blockinfile:
+    path: /etc/chrony.conf
+    marker: "# {mark} ANSIBLE MANAGED — sentinelcam bastion timesync"
+    block: |
+      # VPS NTP server, reachable over eth0 via the priority-777 routing-rule
+      # (bypasses the WireGuard tunnel). 'prefer' so it wins at boot before the
+      # tunnel — and therefore the pool servers — are reachable.
+      server {{ bastion_timesync.vps_ntp_server }} iburst prefer
+      # Always step the clock when offset > {{ bastion_timesync.makestep_threshold }}s.
+      # Overrides the distro default (makestep 1.0 3), which refuses to jump the
+      # ~1.5y offset left by a power-loss RTC reset.
+      makestep {{ bastion_timesync.makestep_threshold }} {{ bastion_timesync.makestep_limit }}
+  notify: restart chronyd
+  tags: [timesync]
+
+- name: "Enable and start chronyd"
+  ansible.builtin.systemd:
+    name: chronyd
+    enabled: yes
+    state: started
+  tags: [timesync]
+
+# chrony-wait.service satisfies time-sync.target once the clock is synced;
+# wireguard-delayed-start orders itself after that target.
+- name: "Enable chrony-wait (provides time-sync.target ordering)"
+  ansible.builtin.systemd:
+    name: chrony-wait.service
+    enabled: yes
+  failed_when: false
+  tags: [timesync]

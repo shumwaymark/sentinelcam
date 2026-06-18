@@ -1,6 +1,13 @@
 #!/bin/bash
 # WireGuard tunnel health watchdog
 # Checks handshake freshness and restarts the tunnel if stale or absent.
+#
+# Backstop for the clock deadlock: this bastion has no RTC, so a power loss
+# resets the clock to the past and WireGuard handshakes are dropped by the VPS
+# as replays (sent > 0, received == 0, no handshake). chrony reaches the VPS
+# over eth0 (the priority-777 bypass), so when we detect that signature with an
+# unsynchronized clock we correct the time FIRST, then restart the tunnel —
+# automating the manual recovery.
 # Deployed by Ansible — do not edit on the host directly.
 
 INTERFACE="{{ bastion_wireguard.interface }}"
@@ -19,13 +26,39 @@ restart_tunnel() {
     nmcli connection up "$INTERFACE"
 }
 
-# Interface absent — not even brought up yet.
+# True when the system clock is NOT synchronized to a time source.
+clock_unsynced() {
+    ! timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q '^yes$'
+}
+
+# Correct the clock from the VPS over eth0 (tunnel-independent). chrony's
+# 'server <vps> prefer iburst' makes this reachable without the tunnel.
+fix_clock() {
+    log "clock unsynchronized ($(date -Iseconds)) — correcting from VPS before restart"
+    chronyc burst 4/4 >/dev/null 2>&1
+    chronyc waitsync {{ bastion_timesync.waitsync_tries }} {{ bastion_timesync.waitsync_max_correction }} 0 {{ bastion_timesync.waitsync_interval }} >/dev/null 2>&1
+    chronyc makestep >/dev/null 2>&1
+    log "clock after correction: $(date -Iseconds)"
+}
+
+# Sum rx/tx bytes across all peers. Sets globals RX and TX.
+read_transfer() {
+    RX=0
+    TX=0
+    while read -r _peer rx tx; do
+        [ -n "$rx" ] && RX=$(( RX + rx ))
+        [ -n "$tx" ] && TX=$(( TX + tx ))
+    done < <(wg show "$INTERFACE" transfer 2>/dev/null)
+}
+
+# Interface absent — not even brought up yet. Locally recoverable.
 if ! ip link show "$INTERFACE" &>/dev/null; then
+    clock_unsynced && fix_clock
     restart_tunnel "interface not present"
     exit $?
 fi
 
-# Interface exists but no peers registered (wg show returns empty).
+# Interface exists but no peers registered (wg show returns empty). Recoverable.
 peers=$(wg show "$INTERFACE" peers 2>/dev/null)
 if [ -z "$peers" ]; then
     restart_tunnel "no peers registered"
@@ -39,15 +72,28 @@ while IFS= read -r ts; do
     [ "$ts" -gt "$latest" ] && latest=$ts
 done < <(wg show "$INTERFACE" latest-handshakes 2>/dev/null | awk '{print $2}')
 
-if [ "$latest" -eq 0 ]; then
-    restart_tunnel "no handshake recorded"
-    exit $?
-fi
-
 age=$(( now - latest ))
-if [ "$age" -gt "$MAX_AGE" ]; then
-    restart_tunnel "handshake age ${age}s exceeds ${MAX_AGE}s"
+if [ "$latest" -ne 0 ] && [ "$age" -le "$MAX_AGE" ]; then
+    log "tunnel healthy (handshake ${age}s ago)"
+    exit 0
+fi
+
+# No fresh handshake. If we are sending but receiving nothing, the far side is
+# dropping us — and the #1 cause on this RTC-less node is a bad clock (replay).
+read_transfer
+if [ "$TX" -gt 0 ] && [ "$RX" -eq 0 ] && clock_unsynced; then
+    log "WARNING: sent ${TX}B, received 0B, no handshake — clock is unsynchronized; \
+VPS is likely dropping our handshakes as replays. Correcting time, then restarting."
+    fix_clock
+    restart_tunnel "post clock-correction"
     exit $?
 fi
 
-log "tunnel healthy (handshake ${age}s ago)"
+# Otherwise a normal stall (or sent/0-received with a good clock — genuinely
+# server-side, but a restart re-resolves the endpoint and is cheap here).
+if [ "$latest" -eq 0 ]; then
+    restart_tunnel "no handshake recorded (rx=${RX}B tx=${TX}B)"
+else
+    restart_tunnel "handshake age ${age}s exceeds ${MAX_AGE}s (rx=${RX}B tx=${TX}B)"
+fi
+exit $?

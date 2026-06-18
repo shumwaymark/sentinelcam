@@ -26,8 +26,63 @@ All variables are defined in `defaults/main.yaml` with sensible defaults. Sensit
 | `bastion_firewall` | Zone assignments and MSS clamping for VPN traffic |
 | `bastion_services` | Service state management |
 | `bastion_network_optimization` | sysctl settings (IP forwarding, TCP BBR) |
+| `bastion_timesync` | Tunnel-independent NTP sync to the VPS (see below) |
 
 DNS host entries are auto-generated from inventory — no manual node list maintenance.
+
+## Time Synchronization and the WireGuard Clock Deadlock
+
+**Symptom:** after a power failure the WireGuard tunnel never comes back up. `wg show` shows
+bytes *sent* but *0 received* and no handshake; a manual `nmcli connection down/up wg0` does not
+help. The VPS peer config is correct and the VPS answers other peers fine.
+
+**Cause:** the bastion has **no battery-backed RTC** (`timedatectl` → `RTC time: n/a`). A power loss
+resets the clock ~1.5 years into the past. WireGuard handshakes carry a TAI64N timestamp, and the
+VPS keeps the greatest timestamp seen per peer as replay protection — so it **silently drops** the
+bastion's now-stale-timestamped handshakes. NTP can't self-correct because the bastion's default
+route (`allowed-ips 0.0.0.0/0`) sends NTP *into the dead tunnel*: a chicken-and-egg deadlock.
+
+**Fix (this role):**
+1. A `priority 777` routing-rule on the eth0 connection (`interfaces.yaml`) routes **all**
+   VPS-bound traffic out eth0, bypassing the tunnel — so both the WireGuard handshake *and* NTP
+   reach the VPS directly.
+2. `chrony` is pointed at the VPS as a `prefer iburst` server with `makestep <thr> -1` so it always
+   steps the clock, even a huge offset (`timesync.yaml`).
+3. `wireguard-delayed-start.service` waits for time sync (`chronyc waitsync`) before bringing the
+   tunnel up.
+4. The WireGuard watchdog detects the sent>0 / received==0 / unsynced-clock signature and corrects
+   the time before restarting — automating recovery if a boot ever races ahead of sync.
+
+**External dependency — the VPS must serve NTP to the bastion.** This is *not* managed by this repo
+(the VPS is outside the Ansible inventory). On the VPS (`blog.swanriver.dev` / cloud2):
+
+```bash
+# /etc/chrony.conf — allow the bastion's WAN network. The bastion's post-NAT
+# public IP is not guaranteed static across ISP/power cycles, so allow its /24
+# rather than a single /32 (a new lease would otherwise silently re-break NTP
+# and re-arm the deadlock). Tighten to /32 only if the IP is known static.
+allow 173.47.238.0/24
+sudo systemctl restart chronyd
+
+# Open UDP 123 ONLY from that network — do NOT use --add-service=ntp (that opens
+# 123 to the whole internet). chrony's own 'allow' is the real ACL; scope the
+# firewall to match for defense-in-depth and minimal public exposure.
+sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="173.47.238.0/24" port port="123" protocol="udp" accept'
+sudo firewall-cmd --reload
+```
+
+> **Why not `--add-service=ntp`?** It exposes UDP 123 globally. The classic NTP
+> amplification risk comes from `ntpd`'s `monlist`/mode-6 control queries, which
+> `chrony` does not implement (its command port is localhost-only), so chrony is
+> low-risk even when open — but there is no reason to be a public time server.
+> The scoped rich rule keeps the surface at exactly one source.
+
+Confirm with `sudo chronyc clients` on the VPS (the bastion should appear) and
+`chronyc sources` on the bastion (the VPS line should move from `^?` to `^*`/`^+`).
+
+**Long-term hardware fix:** add a battery-backed RTC module (or replace the CMOS battery if x86)
+so the clock survives power loss. That dissolves the deadlock entirely; the software fix above is
+the resilient fallback when the clock is nonetheless wrong.
 
 ## Deployment
 
@@ -57,6 +112,8 @@ ansible-playbook playbooks/deploy-bastion.yaml -i inventory/production.yaml --sk
 | `dns` / `dhcp` | dnsmasq configuration | No |
 | `firewall` | Firewall zones, MSS clamping | No |
 | `startup` | Delayed WireGuard start service/timer | No |
+| `timesync` / `ntp` | chrony VPS sync + clock-deadlock fix | No |
+| `watchdog` | WireGuard tunnel health watchdog + clock self-heal | No |
 | `secrets` | All tasks using vault variables | **Yes** |
 | `validate` / `health` | Connectivity and service health checks | No |
 | `backup` | Configuration backup | No |
@@ -68,6 +125,9 @@ ansible-playbook playbooks/deploy-bastion.yaml -i inventory/production.yaml --sk
 - `/etc/dnsmasq.conf`, `/etc/dnsmasq.d/sentinelcam.conf`
 - Firewall zone overrides in `/etc/firewalld/zones/`
 - `/etc/systemd/system/wireguard-delayed-start.{service,timer}`
+- `/etc/systemd/system/wireguard-watchdog.{service,timer}`, `/usr/local/bin/wireguard-watchdog.sh`
+- Managed block in `/etc/chrony.conf` (VPS NTP server + `makestep`)
+- `ipv4.routing-rules` on the eth0 NetworkManager connection (VPS bypass)
 
 ## See Also
 

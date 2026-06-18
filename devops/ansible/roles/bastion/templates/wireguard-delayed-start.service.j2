@@ -1,15 +1,24 @@
 [Unit]
 Description=WireGuard Delayed Start Service
-After=NetworkManager.service dnsmasq.service
-Wants=NetworkManager.service
+After=NetworkManager.service dnsmasq.service chronyd.service time-sync.target
+Wants=NetworkManager.service time-sync.target
 
 [Service]
 Type=oneshot
 ExecStartPre=/bin/sleep {{ bastion_services.wireguard_delayed_start.delay }}
+# Ensure the clock is correct BEFORE the tunnel starts. The bastion has no RTC,
+# so after a power loss the clock is ~1.5y in the past and WireGuard handshakes
+# are dropped by the VPS as replays. chrony reaches the VPS over eth0 (the
+# priority-777 bypass), steps the clock, and waitsync blocks until it is sane.
+# Best-effort ('-'): if sync times out we still try the tunnel and let the
+# watchdog self-heal rather than leaving the link down forever.
+ExecStartPre=-/usr/bin/chronyc makestep
+ExecStartPre=-/usr/bin/chronyc waitsync {{ bastion_timesync.waitsync_tries }} {{ bastion_timesync.waitsync_max_correction }} 0 {{ bastion_timesync.waitsync_interval }}
 ExecStart=/usr/bin/nmcli connection up {{ bastion_wireguard.interface }}
 ExecStop=/usr/bin/nmcli connection down {{ bastion_wireguard.interface }}
 RemainAfterExit=yes
-TimeoutStartSec=120
+# Accommodates the startup delay plus the bounded waitsync above.
+TimeoutStartSec=240
 Restart=on-failure
 RestartSec=30
 

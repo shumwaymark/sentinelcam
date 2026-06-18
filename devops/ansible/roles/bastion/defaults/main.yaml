@@ -116,6 +116,34 @@ bastion_wireguard_watchdog:
   interval_s: 300         # recheck every 5 minutes
   max_handshake_age_s: 300  # restart if most recent handshake is older than this
 
+# Time Synchronization — breaks the NTP-needs-tunnel deadlock
+#
+# The bastion has no battery-backed RTC (timedatectl shows "RTC time: n/a"),
+# so a power loss resets the clock ~1.5 years into the past. WireGuard then
+# sends handshakes whose TAI64N timestamp is OLDER than what the VPS last
+# recorded for this peer, and the VPS silently drops them as replays — the
+# tunnel never handshakes. NTP cannot fix it because the bastion's default
+# route (allowed-ips 0.0.0.0/0) sends NTP traffic INTO the dead tunnel:
+# classic chicken-and-egg.
+#
+# Fix: sync time DIRECTLY to the VPS over eth0 (bypassing the tunnel) so the
+# clock is correct BEFORE WireGuard starts. Requires chronyd serving NTP on
+# the VPS and allowing this bastion's WAN address (see roles/bastion/README.md).
+bastion_timesync:
+  enabled: true
+  # VPS NTP server — same host as the WireGuard endpoint, reached over eth0
+  # via the routing-rule bypass below (NOT through the tunnel).
+  vps_ntp_server: "{{ vault_wireguard_endpoint_ip | default('83.229.35.124') }}"
+  # Always step the clock when offset > 1s. Default chrony (makestep 1.0 3)
+  # only steps during the first few updates and refuses an enormous offset —
+  # useless after an RTC reset, so step unconditionally (-1 = no limit).
+  makestep_threshold: 1.0
+  makestep_limit: -1
+  # Bounded wait for a good clock before bringing the tunnel up.
+  waitsync_tries: 18      # ~90s at the interval below
+  waitsync_max_correction: 0.5
+  waitsync_interval: 5
+
 # System Service Configuration
 bastion_services:
   networkmanager:
