@@ -45,7 +45,8 @@ imagenode_config:
                 min_iou: 0.50
                 edge_margin: 0.05
                 max_aspect_deviation: 0.15
-          # tracker:             # optional host_tracker §8 per-camera overrides; code defaults otherwise
+          tracker:             # optional host_tracker §8 per-camera overrides; code defaults otherwise
+            min_confidence_new: 0.60
           #   match_iou: 0.30
           #   gap_misses: 30
         interesting_objects: [person, vehicle, dog, motorcycle, car, truck, bird, cat]
