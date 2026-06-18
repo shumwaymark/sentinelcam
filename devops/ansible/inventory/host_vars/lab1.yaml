@@ -14,6 +14,15 @@ imagenode_config:
         ROI: (10,20),(70,80)
         detectobjects: mobilenetssd
         accelerator: none
+        # §4.10 unified lifecycle: a tracker DICT (vs the legacy `tracker: none`
+        # string) selects the persistent host-side tracker + event manager and
+        # retires the SpyGlass correlation-tracking cascade. SpyGlass becomes a
+        # DETECT-only inference engine; motion schedules the inferences.
+        tracker:
+          # Starting floor — tune from lab1's own monitored confidence distribution
+          # after the first soak, the same observe-then-set approach that landed
+          # east at 0.60. CPU MobileNet-SSD confidences differ from the OAK device.
+          min_confidence_new: 0.50
         sentinel_tasks:
           person: GetFaces2
           default: MobileNetSSD_allFrames

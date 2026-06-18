@@ -47,7 +47,12 @@ cameras:
             spyglass: {{ camera.resolution | string }}
             detectobjects: {{ camera.detector.detectobjects | default('none') }}
             accelerator: {{ camera.detector.accelerator | default('none') }}
+{% if camera.detector.tracker is defined and camera.detector.tracker is mapping %}
+            tracker:
+{{ camera.detector.tracker | to_nice_yaml(indent=2) | indent(14, first=true) }}
+{% else %}
             tracker: none
+{% endif %}
 {% if camera.detector.interesting_objects is defined %}
             interesting_objects: {{ camera.detector.interesting_objects | list }}
 {% endif %}
