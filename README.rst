@@ -170,6 +170,12 @@ The ``Outpost`` as currently implemented is still considered experimental, and b
 of concept as an evolving work in progress. Further detail on the design, structure, and operation of
 the ``Outpost`` have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
+The motion-driven, cascading-lens approach described above has since evolved. Tracking and event
+management are now handled by a persistent, *source-agnostic* host-side tracker shared by every camera
+node — events are driven by what a subject is doing (arrival, lingering, departure) rather than by raw
+motion, and motion is demoted to scheduling inferences. See
+`Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_ for the high-level concept.
+
 Camwatcher design
 -----------------
 
@@ -612,6 +618,7 @@ See the `depthai.yaml <depthai.yaml>`_ file for the setups.
 Additional documentation
 ========================
 - `Version history and Changelog <HISTORY.md>`_
+- `Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_
 - `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
 - `Facial recognition, model training, and machine learning pipeline <docs/FACIAL_RECON_LEARNING.md>`_
 - `Data management policies and retention strategy <docs/DATA_MANAGEMENT.md>`_
