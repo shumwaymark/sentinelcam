@@ -19,6 +19,15 @@ imagenode_config:
       detector:
         accelerator: coral         # none | ncs2 | coral
         detectobjects: mobilenetssd
+        # §4.10 unified lifecycle (see lab1): a tracker DICT selects the persistent
+        # host-side tracker + event manager; SpyGlass becomes DETECT-only and motion
+        # schedules the EdgeTPU inferences. Same motion-gated path validated on lab1.
+        # FOLLOW-UP: Coral can run NN every frame (always-on, OAK-style) — a future
+        # scheduler flag — but validate motion-gated first.
+        tracker:
+          # Starting floor — tune from alpha5's own confidence distribution after the
+          # first soak (cf. east 0.60, lab1 0.50). EdgeTPU confidences differ.
+          min_confidence_new: 0.50
         sentinel_tasks:
           person: GetFaces2
           default: MobileNetSSD_allFrames
