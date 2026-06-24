@@ -32,9 +32,9 @@ scene   ░░🚶→░░░░░     ░░░░🚶 (still) ░░░░  
 track   PROV ▶ ACTIVE ═══════════▶ QUIESCENT ═══════════▶ ACTIVE ▶ END
         confirm        (moving)     (banked, silent)        (relocated)
 
-event        ┏━ OPEN ━━━━━━┓                          ┏━ OPEN ━━┓
-             ┃ start·trk·… ┃ ──▶ end                  ┃ start·trk┃ ──▶ end
-             ┗━━━━━━━━━━━━━━┛                          ┗━━━━━━━━━━┛
+event        ┏━ OPEN ━━━━━━┓                          ┏━ OPEN ━━━━┓
+             ┃ start·trk·… ┃ ──▶ end                  ┃ start·trk ┃ ──▶ end
+             ┗━━━━━━━━━━━━━┛                          ┗━━━━━━━━━━━┛
                EVENT #1 “arrival”                        EVENT #2 “departure”
 ```
 
@@ -143,7 +143,7 @@ flowchart LR
 | Event open/close, `ote` records | `imagenode/.../eventmanager.py` (`EventManager`) |
 | OAK detection feed (device drain) | `imagenode/.../outpost_intake.py` (`OutpostIntake`) |
 | picamera feed (motion-scheduled observe/tick) | `imagenode/.../picamera_intake.py` (`PicameraIntake`) |
-| Per-camera thresholds | each node's `host_vars` `detector.tracker` block |
+| Per-camera thresholds | each node's `host_vars` `detector.tracker` block — field reference + tuning guidance in [OUTPOST_CONFIGURATION.md](OUTPOST_CONFIGURATION.md) |
 
 > **Diagram sources.** Panels 2 and 3 are Mermaid (rendered inline). The lifecycle
 > timeline (panel 1) is kept as ASCII here; if a polished render is wanted it can be

@@ -48,10 +48,11 @@ cameras:
             detectobjects: {{ camera.detector.detectobjects | default('none') }}
             accelerator: {{ camera.detector.accelerator | default('none') }}
 {% if camera.detector.tracker is defined and camera.detector.tracker is mapping %}
+            # §4.10: host-tracker config (a dict) opts this node into the unified
+            # lifecycle. Lives at the detector level for ALL node types (OAK + picamera);
+            # the legacy `tracker: none` string flag is retired. Absent => publish-only.
             tracker:
 {{ camera.detector.tracker | to_nice_yaml(indent=2) | indent(14, first=true) }}
-{% else %}
-            tracker: none
 {% endif %}
 {% if camera.detector.interesting_objects is defined %}
             interesting_objects: {{ camera.detector.interesting_objects | list }}
@@ -64,7 +65,6 @@ cameras:
                 minContourW: {{ camera.detector.motion_params.minContourW }}
                 minContourH: {{ camera.detector.motion_params.minContourH }}
                 gaussianBlur: {{ camera.detector.motion_params.gaussianBlur }}
-                noMotionThreshold: {{ camera.detector.motion_params.noMotionThreshold }}
 {% endif %}
 {% if camera.detector.roi is defined %}
             ROI: {{ camera.detector.roi }}
@@ -79,10 +79,6 @@ cameras:
 {% if camera.detector.depthai.oak_pipeline is defined %}
                oak_pipeline:
 {{ camera.detector.depthai.oak_pipeline | to_nice_yaml(indent=2) | indent(18, first=true) }}
-{% endif %}
-{% if camera.detector.depthai.tracker is defined %}
-               tracker:
-{{ camera.detector.depthai.tracker | to_nice_yaml(indent=2) | indent(18, first=true) }}
 {% endif %}
 {% endif %}
 {% if camera.detector.sentinel_tasks is defined %}

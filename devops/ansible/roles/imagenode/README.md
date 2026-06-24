@@ -6,7 +6,15 @@ Deploys and manages **imagenode** on outpost camera nodes.
 
 ImageNode captures images from cameras and publishes them via ZeroMQ to datasink nodes. Supports PiCamera,
 OAK/DepthAI, and USB webcam sources with edge detection via Spyglass (CPU/VPU) and optional DepthAI neural
-network pipelines. Person detections trigger sentinel task chains for face recognition and tracking.
+network pipelines. Person and vehicle detections trigger sentinel task chains for recognition and tracking.
+
+Since the §4.10 outpost redesign, **all** node types share one unified, detection-triggered event
+lifecycle: a persistent host-side tracker (`hosttracker.py`) + event manager (`eventmanager.py`) own
+object identity and event start/end. The picamera path uses Spyglass as a DETECT-only inference engine
+with motion detection scheduling the inferences; the OAK path drives the same tracker from the device
+neural net on its own threads. The legacy correlation-tracking cascade (dlib/cv2 trackers, CentroidTracker,
+SpyGlass scene management) was retired. A node opts into the lifecycle by giving `detector.tracker` a
+config dict (see below); omitting it leaves the node publish-only (live scene, no events).
 
 ## Dependencies
 
@@ -15,28 +23,65 @@ network pipelines. Person detections trigger sentinel task chains for face recog
 
 ## Configuration
 
-Camera configuration lives in `host_vars/<hostname>.yaml` via the `imagenode_config` structure:
+Camera configuration lives in `host_vars/<hostname>.yaml` via the `imagenode_config` structure.
+
+**PiCamera / Coral (host-NN) node** — Spyglass DETECT + host tracker, motion-scheduled:
 
 ```yaml
 imagenode_config:
-  node_name: east              # Outpost identifier (can differ from hostname)
+  node_name: alpha5            # Outpost identifier (can differ from hostname)
   cameras:
-    O1:                        # Camera type prefix: P* (PiCamera), O* (OAK), W* (Webcam)
-      viewname: Front          # View identifier
-      resolution: [640, 360]
+    P1:                        # Camera type prefix: P* (PiCamera), O* (OAK), W* (Webcam)
+      viewname: PiCam3         # View identifier
+      resolution: (640, 480)
+      framerate: 32
+      detector:
+        detectobjects: mobilenetssd   # Spyglass detector (mobilenetssd | none)
+        accelerator: coral            # none | ncs2 | coral
+        tracker:                      # a DICT opts into the unified host-tracker lifecycle
+          min_confidence_new: 0.50    # see "Host tracker tuning" below
+        sentinel_tasks:
+          person: GetFaces2           # Task triggered on person detection
+          default: MobileNetSSD_allFrames
+```
+
+**OAK / DepthAI node** — device NN event plane, host tracker on its own threads:
+
+```yaml
+    O1:
+      viewname: Front
+      resolution: (640, 360)
       framerate: 30
       detector:
-        detectobjects: none    # Spyglass detector (mobilenetssd | none)
-        accelerator: none      # none | ncs2 | coral
-        depthai:               # OAK-only: DepthAI pipeline config
-          pipeline: MobileNetSSD
-          images: frames
-          jpegs: jpegs
-          neural_nets:
-            Q1: nn
+        encoder: oak           # oak | cpu (JPEG encoding location)
+        detectobjects: none    # device NN does detection; Spyglass not used
+        accelerator: none
+        tracker:               # host-tracker config — detector level for ALL node types
+          min_confidence_new: 0.60
+        depthai:               # OAK v3 event-plane config (redesign Phase 3/4)
+          lookback_frames: 90  # nn_archive + crop_publish are injected by the template
+          oak_pipeline:
+            jpeg_quality: 90
+            rotate_180: true
+            camera_fps: 30
+            crop_profiles: { person: {...}, vehicle: {...} }
         sentinel_tasks:
-          person: GetFaces2    # Task triggered on person detection
+          person: GetFaces2
+          default: VehicleSpeed
 ```
+
+> **§4.10 config note:** `detector.tracker` is a *dict* and lives at the detector level for
+> **every** node type — the legacy `tracker: none` string flag and the `depthai.tracker`
+> sub-block are retired. An OAK node sets it as a sibling of `depthai:`, not inside it.
+
+### Tuning the detector
+
+The per-node detector knobs — `detector.tracker` (host tracker thresholds),
+`crop_profiles` (OAK high-res crop geometry), `motion_params`, and `sentinel_tasks` — each have
+a full field reference, defaults, and guidance in **[docs/OUTPOST_CONFIGURATION.md](../../../../docs/OUTPOST_CONFIGURATION.md)**.
+The common per-node knob is `detector.tracker.min_confidence_new`, the birth floor tuned from each
+node's own confidence distribution after a soak (production: east 0.60 OAK, alpha5/lab1 0.50 host NN).
+For the lifecycle concepts these knobs tune, see [docs/TRACKING_ARCHITECTURE.md](../../../../docs/TRACKING_ARCHITECTURE.md).
 
 Datasink mapping is auto-resolved from the `sentinelcam_outposts` registry in `group_vars/all/site.yaml`.
 
@@ -85,7 +130,7 @@ ansible-playbook playbooks/deploy-outpost.yaml --tags config --limit <hostname>
     ├── imagenode/              # Python package
     │   ├── imagenode.py
     │   ├── tools/
-    │   └── sentinelcam/        # Common libraries
+    │   └── sentinelcam/        # outpost/spyglass and libraries
     └── models/                 # Deployed model files (versioned)
         └── mobilenet_ssd/
             └── YYYY-MM-DD/
