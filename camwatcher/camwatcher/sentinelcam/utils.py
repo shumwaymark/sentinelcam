@@ -84,9 +84,9 @@ class ImageSubscriber(imagezmq.ImageHub):
                         if self.msg_waiting():
                             try:
                                 imagedata = self.recv_jpg()
-                                msg = imagedata[0].split('|')
-                                if msg[0].split(' ')[1] == self.view:
-                                    self._data = (msg[2], imagedata[1])
+                                parsed = self._parse_message(imagedata)
+                                if parsed is not None:
+                                    self._data = parsed
                                     self._data_ready.set()
                             except zmq.error.ZMQError as e:
                                 logging.error(f"ZMQ error while receiving: {e}")
@@ -121,13 +121,23 @@ class ImageSubscriber(imagezmq.ImageHub):
         except zmq.error.ZMQError as e:
             logging.debug(f"Disconnect error (expected if not connected): {e}")
 
-    def receive(self, timeout=15.0):
+    def receive(self, timeout=15.0) -> Tuple[str, bytes]:
         flag = self._data_ready.wait(timeout=timeout)
         if not flag:
-            self.stop()            
+            self.stop()
             raise TimeoutError(f"Timed out reading from publisher {self.publisher}")
         self._data_ready.clear()
+        assert self._data is not None  # set by the receiver thread before _data_ready
         return self._data
+
+    def _parse_message(self, imagedata):
+        """Scene-frame text protocol: '{node} {view}|...|{timestamp}'. Returns
+        (timestamp, jpeg) when the frame is for our view, else None. Subclasses
+        override to parse a different wire format (see CropSubscriber)."""
+        msg = imagedata[0].split('|')
+        if msg[0].split(' ')[1] == self.view:
+            return (msg[2], imagedata[1])
+        return None
 
     def subscribe(self, publisher, view):
         self.publisher = publisher
@@ -138,6 +148,38 @@ class ImageSubscriber(imagezmq.ImageHub):
 
     def stop(self):
         self._stop = True
+
+class CropSubscriber(ImageSubscriber):
+    """Plane-2 hi-res crop subscriber (OAK outposts, :5568).
+
+    Crop frames do NOT use the scene-frame text protocol. Each crop carries a
+    flat sidecar in the imagezmq text field:
+
+        {view}|crop_{class}|{event_id}|{tid}|{seqnum}|{phase}
+
+    Reuses all of ImageSubscriber's connection/retry/threading lifecycle but
+    overrides only the parse: returns the RAW sidecar text paired with the JPEG
+    (the writer parses the correlation key), and view-filters on segment 0.
+    """
+    def _parse_message(self, imagedata):
+        text = imagedata[0]
+        parts = text.split('|')
+        if len(parts) == 6 and parts[0] == self.view and parts[1].startswith('crop_'):
+            return (text, imagedata[1])
+        return None
+
+    def receive(self, timeout=15.0) -> Tuple[str, bytes]:
+        """Block until a crop arrives. Unlike the scene receiver this never times
+        out or stop()s — the crop socket is legitimately idle for long stretches
+        between events, and ZMQ handles publisher reconnects transparently. (The
+        base receive() timeout path stop()s the receiver, which races a concurrent
+        re-arm; an always-resident crop consumer must not take that path.) The
+        `timeout` arg is accepted for ImageSubscriber signature compatibility but
+        ignored."""
+        self._data_ready.wait()
+        self._data_ready.clear()
+        assert self._data is not None  # set by the receiver thread before _data_ready
+        return self._data
 
 def readConfig(path):
 	cfg = {}

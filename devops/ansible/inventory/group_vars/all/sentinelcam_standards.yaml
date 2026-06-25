@@ -102,6 +102,7 @@ code_deployment:
 sentinelcam_directories:
   csvfiles: "{{ sentinelcam_data_path }}/camwatcher"
   images: "{{ sentinelcam_data_path }}/images"
+  crops: "{{ sentinelcam_data_path }}/crops"  # OAK hi-res re-ID crop stream (Plane 2)
   logs: "{{ sentinelcam_data_path }}/logs"
   faces: "{{ sentinelcam_data_path }}/faces"
   imagehub_data: "{{ sentinelcam_data_path }}/imagehub"

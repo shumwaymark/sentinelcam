@@ -23,12 +23,16 @@ from time import sleep
 from datetime import date, datetime
 from zmq.asyncio import Context as AsyncContext
 from sentinelcam.camdata import CamData
-from sentinelcam.utils import ImageSubscriber, readConfig
+from sentinelcam.utils import ImageSubscriber, CropSubscriber, readConfig
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "camwatcher.yaml"))
 
 outposts = {}                        # outpost image subscribers by (node,view)
+crop_writers = {}                    # OAK crop subscribers by (node,view); only crop-publishing nodes
 outpost_health = {}                  # per-outpost health tracking by node name
+_event_meta = {}                     # (node,view,event) -> (camsize, start_ts), cached from the trk 'start'
+_crp_active = set()                  # (node,view,event) with an open crp correlation file
+_crp_record_counts = {}              # (node,view) -> total crp records captured; HC reconciliation vs crops written
 threadLock = threading.Lock()        # coordinate updates to list of outpost subscribers
 dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer
 dateIndxQ = multiprocessing.Queue()  # for creating new camwatcher index entries
@@ -121,6 +125,56 @@ class ImageStreamWriter:
         logging.debug(f"stop image subscriber {self.node_view} pid {self.process.pid}")
         self._writeImages.value = 0
 
+# Child subprocess subscribing to an OAK outpost's hi-res crop publisher (Plane 2, :5568).
+# Only OAK-equipped outposts publish crops, so a CropStreamWriter is created only for nodes
+# whose config carries a `crops` publisher address. Unlike ImageStreamWriter (event-gated,
+# files named by capture timestamp), the crop stream is always-resident: each crop is self-
+# identified by its sidecar and named from the correlation key. The crop socket is silent
+# between events, so an always-on subscriber simply writes whatever the EventSampler emits.
+class CropStreamWriter:
+
+    def __init__(self, node_view, publisher, cropdir):
+        self.node_view = node_view
+        self._frames_written = multiprocessing.Value('L', 0)  # monotonic crop counter for HC
+        self.process = multiprocessing.Process(target=self._crop_subscriber, args=(
+            self._frames_written, publisher, node_view[1], cropdir))
+        self.process.start()
+        logging.debug(f"CropStreamWriter started for {node_view} pid {self.process.pid} in {cropdir}")
+
+    def _set_datedir(self, dir, ymd):
+        path = os.path.join(dir, ymd)
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            pass
+        return path
+
+    def _crop_subscriber(self, frames_written, publisher, view, outdir):
+        receiver = CropSubscriber(publisher, view)
+        receiver.start()
+        while True:
+            try:
+                text, jpeg = receiver.receive()  # blocks until a crop arrives
+            except Exception:
+                logging.exception(f"CropStreamWriter failure {self.node_view}")
+                continue
+            # Sidecar: {view}|crop_{class}|{event_id}|{tid}|{seqnum}|{phase}
+            _view, _cropclass, event_id, tid, seqnum, phase = text.split('|')
+            clas = _cropclass[len('crop_'):]
+            # PROVISIONAL date partition — receive time, NOT capture time. The sidecar
+            # carries no capture timestamp (only the crp OTE record does), so a crop
+            # received just after midnight could land in a different day-folder than its
+            # crp record. Clean fix is to add a capture ts to the sidecar so both planes
+            # date identically; until then this is the one-line swap point.
+            date_directory = self._set_datedir(outdir, str(date.today()))
+            cropfile = "{}_{}_{}_{}_{}.jpg".format(event_id, tid, seqnum, clas, phase)
+            try:
+                with open(os.path.join(date_directory, cropfile), "wb") as f:
+                    f.write(jpeg)
+                frames_written.value += 1
+            except Exception:
+                logging.exception(f"CropStreamWriter write failure {self.node_view} {cropfile}")
+
 # Child subprocess for managing the camwatcher index. There will be one instance of this daemon subprocess
 # per camwatcher. It provides a single point of control for all updates to the camwatcher event index files.
 # Rather than update the index directly, all CSV writers pass new index entries through a queue for update
@@ -140,6 +194,7 @@ class CSVindex:
     def _run(self, indxQ, alertQ):
         _csvdir = CFG['data']['csvfiles']
         _imgdir = CFG['data']['images']
+        _cropdir = CFG['data'].get('crops')  # OAK crop store; absent on non-crop datasinks
         _delQ = queue.Queue()
         _thread = threading.Thread(target=self._purge_loop, args=(_delQ,))
         _thread.daemon = True
@@ -167,6 +222,8 @@ class CSVindex:
                     logging.error(f"CSVindex index delete error {result.returncode} for {_date}/{_event}")
                 _delQ.put(f"rm {os.path.join(_csvdir, _date, ''.join([_event,'*']))}")
                 _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} | xargs rm")
+                if _cropdir:  # remove any OAK crop JPEGs for this event
+                    _delQ.put(f"ls {os.path.join(_cropdir, _date, ''.join([_event,'*']))} | xargs rm")
                 # Send deletion alert to sentinel for re-broadcast to subscribers
                 alert = {
                     'task': 'ALERT',
@@ -191,6 +248,13 @@ class CSVindex:
 
 # Disk I/O CSV writer thread
 class CSVwriter:
+
+    # Per-type CSV schemas. `trk` (and sentinel result types like `fd1`) carry
+    # detection geometry; `crp` carries the crop correlation key only — no bbox
+    # (geometry joins back to trk via seqnum/detidx, see plan §4.5).
+    TRK_HEADER = "timestamp,objid,classname,rect_x1,rect_y1,rect_x2,rect_y2\n"
+    CRP_HEADER = "timestamp,objid,seqnum,detidx,classname,phase\n"
+
     def __init__(self, dir, dateIdx, dataQ):
         self._openfiles = {}      # a list of open files by unique identifier
         self._folder = dir        # top-level folder for CSV files
@@ -218,6 +282,17 @@ class CSVwriter:
             self._dateIdx.put((CSVindex.CSV_new, (date_directory, node, view, evt, timestamp, camsize, type)))
         return date_directory
 
+    def _header(self, tag):
+        return CSVwriter.CRP_HEADER if tag == 'crp' else CSVwriter.TRK_HEADER
+
+    def _format_row(self, tag, d):
+        if tag == 'crp':
+            return ','.join([d['timestamp'], str(d['obj']), str(d['seq']),
+                             str(d['det']), str(d['clas']), str(d['phase'])]) + "\n"
+        return ','.join([d['timestamp'], str(d['obj']), str(d['clas']),
+                         str(d['rect'][0]), str(d['rect'][1]),
+                         str(d['rect'][2]), str(d['rect'][3])]) + "\n"
+
     def _run(self):
         logging.debug(f"CSVwriter thread starting within {self._folder}")
         while not self._stop:
@@ -230,26 +305,18 @@ class CSVwriter:
                 _recType = None
                 try:
                     _recType = _data['type']
-                    if _recType == _tag:
-                        self._openfiles[_ref].write(','.join([
-                            _data['timestamp'],
-                            str(_data['obj']),
-                            str(_data['clas']),
-                            str(_data['rect'][0]),
-                            str(_data['rect'][1]),
-                            str(_data['rect'][2]),
-                            str(_data['rect'][3])
-                            ]) + "\n" )
-                    elif _recType == 'start':
+                    if _recType == 'start':
                         f = open(os.path.join(self._set_index(
                             _node, _view, _data['id'], _data['timestamp'], _data['camsize'], _tag, _data['new']),
                             _data['id'] + '_' + _tag + '.csv'), mode='wt')
-                        f.write("timestamp,objid,classname,rect_x1,rect_y1,rect_x2,rect_y2\n") # write column headers
+                        f.write(self._header(_tag))  # column headers per record type
                         self._openfiles[_ref] = f # add to list
                     elif _recType == 'end':
                         logging.debug(f"CSVwriter closing file for {_ref}")
                         self._openfiles[_ref].close() # close file
                         del self._openfiles[_ref] # remove from list
+                    elif _recType == _tag:
+                        self._openfiles[_ref].write(self._format_row(_tag, _data))
                     else:
                         logging.warning(f"Tracking type {_recType} from {_ref} ignored by CSVwriter")
                 except KeyError as keyval:
@@ -520,9 +587,26 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
         view = ote['view']
         node_view = (node, view)
         ote2db = ((node, view, eventID, 'trk'), ote)
+        ekey = (node, view, eventID)
         if ote["type"] == 'trk':
             dbLogMsgQ.put(ote2db)
+        elif ote["type"] == 'crp':
+            # Crop correlation record (OAK). The crop stream is not bracketed by
+            # start/end, so CamWatcher originates the crp file + index row on the
+            # first crp seen for an event (synthetic 'start', mirroring SentinelAgent),
+            # carrying the event's scene camsize cached from the trk 'start'.
+            crp_ref = (node, view, eventID, 'crp')
+            if ekey not in _crp_active:
+                _crp_active.add(ekey)
+                _camsize, _start_ts = _event_meta.get(ekey, ((0, 0), ote['timestamp']))
+                dbLogMsgQ.put((crp_ref, {
+                    "view": view, "id": eventID, "timestamp": _start_ts,
+                    "type": "start", "new": True, "camsize": _camsize,
+                }))
+            dbLogMsgQ.put((crp_ref, ote))
+            _crp_record_counts[node_view] = _crp_record_counts.get(node_view, 0) + 1
         elif ote["type"] == 'start':
+            _event_meta[ekey] = (ote['camsize'], ote['timestamp'])
             dbLogMsgQ.put(ote2db)
             if node_view in outposts:
                 # Start image subscriber / JPEG file writer
@@ -531,6 +615,10 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
                 logging.error(f"ImageStreamWriter {node_view} not found")
         elif ote["type"] == 'end':
             dbLogMsgQ.put(ote2db)
+            if ekey in _crp_active:  # close the crp correlation file for this event
+                dbLogMsgQ.put(((node, view, eventID, 'crp'), {"type": "end"}))
+                _crp_active.discard(ekey)
+            _event_meta.pop(ekey, None)
             if node_view in outposts:
                  # Stop image subscriber
                 outposts[node_view].stop()
@@ -585,6 +673,7 @@ def _build_hc_response():
     uptime = now - _start_time
     # Writer status
     writers = {}
+    crop_writers_hc = {}
     with threadLock:
         for nv, writer in outposts.items():
             key = f"{nv[0]}/{nv[1]}"
@@ -593,6 +682,18 @@ def _build_hc_response():
                 "alive": alive,
                 "pid": writer.process.pid if alive else None,
                 "frames_written": writer._frames_written.value
+            }
+        # OAK crop writers (only crop-publishing nodes). crops_written (files, image
+        # plane) vs crp_records (records, log plane) reconcile the two planes — a
+        # persistent gap signals crop/crp pair failures.
+        for nv, writer in crop_writers.items():
+            key = f"{nv[0]}/{nv[1]}"
+            alive = writer.process.is_alive()
+            crop_writers_hc[key] = {
+                "alive": alive,
+                "pid": writer.process.pid if alive else None,
+                "crops_written": writer._frames_written.value,
+                "crp_records": _crp_record_counts.get(nv, 0)
             }
     # SentinelAgent liveness
     agent_alive = _sentinel_agent.process.is_alive() if _sentinel_agent is not None else None
@@ -622,6 +723,7 @@ def _build_hc_response():
         "timestamp": now.isoformat(),
         "uptime": str(uptime).split('.')[0],
         "writers": writers,
+        "crop_writers": crop_writers_hc,
         "heartbeats": heartbeats,
         "disk": disk,
         "sentinel_agent": {"alive": agent_alive}
@@ -646,6 +748,8 @@ async def control_loop(control_socket, log_socket):
                             _view = request['view']
                             _new_outpost = (_node, _view)
                             outposts[_new_outpost] = ImageStreamWriter(_new_outpost, request['images'], CFG['data']['images'])
+                            if 'crops' in request:  # OAK outposts advertise a crop publisher
+                                crop_writers[_new_outpost] = CropStreamWriter(_new_outpost, request['crops'], CFG['data']['crops'])
                             log_socket.connect(request['logger'])
                             logging.info(f"New outpost registered {_new_outpost}.")
                 elif request['cmd'] == 'Agent':
@@ -728,6 +832,8 @@ async def main():
             _nodecfg = _outpost_nodes[node]
             node_view = (node, _nodecfg['view'])
             outposts[node_view] = ImageStreamWriter(node_view, _nodecfg['images'], _data["images"])
+            if 'crops' in _nodecfg:  # OAK outposts only — picamera nodes publish no crop stream
+                crop_writers[node_view] = CropStreamWriter(node_view, _nodecfg['crops'], _data["crops"])
             asyncSUB.connect(_nodecfg['logger'])
     try:
         await asyncio.gather(control_loop(asyncREP, asyncSUB),

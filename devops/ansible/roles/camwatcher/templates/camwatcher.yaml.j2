@@ -21,10 +21,14 @@ outpost_nodes:
 {%     for camera_id, camera_config in outpost_config.cameras.items() %}
 {%       set logger_port = camera_config.logger_port | default(sentinelcam_ports.imagenode_logging) %}
 {%       set image_port = camera_config.image_port | default(sentinelcam_ports.imagenode_publisher) %}
+{%       set crop_port = camera_config.crop_port | default(sentinelcam_ports.imagenode_crops) %}
   {{ outpost_name }}:
     view: {{ camera_config.viewname }}
     logger: tcp://{{ outpost_host }}:{{ logger_port }}
     images: tcp://{{ outpost_host }}:{{ image_port }}
+{%       if camera_config.publishes_crops | default(false) %}
+    crops: tcp://{{ outpost_host }}:{{ crop_port }}   # OAK hi-res crop stream (Plane 2)
+{%       endif %}
 {%     endfor %}
 {%   endif %}
 {% endfor %}
@@ -41,6 +45,7 @@ sentinel:
        ##   Data storage locations  ##
 data:
   images:   {{ sentinelcam_directories.images }}
+  crops:    {{ sentinelcam_directories.crops }}
   csvfiles: {{ sentinelcam_directories.csvfiles }}
 
 logconfigs:

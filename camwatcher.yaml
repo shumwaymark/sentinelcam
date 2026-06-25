@@ -14,7 +14,9 @@ outpost_nodes:
     view: Front
     logger: tcp://east:5565
     images: tcp://east:5567
-  outpost:            
+    crops:  tcp://east:5568        # OAK node: hi-res crop stream (Plane 2). Present only for
+                                   # crop-publishing outposts; triggers a CropStreamWriter.
+  outpost:
     view: PiCamera                 # view name for the camera
     logger: tcp://lab1:5565        # log publisher subscriptions for node
     images: tcp://lab1:5567        # image publisher subscriptions for node
@@ -33,8 +35,9 @@ sentinel:
    datasink:  data1                    # tag identifying this data sink
 
        ##   Data storage locations  ##
-data:  
+data:
   images:   /home/ops/sentinelcam/images      # JPG file storage
+  crops:    /home/ops/sentinelcam/crops       # OAK hi-res crop storage (Plane 2)
   csvfiles: /home/ops/sentinelcam/camwatcher  # CSV file storage
 
 logconfigs: 

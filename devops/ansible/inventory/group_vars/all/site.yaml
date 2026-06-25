@@ -77,6 +77,9 @@ sentinelcam_outposts:
         # size. Downstream (watchtower ring buffers/view size, event index) keys
         # on this; must match oak_camera.build_pipeline scene_out (768x432, 16:9).
         resolution: [768, 432]
+        # OAK node: publishes the Plane-2 hi-res crop stream (re-ID). CamWatcher
+        # renders a `crops:` subscription and runs a CropStreamWriter only when set.
+        publishes_crops: true
 
   alpha5:
     hostname: alpha5
