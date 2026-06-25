@@ -164,7 +164,7 @@ class RequestMetrics:
         self.last_request_time = datetime.now()
         if self._req_start is not None:
             elapsed = time.monotonic() - self._req_start
-            if self._req_start_cmd == 'pic':  # image request
+            if self._req_start_cmd in ('pic', 'cpic'):  # image request (scene or crop)
                 self._response_times[0].append(elapsed)
                 if len(self._response_times[0]) > self.WINDOW:
                     self._response_times = (self._response_times[0][-self.WINDOW:], self._response_times[1])
@@ -211,6 +211,9 @@ def main():
     # Derive sentinelcam root from the configured data folder
     # datafolder is .../sentinelcam/camwatcher, root is one level up
     sentinelcam_root = os.path.dirname(CFG['datafolder'])
+    # OAK hi-res crop store (Plane 2). Defaults to a sibling of images/ so an
+    # un-redeployed datapump.yaml still resolves it.
+    cropfolder = CFG.get('cropfolder', os.path.join(sentinelcam_root, 'crops'))
     log.info("datapump response loop starting")
     metrics = RequestMetrics()
     # TODO: Graceful shutdown / termination handling needed.
@@ -269,6 +272,19 @@ def main():
                     pump.send_jpg(reply, jpeg)
                     metrics.end()
                     continue
+                elif request['cmd'] == 'cpic':  # retrieve OAK crop frame (Plane 2)
+                    # crop key carries the filename suffix {objid}_{seqnum}_{class}_{phase}
+                    jpegfile = os.path.join(cropfolder, request['date'],
+                        request['evt'] + '_' + request['crop'] + '.jpg')
+                    if os.path.exists(jpegfile):
+                        jpeg = open(jpegfile, "rb").read()
+                        if len(jpeg) == 0:
+                            jpeg = tinyJPG
+                    else:
+                        jpeg = tinyJPG
+                    pump.send_jpg(reply, jpeg)
+                    metrics.end()
+                    continue
                 elif request['cmd'] == 'del':  # delete event data
                     (date, event) = (request['date'], request['evt'])
                     if facelist.event_locked(date, event):
@@ -308,7 +324,7 @@ def main():
                     pump.send_DataFrame('Error', pandas.DataFrame())
                 elif cmd in ('dat', 'img', 'str', 'hth'):
                     pump.pickle_and_send('Error', None)
-                elif cmd == 'pic':
+                elif cmd in ('pic', 'cpic'):
                     pump.send_jpg('Error', tinyJPG)
                 else:
                     pump.send_reply(b'Error')
@@ -321,7 +337,7 @@ def main():
                     pump.send_DataFrame('Error', pandas.DataFrame())
                 elif cmd in ('dat', 'img', 'str', 'hth'):
                     pump.pickle_and_send('Error', None)
-                elif cmd == 'pic':
+                elif cmd in ('pic', 'cpic'):
                     pump.send_jpg('Error', tinyJPG)
                 else:
                     pump.send_reply(b'Exception')

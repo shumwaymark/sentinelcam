@@ -6,6 +6,7 @@ camwatcher: tcp://127.0.0.1:5566
 
 # Data storage locations  
 imagefolder: /home/ops/sentinelcam/images
+cropfolder:  /home/ops/sentinelcam/crops
 datafolder:  /home/ops/sentinelcam/camwatcher
 
 # Current FaceList CSV file, defines the population of locked events

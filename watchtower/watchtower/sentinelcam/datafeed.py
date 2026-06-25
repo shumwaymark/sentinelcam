@@ -113,6 +113,7 @@ class DataFeed(imagezmq.ImageSender):
     DEL_EVT = 5
     STG_RPT = 6
     HTH_RPT = 7
+    CRP_JPG = 8
     HEALTH = -1
 
     def __init__(self, connect_to, timeout=15.0):
@@ -128,6 +129,7 @@ class DataFeed(imagezmq.ImageSender):
             DataFeed.DEL_EVT: self.recv,
             DataFeed.STG_RPT: self.recv_pickle,
             DataFeed.HTH_RPT: self.recv_pickle,
+            DataFeed.CRP_JPG: self.recv_jpg,
             DataFeed.HEALTH: self.recv
         }
         self._cmdQ = queue.Queue()
@@ -224,6 +226,14 @@ class DataFeed(imagezmq.ImageSender):
                    'frametime': "{}_{}".format(dt[:10], dt[11:].replace(':','.'))}
         result = self.pump_action(DataFeed.IMG_JPG, request)
         return result
+
+    def get_crop_jpg(self, date, event, objid, seqnum, classname, phase) -> bytes:
+        # OAK Plane-2 crop. Key fields come straight from a crp tracking row
+        # (get_tracking_data(date, event, 'crp')); DataPump resolves
+        # {cropfolder}/{date}/{event}_{objid}_{seqnum}_{class}_{phase}.jpg
+        request = {'cmd': 'cpic', 'date': date, 'evt': event,
+                   'crop': "{}_{}_{}_{}".format(objid, seqnum, classname, phase)}
+        return self.pump_action(DataFeed.CRP_JPG, request)
 
     def get_storage_report(self) -> dict:
         """Retrieve the pre-computed storage analysis report.

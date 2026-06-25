@@ -8,6 +8,7 @@ camwatcher: tcp://127.0.0.1:{{ sentinelcam_ports.camwatcher_control }}
 
 # Data storage locations  
 imagefolder: {{ sentinelcam_directories.images }}
+cropfolder:  {{ sentinelcam_directories.crops }}
 datafolder:  {{ sentinelcam_directories.csvfiles }}
 
 # Current FaceList CSV file, defines the population of locked events
