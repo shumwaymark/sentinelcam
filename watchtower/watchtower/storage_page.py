@@ -120,9 +120,9 @@ class StoragePage(tk.Canvas):
             self.tag_bind(close_id, "<Button-1>", lambda e: self._go_back())
 
     def _close(self):
-        """Return to the player page."""
+        """Return to the system health page (the storage report's new home, §7.7)."""
         from watchtower import UserPage
-        self.app.show_page(UserPage.SETTINGS)
+        self.app.show_page(UserPage.HEALTH)
 
     def _go_back(self):
         """Navigate back one level."""

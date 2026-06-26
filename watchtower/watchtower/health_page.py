@@ -450,13 +450,16 @@ class SystemHealthPage(tk.Canvas):
                              font=('TkDefaultFont', 9), tags='content')
 
     def _draw_datapump_card(self, x, y, w, h):
-        """DataPump pipeline card."""
+        """DataPump pipeline card — also the touch target for the storage report (§7.7)."""
         dp = self._report.get('datapump', {})
         ok = dp.get('ok')
 
-        self.create_rectangle(x, y, x + w, y + h,
+        # Filled background rect is the drill-down target (a fill='' overlay
+        # would only be clickable on its outline, not its interior).
+        bg_id = self.create_rectangle(x, y, x + w, y + h,
                               fill='gray10', outline='gray20', width=2,
                               tags='content')
+        self.tag_bind(bg_id, "<Button-1>", lambda e: self._datapump_drilldown())
 
         self.create_text(x + 12, y + 10, text="DataPump", fill=COLOR_TEXT,
                          anchor='nw', font=('TkDefaultFont', 12, 'bold'),
@@ -464,6 +467,13 @@ class SystemHealthPage(tk.Canvas):
         dot_color = _status_color(ok)
         self.create_oval(x + w - 25, y + 8, x + w - 10, y + 23,
                          fill=dot_color, outline='', tags='content')
+
+        # Storage-report drill-down hint (also tappable)
+        hint_id = self.create_text(x + w - 10, y + h - 8, text="storage ▸",
+                                   anchor='se', fill=COLOR_BLUE,
+                                   font=('TkDefaultFont', 9, 'bold'),
+                                   tags='content')
+        self.tag_bind(hint_id, "<Button-1>", lambda e: self._datapump_drilldown())
 
         if not ok:
             self.create_text(x + w // 2, y + h // 2 + 10,
@@ -496,6 +506,11 @@ class SystemHealthPage(tk.Canvas):
             self.create_text(x + 12, line_y, text=f"up {uptime}",
                              fill=COLOR_MUTED, anchor='nw',
                              font=('TkDefaultFont', 9), tags='content')
+
+    def _datapump_drilldown(self):
+        """Navigate to the storage report (relocated here from the tools page, §7.7)."""
+        from watchtower import UserPage
+        self.app.show_page(UserPage.STORAGE)
 
     def _draw_sentinel_card(self, x, y, w, h):
         """Sentinel pipeline card — also a touch target for Phase 7 drill-down."""

@@ -1228,18 +1228,8 @@ class SettingsPage(tk.Canvas):
             fill="gray", font=('TkDefaultFont', 10, 'italic')
         )
 
-        # Storage Report button
-        y_pos += button_height + button_spacing + 30
-        self.storage_btn = tk.Button(
-            self,
-            text="Storage Report",
-            command=lambda: app.show_page(UserPage.STORAGE),
-            bg='#2E86AB', fg='white',
-            font=('TkDefaultFont', 14, 'bold'),
-            width=40, height=2,
-            relief=tk.RAISED, bd=3
-        )
-        self.create_window(400, y_pos, window=self.storage_btn, anchor="n")
+        # Storage Report relocated to the System Health page (§7.7) —
+        # reached via the DataPump tile there, not from this tools page.
 
         # Close/Back button
         self.close_img = PIL.ImageTk.PhotoImage(file="images/close.png")
