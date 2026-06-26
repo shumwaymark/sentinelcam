@@ -143,6 +143,7 @@ class HealthChecker:
             return outposts
 
         writers = camwatcher_result.get('writers', {})
+        crop_writers = camwatcher_result.get('crop_writers', {})
         heartbeats = camwatcher_result.get('heartbeats', {})
 
         for name in self.config.get('outposts', []):
@@ -161,6 +162,21 @@ class HealthChecker:
                     status['ok'] = False
             else:
                 status['writer_alive'] = None
+
+            # Crop writer — OAK crop-publishing nodes only. Mirror the writer
+            # key match; non-OAK nodes have no crop_writers entry, so these
+            # keys are simply absent. crops_written (image plane) vs crp_records
+            # (log plane); a persistent gap signals crop/crp pair failures.
+            crop_key = None
+            for ck in crop_writers:
+                if ck.startswith(name + '/') or ck == name:
+                    crop_key = ck
+                    break
+            if crop_key:
+                cw = crop_writers[crop_key]
+                status['crop_writer_alive'] = cw.get('alive', False)
+                status['crops_written'] = cw.get('crops_written', 0)
+                status['crp_records'] = cw.get('crp_records', 0)
 
             # Check heartbeat
             hb = heartbeats.get(name)

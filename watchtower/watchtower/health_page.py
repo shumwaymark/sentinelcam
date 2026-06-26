@@ -357,6 +357,19 @@ class SystemHealthPage(tk.Canvas):
                              fill=COLOR_MUTED, anchor='nw',
                              font=('TkDefaultFont', 9), tags='content')
 
+        # Crops written — OAK crop-publishing nodes only. crops_written (image
+        # plane) reconciled against crp_records (log plane); a nonzero delta is
+        # shown so a growing gap (pair failures) is visible at a glance.
+        crops = info.get('crops_written')
+        if crops is not None:
+            crop_text = f"{crops:,} crops"
+            gap = info.get('crp_records', crops) - crops
+            if gap:
+                crop_text += f"  Δ{gap:+,}"
+            self.create_text(x + 12, y + 100, text=crop_text,
+                             fill=COLOR_MUTED, anchor='nw',
+                             font=('TkDefaultFont', 9), tags='content')
+
         # Stale warning
         if stale:
             self.create_text(x + w - 12, y + h - 12, text="STALE",
