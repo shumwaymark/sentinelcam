@@ -268,8 +268,12 @@ class StoragePage(tk.Canvas):
         sc_y = summary_y + 22
         sc_bytes = latest.get('sentinelcam_bytes', 0)
         img_bytes = latest.get('image_bytes', 0)
+        crop_bytes = latest.get('crop_bytes', 0)
         csv_bytes = latest.get('csv_bytes', 0)
-        sc_text = f"SentinelCam: {format_bytes(sc_bytes)} ({format_bytes(img_bytes)} images, {format_bytes(csv_bytes)} CSV)"
+        sc_text = (f"SentinelCam: {format_bytes(sc_bytes)} "
+                   f"({format_bytes(img_bytes)} images, "
+                   f"{format_bytes(crop_bytes)} crops, "
+                   f"{format_bytes(csv_bytes)} CSV)")
         self.create_text(gauge_x, sc_y, text=sc_text,
                          fill=COLOR_MUTED, anchor='nw',
                          font=('TkDefaultFont', 10), tags='content')
@@ -529,6 +533,8 @@ class StoragePage(tk.Canvas):
             image_count=('image_count', 'sum'),
             event_count=('event_count', 'sum'),
             csv_bytes=('csv_bytes', 'sum'),
+            crop_bytes=('crop_bytes', 'sum'),
+            crop_count=('crop_count', 'sum'),
         ).reset_index()
         by_view = by_view.sort_values('image_bytes', ascending=False)
 
@@ -582,10 +588,12 @@ class StoragePage(tk.Canvas):
                              text=stats, fill=COLOR_TEXT, anchor='w',
                              font=('TkDefaultFont', 9), tags='content')
 
-            # Average images per event
+            # Average images per event, plus crop tally for crop-publishing views
             if row.event_count > 0:
                 avg_imgs = row.image_count / row.event_count
                 avg_text = f"~{avg_imgs:.0f} imgs/event"
+                if getattr(row, 'crop_count', 0):
+                    avg_text += f"  •  {row.crop_count:,} crops ({format_bytes(row.crop_bytes)})"
                 self.create_text(chart_x, y + row_h - 12,
                                  text=avg_text, fill=COLOR_MUTED, anchor='nw',
                                  font=('TkDefaultFont', 8), tags='content')

@@ -20,8 +20,10 @@ from datetime import datetime, date, timedelta
 
 import pandas
 
-# Report format version — increment when structure changes
-REPORT_VERSION = 1
+# Report format version — increment when structure changes.
+# v2: added crop_count / crop_bytes (daily_summary) and crop_bytes (disk_summary)
+#     for the OAK crop stream stored under ~/sentinelcam/crops/.
+REPORT_VERSION = 2
 
 # Camwatcher index columns (no header row in CSV)
 IDXCOLS = ["node", "viewname", "timestamp", "event", "width", "height", "type"]
@@ -114,7 +116,7 @@ def load_event_index(csv_path, ymd):
         return pandas.DataFrame(columns=["node", "viewname", "event"])
 
 
-def scan_date_folder(csv_path, img_path, ymd):
+def scan_date_folder(csv_path, img_path, crop_path, ymd):
     """Scan a single date folder and produce per-view storage metrics.
 
     Parameters
@@ -123,6 +125,8 @@ def scan_date_folder(csv_path, img_path, ymd):
         Root camwatcher CSV directory
     img_path : str
         Root images directory
+    crop_path : str
+        Root crops directory (OAK crop stream)
     ymd : str
         Date string in YYYY-MM-DD format
 
@@ -138,7 +142,7 @@ def scan_date_folder(csv_path, img_path, ymd):
     for row in event_index.itertuples(index=False):
         event_to_view[row.event] = (row.node, row.viewname)
 
-    # Accumulator: (node, viewname) -> {image_count, image_bytes, csv_count, csv_bytes, event_ids}
+    # Accumulator: (node, viewname) -> per-view byte/count tallies + event_ids
     view_stats = {}
 
     def ensure_view(node, viewname):
@@ -147,6 +151,7 @@ def scan_date_folder(csv_path, img_path, ymd):
             view_stats[key] = {
                 'image_count': 0, 'image_bytes': 0,
                 'csv_count': 0, 'csv_bytes': 0,
+                'crop_count': 0, 'crop_bytes': 0,
                 'event_ids': set()
             }
         return view_stats[key]
@@ -207,6 +212,30 @@ def scan_date_folder(csv_path, img_path, ymd):
                         stats['image_bytes'] += fsize
                         stats['event_ids'].add(event_id)
 
+    # Scan crop files in crops/YYYY-MM-DD/ (OAK crop stream).
+    # Filename: {EventID}_{ObjID}_{Seqnum}_{Class}_{Phase}.jpg — the EventID
+    # is the leading underscore-delimited field, same attribution as images.
+    crop_date_dir = os.path.join(crop_path, ymd)
+    if os.path.isdir(crop_date_dir):
+        with os.scandir(crop_date_dir) as entries:
+            for entry in entries:
+                if not entry.is_file() or not entry.name.endswith('.jpg'):
+                    continue
+                try:
+                    fsize = entry.stat().st_size
+                except OSError:
+                    continue
+
+                underscore_pos = entry.name.find('_')
+                if underscore_pos > 0:
+                    event_id = entry.name[:underscore_pos]
+                    if event_id in event_to_view:
+                        node, viewname = event_to_view[event_id]
+                        stats = ensure_view(node, viewname)
+                        stats['crop_count'] += 1
+                        stats['crop_bytes'] += fsize
+                        stats['event_ids'].add(event_id)
+
     # Convert to list of dicts for DataFrame construction
     rows = []
     for (node, viewname), stats in view_stats.items():
@@ -219,6 +248,8 @@ def scan_date_folder(csv_path, img_path, ymd):
             'image_bytes': stats['image_bytes'],
             'csv_count': stats['csv_count'],
             'csv_bytes': stats['csv_bytes'],
+            'crop_count': stats['crop_count'],
+            'crop_bytes': stats['crop_bytes'],
         })
 
     return rows
@@ -311,6 +342,7 @@ def run_analysis(cfg):
 
     csv_path = os.path.join(sentinelcam_root, 'camwatcher')
     img_path = os.path.join(sentinelcam_root, 'images')
+    crop_path = os.path.join(sentinelcam_root, 'crops')
     report_file = os.path.join(report_dir, 'storage_report.pickle')
 
     # Ensure report directory exists
@@ -329,10 +361,12 @@ def run_analysis(cfg):
             all_dates.add(folder)
         for folder in list_date_folders(img_path):
             all_dates.add(folder)
+        for folder in list_date_folders(crop_path):
+            all_dates.add(folder)
 
         daily_rows = []
         for ymd in sorted(all_dates):
-            rows = scan_date_folder(csv_path, img_path, ymd)
+            rows = scan_date_folder(csv_path, img_path, crop_path, ymd)
             daily_rows.extend(rows)
             logger.debug(f"Scanned {ymd}: {len(rows)} view entries")
 
@@ -366,6 +400,10 @@ def run_analysis(cfg):
             img_dir = os.path.join(img_path, folder)
             if get_folder_mtime(img_dir) > last_scan_ts:
                 rescan_dates.add(folder)
+        for folder in list_date_folders(crop_path):
+            crop_dir = os.path.join(crop_path, folder)
+            if get_folder_mtime(crop_dir) > last_scan_ts:
+                rescan_dates.add(folder)
 
         logger.info(f"Rescanning {len(rescan_dates)} date(s): "
                      f"{', '.join(sorted(rescan_dates)[:5])}{'...' if len(rescan_dates) > 5 else ''}")
@@ -376,7 +414,7 @@ def run_analysis(cfg):
 
         new_rows = []
         for ymd in sorted(rescan_dates):
-            rows = scan_date_folder(csv_path, img_path, ymd)
+            rows = scan_date_folder(csv_path, img_path, crop_path, ymd)
             new_rows.extend(rows)
             logger.debug(f"Rescanned {ymd}: {len(rows)} view entries")
 
@@ -392,18 +430,21 @@ def run_analysis(cfg):
     if len(daily_summary) > 0:
         total_image_bytes = int(daily_summary['image_bytes'].sum())
         total_csv_bytes = int(daily_summary['csv_bytes'].sum())
+        total_crop_bytes = int(daily_summary['crop_bytes'].sum())
     else:
         total_image_bytes = 0
         total_csv_bytes = 0
+        total_crop_bytes = 0
 
     disk_row = pandas.DataFrame([{
         'scan_date': now,
         'total_bytes': disk_metrics['total_bytes'],
         'used_bytes': disk_metrics['used_bytes'],
         'free_bytes': disk_metrics['free_bytes'],
-        'sentinelcam_bytes': total_image_bytes + total_csv_bytes,
+        'sentinelcam_bytes': total_image_bytes + total_csv_bytes + total_crop_bytes,
         'image_bytes': total_image_bytes,
         'csv_bytes': total_csv_bytes,
+        'crop_bytes': total_crop_bytes,
     }])
     disk_summary = pandas.concat([disk_summary, disk_row], ignore_index=True)
 
@@ -437,6 +478,7 @@ def run_analysis(cfg):
                 f"{disk_metrics['free_bytes'] / (1024**3):.1f} GB free "
                 f"({disk_metrics['used_bytes'] / disk_metrics['total_bytes'] * 100:.1f}% used)")
     logger.info(f"  SentinelCam: {total_image_bytes / (1024**3):.2f} GB images, "
+                f"{total_crop_bytes / (1024**3):.2f} GB crops, "
                 f"{total_csv_bytes / (1024**2):.1f} MB CSV")
     if len(daily_summary) > 0:
         date_count = daily_summary['date'].nunique()
