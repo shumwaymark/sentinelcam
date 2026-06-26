@@ -251,7 +251,8 @@ class SpeedMontage:
                             evtSets = cwIndx.loc[cwIndx['event'] == event]
 
                             if len(evtSets.index) > 0:
-                                trkTypes = list(evtSets['type'])
+                                # geometry/overlay types only — skip non-rect types like `crp`
+                                trkTypes = [t for t in evtSets['type'] if t in refsort]
                                 all_tracking_data = []
 
                                 for t in trkTypes:

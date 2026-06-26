@@ -398,7 +398,10 @@ class EventAggregator:
         evtData = pd.DataFrame(columns=TRKCOLS)
         refsort = {'trk': 0, 'obj': 1, 'vsp': 2, 'fd1': 3, 'fr1': 4}  # z-ordering for tracking result labels
         if len(evtSets.index) > 0:
-            trkTypes = [t for t in evtSets['type']]
+            # Only overlay-drawable (geometry) types — refsort enumerates them. Skips
+            # non-geometry types like `crp` (crop correlation, no rect_* columns), whose
+            # NaN rects would otherwise crash the per-frame overlay render.
+            trkTypes = [t for t in evtSets['type'] if t in refsort]
             # Process each tracking type individually to handle missing data gracefully
             all_tracking_data = []
             for t in trkTypes:
