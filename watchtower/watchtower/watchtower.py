@@ -940,6 +940,7 @@ class EventListUpdater:
         self._eventData = (None, None)
         self.outpost_views = outpost_views
         self.event_aggregator = EventAggregator()
+        self.crop_selector = CropSelector()  # §7.1 slice 3 — "this just happened" crop thumbnail
         self._image = blank_image(1,1)
         self.initial_load_done = False
         self._thread = threading.Thread(daemon=True, target=self._run, args=(eventQ, newEvent, outpost_views))
@@ -963,6 +964,13 @@ class EventListUpdater:
                     feed.get_image_jpg(day, event, frametimes[sample_frame]),
                     colorspace='BGR')
 
+                # §7.1 slice 3: prefer the selected-crop card ("this just happened"
+                # readout) over the scene; fall back to the scene + bbox overlays
+                # whenever there is no usable crop (selection fails soft -> None).
+                selected = self.crop_selector.select(feed, day, event)
+                if selected:
+                    image = render_centered_card(image, selected)
+
                 header_text = f"{view} {frametimes[sample_frame].strftime('%I:%M %p - %A %B %d, %Y')}"
                 # Get text size for background rectangle
                 (text_width, text_height), baseline = cv2.getTextSize(header_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
@@ -973,8 +981,9 @@ class EventListUpdater:
                 # Draw text on top
                 cv2.putText(image, header_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-                for (name, classname, x1, y1, x2, y2) in refresults[sample_frame]:
-                    self.event_aggregator.texthelper.putText(image, name, classname, x1, y1, x2, y2)
+                if not selected:
+                    for (name, classname, x1, y1, x2, y2) in refresults[sample_frame]:
+                        self.event_aggregator.texthelper.putText(image, name, classname, x1, y1, x2, y2)
 
                 return (frametimes[sample_frame], image)
             elif frametimes:
