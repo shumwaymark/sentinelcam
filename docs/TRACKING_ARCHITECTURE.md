@@ -161,10 +161,10 @@ flowchart LR
     end
 
     NN -->|detections| TRK
-    TRK -->|"ote: trk / crp"| LOG([log PUB :5565])
-    ENC -->|30 FPS scene| SCN([scene PUB :5567])
+    TRK -->|"ote: trk / crp"| LOG(["log PUB :5565"])
+    ENC -->|"30 FPS scene"| SCN(["scene PUB :5567"])
     MANIP --> SAMP
-    SAMP -->|selected crops| CRPUB([crop PUB :5568])
+    SAMP -->|"selected crops"| CRPUB(["crop PUB :5568"])
     SAMP --> SG
 
     subgraph SINK["Data sink — CamWatcher / DataPump"]
