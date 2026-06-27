@@ -163,9 +163,11 @@ but the real transformation is *what it can now capture*. Beyond the reduced-res
 used for viewing, the camera produces **high-resolution, class-specific crops taken straight from the
 sensor**, at a fidelity the published frames never carry. Those crops are the ground-truth imagery the
 entire re-identification effort stands on — the genuinely transformative capability here, not a mere
-speed-up. The architecture refuses to choose between the two worlds: the *same* source-agnostic
-lifecycle degrades gracefully down to the bookshelf Pi and scales up to the OAK, with accelerators
-such as an Intel NCS2 or Google Coral fitting in between.
+speed-up.
+
+The architecture refuses to choose between the two worlds: the *same* source-agnostic lifecycle
+degrades gracefully down to the bookshelf Pi and scales up to the OAK, with accelerators such as an
+Intel NCS2 or Google Coral fitting in between.
 
 The closer-analysis ambition is unchanged. If a person is detected, is there a face in view, and can it
 be recognized? Was it a package delivery, or a postal carrier? If the subject is a vehicle, can the make,
