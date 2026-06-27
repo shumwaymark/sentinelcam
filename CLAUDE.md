@@ -23,13 +23,15 @@ sentinelcam/
 │   ├── outpost.py                     #   Outpost Detector — main pipeline, event mgmt
 │   ├── spyglass.py                    #   SpyGlass — multiprocess vision analysis
 │   ├── lenses.py                      #   Detection/tracking lens implementations
-│   ├── oak_camera.py                  #   DepthAI OAK camera pipeline
+│   ├── oak_camera.py                  #   DepthAI OAK v3 camera pipeline (scene/det/crops)
+│   ├── eventsampler.py                #   Stage-2 crop selection (phase strategy)
 │   └── utils.py                       #   FPS, ImageSubscriber, readConfig
 │
 ├── camwatcher/
 │   ├── camwatcher/camwatcher.py       # CamWatcher — async event loop, image/log capture, sentinel agent
 │   ├── camwatcher/sentinelcam/        #   camdata.py, utils.py (ImageSubscriber, readConfig)
 │   ├── datapump/datapump.py           # DataPump — REQ/REP server for data access
+│   ├── datapump/storage_analysis.py   #   nightly storage report builder (incl. crops)
 │   ├── datapump/sentinelcam/          #   camdata.py, facedata.py, utils.py
 │   └── event_review/                  #   primitive WSGI viewer app example
 │
@@ -42,6 +44,7 @@ sentinelcam/
 ├── watchtower/watchtower/
 │   ├── watchtower.py                  # Watchtower — Tk kiosk, player subsystem, sentinel monitor
 │   ├── calendar_page.py               #   outpost view event history selection
+│   ├── crop_overlay.py                #   selected-crop kiosk overlay (CropSelector + render)
 │   ├── health_page.py                 #   system health summary status page
 │   ├── heart_icon.py                  #   animated heart icon for system status alarm
 │   ├── motion_calibration.py          #   interactive motion detector tuning
@@ -73,11 +76,14 @@ Each component reads its configuration from `~/componentname.yaml` at startup. T
 
 | Term | What it is | Key file(s) |
 |------|-----------|-------------|
-| **Outpost** | Camera node. An `imagenode` Detector that does motion detection, publishes JPEG frames and event logs | `outpost.py`, `spyglass.py` |
-| **SpyGlass** | Child process on an Outpost for CPU-intensive object detection/tracking. One frame at a time, non-blocking | `spyglass.py`, `lenses.py` |
+| **Outpost** | Camera node. An `imagenode` Detector running a detection-driven, tracker-managed event lifecycle; publishes scene JPEGs, crops (OAK), and event logs | `outpost.py`, `spyglass.py`, `oak_camera.py` |
+| **HostTracker** | Persistent host-side multi-subject tracker that owns identity (`tid`) and state; drives event start/stop from the detection stream on both node types | `docs/TRACKING_ARCHITECTURE.md`, outpost intake |
+| **EventSampler** | In-process stage-2 filter selecting ~3 well-framed crops per traversal by phase strategy (entry/centre/far); pluggable per camera | `eventsampler.py` |
+| **SpyGlass** | Child process on an Outpost. On OAK an edge-inference engine fed selected crops; on picamera returns raw `Detection`s. One frame at a time, non-blocking | `spyglass.py`, `lenses.py` |
 | **LensTasking** | SpyGlass process manager: shared memory buffer, IPC wire, fork, handshake | `spyglass.py` class `LensTasking` |
 | **CamWatcher** | Data sink: async event loop subscribing to Outpost log/image streams, writing CSV + JPEG to disk | `camwatcher.py` |
-| **ImageStreamWriter** | Child process per Outpost that subscribes to image publisher and writes JPEG files | `camwatcher.py` class `ImageStreamWriter` |
+| **ImageStreamWriter** | Child process per Outpost that subscribes to the scene image publisher and writes JPEG files | `camwatcher.py` class `ImageStreamWriter` |
+| **CropStreamWriter** | Always-resident child process per crop-publishing (OAK) Outpost; stores hi-res crops named from the wire sidecar | `camwatcher.py` class `CropStreamWriter` |
 | **CSVindex** | Child process managing the camwatcher event index. Single point of control for all index mutations | `camwatcher.py` class `CSVindex` |
 | **CSVwriter** | Dedicated I/O thread writing tracking detail records to CSV files | `camwatcher.py` class `CSVwriter` |
 | **SentinelAgent** | Child process in CamWatcher subscribing to Sentinel log publishing, capturing task result data back to CSV | `camwatcher.py` class `SentinelAgent` |
@@ -92,6 +98,7 @@ Each component reads its configuration from `~/componentname.yaml` at startup. T
 | **TaskFactory** | Task base class and concrete implementations (MobileNetSSD_allFrames, GetFaces, FaceRecon, FaceSweep, etc.) | `taskfactory.py` |
 | **JobRequest** | Job lifecycle object: submit → queued → running → done/failed/chained | `sentinel.py` class `JobRequest` |
 | **Watchtower** | Tk kiosk on 7" touchscreen. Live viewing, event replay, sentinel monitor, video export, calibration tool | `watchtower.py` |
+| **CropSelector** | Watchtower helper: picks an event's most representative crop (vehicle-first by speed) and renders the centered-crop kiosk overlay | `crop_overlay.py` |
 | **CamData** | Filesystem accessor for camwatcher CSV data and images. Used by DataPump and SentinelAgent | `camdata.py` |
 | **FaceData** / **FaceList** / **FaceBaselines** | Face recognition pipeline data management classes | `facedata.py` |
 | **ImageSubscriber** | Subclass of `imagezmq.ImageHub` for subscribing to Outpost image publishers. Load-and-stay-resident with `start()`/`stop()` | `utils.py` |
@@ -100,6 +107,7 @@ Each component reads its configuration from `~/componentname.yaml` at startup. T
 
 ```
 Outpost ──PUB/SUB (ImageZMQ :5567)──→ CamWatcher (ImageStreamWriter child processes)
+Outpost (OAK) ─PUB/SUB (ImageZMQ :5568)→ CamWatcher (CropStreamWriter — hi-res crop stream)
 Outpost ──PUB/SUB (ZMQ :5565)──────→ CamWatcher (async log subscriber)
 CamWatcher ──REQ/REP (ZMQ :5566)──→ Sentinel (task submissions)
 Sentinel ──PUB (ZMQ :5565)─────────→ CamWatcher (SentinelAgent subscribes to results)
@@ -167,14 +175,17 @@ Outpost logs carry `ote` (object tracking event) prefixed JSON messages. Message
 ```
 ~/sentinelcam/camwatcher/YYYY-MM-DD/camwatcher.csv           # Event index (no header)
 ~/sentinelcam/camwatcher/YYYY-MM-DD/{EventID}_{type}.csv     # Tracking detail (with header)
-~/sentinelcam/images/YYYY-MM-DD/{EventID}_{Timestamp}.jpg    # Captured frames
+~/sentinelcam/images/YYYY-MM-DD/{EventID}_{Timestamp}.jpg    # Captured scene frames
+~/sentinelcam/crops/YYYY-MM-DD/{EventID}_{ObjID}_{Seqnum}_{Class}_{Phase}.jpg  # OAK hi-res crops
 ```
 
 **Event index columns**: node, viewname, timestamp, event (UUID), width, height, type
 
-**Tracking detail columns**: timestamp, objid, classname, rect_x1, rect_y1, rect_x2, rect_y2
+**Tracking detail columns** (`trk`): timestamp, objid, classname, rect_x1, rect_y1, rect_x2, rect_y2
 
-Event data is always scoped by date. No cross-date indexing. All identifiers are UUIDs. Multiple tracking types per event are supported (e.g., `trk` from Outpost, `fd1` from Sentinel face detection).
+**Crop correlation columns** (`crp`): timestamp, objid, seqnum, detidx, classname, phase — correlation key only, no geometry (the crop's bbox is reached via the `trk` record for the same objid).
+
+Event data is always scoped by date. No cross-date indexing. All identifiers are UUIDs. Multiple tracking types per event are supported (e.g., `trk` from Outpost, `crp` crop-correlation from Outpost, `fd1` face detection / `vsp` VASCAR speed from Sentinel). The crop filename `{EventID}_{ObjID}_{Seqnum}_{Class}_{Phase}` *is* the addressable key DataPump dereferences (`get_crop_jpg`), collision-free under one-crop-per-(objid, seqnum). Join chain: crop JPEG →(event, objid, seqnum)→ `crp` record →(objid, timestamp)→ `trk` geometry.
 
 ## Ansible Infrastructure
 
@@ -306,19 +317,20 @@ Current production nodes: 3 outposts (east, lab1/outpost, alpha5), 1 datasink (d
 ## Component Responsibilities
 
 ### Outpost (`outpost.py` → imagenode Detector)
-- Motion detection via MOG2 background subtraction within ROI — runs every frame in main pipeline
-- Publishes JPEG frames at 30 FPS via ImageZMQ PUB (:5567)
-- Publishes event logs via ZMQ PUB (:5565) — `ote`-prefixed JSON for tracking, `fps`-prefixed for heartbeat
-- SpyGlass child process for object detection/tracking (MobileNetSSD, YOLOv3, dlib/OpenCV trackers)
-- DepthAI OAK cameras provide on-camera MobileNetSSD at 30 FPS + hardware JPEG encoding
+- **Detection-driven event lifecycle** (both node types): a persistent host-side tracker (`docs/TRACKING_ARCHITECTURE.md`) consumes the detection stream and drives event start/`trk`/end. Motion is no longer the event driver — it is demoted to an NN *scheduler* on picamera, and absent on OAK (`motion_detector: none`). A motion-only outpost is a reserved edge case.
+- Publishes JPEG scene frames at 30 FPS via ImageZMQ PUB (:5567)
+- Publishes event logs via ZMQ PUB (:5565) — `ote`-prefixed JSON (`trk` tracking, `crp` crop-correlation), `fps`-prefixed for heartbeat
+- **OAK (DepthAI v3)**: on-device MobileNetSSD every frame + three streams — scene JPEG, detection metadata, and class-specific hi-res crops from a single on-device `ImageManip`. A drain thread feeds the tracker, event manager, and `EventSampler` (phase-based crop selection); selected crops publish on a dedicated ImageZMQ socket + a `crp` log record, and go to SpyGlass for edge inference.
+- **picamera**: SpyGlass returns raw `Detection`s (motion-gated NN); the detector feeds them to the same tracker. SpyGlass is now an edge-inference engine, not a scene/correlation tracker — the legacy `Lens_*` cascade and correlation trackers were removed.
 - `interesting_objects` config controls which detections trigger events and sentinel tasks
 - `sentinel_tasks` config maps object classes to sentinel task names submitted post-event
 - Heartbeat every 5 minutes: `fps(tick_count, looks, events, tick_rate, measured_fps)`
 
 ### CamWatcher (`camwatcher.py`)
 - Main async event loop: `asyncio.gather(control_loop, process_logs, alert_sender)`
-- `ImageStreamWriter` child process per outpost — subscribes to image publisher, writes JPEG files
-- `CSVwriter` I/O thread — writes tracking detail CSV from queue
+- `ImageStreamWriter` child process per outpost — subscribes to scene image publisher, writes JPEG files
+- `CropStreamWriter` child process per crop-publishing (OAK) outpost — always-resident; subscribes to the crop socket, names files from the sidecar, stores under `crops/`. Originates the `crp` index row on first crop seen
+- `CSVwriter` I/O thread — writes tracking detail CSV from queue, with per-type schema dispatch (`trk` geometry vs `crp` correlation-key-only)
 - `CSVindex` child process — single point of control for event index mutations (prevents corruption)
 - `SentinelAgent` child process — subscribes to sentinel log publisher, captures task results to CSV
 - Post-event: automatically submits sentinel tasks based on outpost `sentinel_tasks` config
@@ -327,10 +339,10 @@ Current production nodes: 3 outposts (east, lab1/outpost, alpha5), 1 datasink (d
 
 ### DataPump (`datapump.py`)
 - REQ/REP server on :5556, subclass of `imagezmq.ImageHub`
-- Serves: `get_date_index()`, `get_tracking_data()`, `get_image_list()`, `get_image_jpg()`
+- Serves: `get_date_index()`, `get_tracking_data()` (any type, incl. `crp`/`vsp`), `get_image_list()`, `get_image_jpg()`, `get_crop_jpg()`, `get_storage_report()`
 - Returns pandas DataFrames (pickled), timestamp lists, JPEG buffers
 - FaceList integration for face data management
-- To be extended: storage analysis, cleanup reporting, capacity monitoring
+- Storage report served from a nightly pre-computed pickle (`storage_analysis.py`, run on the datasink)
 
 ### DataFeed (`datafeed.py`)
 - Client library, subclass of `imagezmq.ImageSender`. Used by Sentinel TaskEngines and Watchtower
@@ -352,8 +364,9 @@ Current production nodes: 3 outposts (east, lab1/outpost, alpha5), 1 datasink (d
 - Tkinter kiosk app designed for Pi 7" touchscreen (800×480)
 - Player subsystem: `PlayerDaemon` child process for image decoding, ring buffer, frame display
 - Subscribes to sentinel log publishing — auto-updates display on new events with inference overlays
+- Selected-crop overlay (`crop_overlay.py`): a centered crop card (vehicle-first by speed) raised on replay pause, replay-end, and new-event arrival — also the outpost-list event thumbnail. Fail-soft fallback to the sample-frame representation
 - Event history browser by outpost view and hourly time slot
-- System health and status display, monitoring, and reporting
+- System health and status display (incl. crop-publishing counts); the storage report is reached via the DataPump health tile
 - Video export: stitches multi-segment events into MP4 with bounding box overlays, uploads to VPS via SCP
 - Motion calibration tool: live parameter tuning with real-time visual feedback
 - State machine: STARTING → LOADING → READY → PLAYING → PAUSED → IDLE, with DaemonState coordination
@@ -371,11 +384,11 @@ Current production nodes: 3 outposts (east, lab1/outpost, alpha5), 1 datasink (d
 
 ## Current Development Focus
 
-- Person re-identification pipeline refinement
-- Vehicle re-identification pipeline construction
-- Outpost and Spyglass refactoring, exploiting hi-res crops via the DepthAI pipeline
+- **Vehicle re-identification first** — the crop pipeline (Phases 5/6) is the shared substrate; the data-rich east street camera pressure-tests it. `vsp` speed is now bound to the persistent `tid` (the identity-join pattern re-ID reuses)
+- Person re-identification — feeding `GetFaces`/`FaceRecon` from source-resolution crops (Phase 6.3-6.5), building the embedding gallery
 - Multiple simultaneous result sets from parallel neural nets
 - Librarian as centralized knowledge/state repository
+- The OAK outpost redesign and crop pipeline are **landed** (see `docs/TRACKING_ARCHITECTURE.md`); downstream re-ID ML is the active frontier
 
 ## Anti-Patterns — Avoid These
 

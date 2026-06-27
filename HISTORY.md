@@ -31,6 +31,101 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## 0.3.0-alpha - 2026-06-27
+
+The headline of this release is the **OAK outpost redesign** and the **high-resolution
+crop pipeline** it establishes — a ground-truth capture path for person and vehicle
+re-identification — followed by a Watchtower/health "operational readout" layer that makes
+the new crop data visible and operable. See `docs/TRACKING_ARCHITECTURE.md` for the tracking
+& event-management architecture overview.
+
+### Added
+
+- **Unified, detection-driven outpost lifecycle (OAK and picamera).** A persistent
+  host-side tracker now drives event start/stop on both node types from the detection
+  stream; only the detection source differs (OAK device NN every frame; picamera SpyGlass
+  NN, motion-gated). Motion is demoted to an NN *scheduler* on picamera and absent entirely
+  on OAK (`motion_detector: none`). A motion-only outpost remains a reserved edge case. The
+  tracker, event manager, and EventSampler run in-process on a single drain thread; the only
+  cross-process image handoff (selected crop → SpyGlass) reuses the proven `LensTasking`
+  single-frame buffer — no new shared-memory ring buffer was introduced.
+
+- **DepthAI v3 pipeline producing three output streams from OAK cameras.** A reduced-
+  resolution 30 FPS JPEG scene stream for viewing/publishing, MobileNet-SSD detection
+  metadata for tracking, and class-specific high-resolution crops produced on-device through
+  a single `ImageManip` with per-config output sizing. Per-class device-side gating (throttle,
+  pre/post-pad edge guards, area gate) and a host-side `EventSampler` with pluggable phase
+  strategy (entry / centre / far) select ~3 well-framed crops per traversal. Five hard-won
+  device-pipeline design rules are encoded in source comments at `oak_camera.py`. Requires
+  `depthai>=3.5`, now pinned fleet-wide; OAK NN models deploy as NN-Archive format via the
+  model registry.
+
+- **High-resolution crop pipeline, end to end.** The outpost publishes crops on a dedicated
+  ImageZMQ socket (self-identifying via a sidecar) plus a new `crp` correlation record on the
+  OTE log stream. **CamWatcher** gained a resident `CropStreamWriter` (per crop-publishing
+  node) that stores crops under `~/sentinelcam/crops/YYYY-MM-DD/` keyed by
+  `{EventID}_{ObjID}_{Seqnum}_{Class}_{Phase}.jpg`, per-type CSV schema dispatch for the
+  bbox-less `crp` records, and a CamWatcher-originated `crp` index row. **DataPump** serves
+  crops via a new `get_crop_jpg(date, event, objid, seqnum, classname, phase)` request; crop
+  *data*/*list* reuse the existing `get_tracking_data(..., 'crp')` path. Event deletion now
+  purges the associated crop JPEGs.
+
+- **Selected-crop kiosk overlay (Watchtower).** A new `crop_overlay.py` selects the most
+  representative crop for an event — vehicle-first by VASCAR speed, otherwise the most-cropped
+  subject — and composites it as an enlarged centered card over a dimmed scene with a label.
+  It is raised on event-replay **pause**, on **replay completion**, and on a **new-event
+  arrival** (replacing the previous sample-frame thumbnail in the outpost list and the
+  live-display push). Fully additive and fail-soft: events with no usable crop fall back to
+  the prior sample-frame representation.
+
+- **Storage report crop visibility.** The nightly `storage_analysis` job now scans the
+  `crops/` tree and reports `crop_count`/`crop_bytes` per view and in the disk totals; the
+  Watchtower storage report surfaces crops in the SentinelCam breakdown and per-view bars.
+
+- **Crop-publishing health.** The ramrod health observer surfaces per-OAK-node
+  `crops_written` vs `crp_records` reconciliation counters into the SYSHEALTH report, and the
+  Watchtower system-health page renders a crop count on the outpost card (with a delta when
+  the two planes diverge — a glanceable pair-failure signal).
+
+### Changed
+
+- **VehicleSpeed now keys on the persistent HostTracker identity.** The task groups vehicle
+  detections by the `trk` objid (the persistent tid resolved upstream at the outpost) and
+  walks each vehicle's trajectory, rather than re-associating detections with its own
+  in-task centroid tracker. Result: `vsp.objid == trk.objid == crp.objid` — the identity
+  join the re-ID pipeline is built on. The replay overlay label is now speed-only
+  (direction dropped — it is recoverable from the bbox trajectory).
+
+- **Storage report relocated** from the buried "tools" settings page to the System Health
+  page, reached via the DataPump tile.
+
+- **Outpost confidence floor.** A tracker birth-gate (`min_confidence_new: 0.60`) eliminates
+  low-confidence detection flicker (validated on the east street camera).
+
+### Fixed
+
+- **VehicleSpeed label swaps and parked-car attribution bleed** — eliminated at the source by
+  keying on the persistent tid instead of re-tracking identity from scratch.
+- **Crop ImageManip config lag** — the on-device crop manip applied the previous emit's
+  config (wrong geometry under multi-subject coexistence); fixed with one-config-per-image on
+  `inputConfig` (device-pipeline Rule 5).
+- **Bastion WireGuard clock deadlock after power loss** — the tunnel could not recover when the
+  RTC-less bastion's clock reset to the past and the VPS dropped handshakes as replays; fixed
+  with chrony-via-VPS, waitsync, and a watchdog self-heal.
+- **Watchtower replay/export overlays** now skip non-geometry tracking types (e.g. `crp`),
+  which previously crashed the per-frame overlay render with NaN rects.
+- **Dangling `deploy-ramrod.yaml` reference** in the deployment config repointed at the real
+  (config-only) `configure-ramrod.yaml`; ramrod code ships by rsync, not a playbook.
+
+### Removed
+
+- **Legacy correlation-tracking cascade** on the outpost — the `Lens_DETECT/TRACK/REDETECT/RESET`
+  cascade, dlib/OpenCV correlation trackers, SpyGlass scene-management surface, `skip_factor`,
+  the Active/Quiet/Inactive state machine, and the 15-second kill switch. Replaced by the
+  unified tracker-driven lifecycle and a structured `Detection` contract shared by the OAK and
+  picamera intakes.
+
+
 ## 0.2.8-alpha - 2026-05-25
 
 ### Added
