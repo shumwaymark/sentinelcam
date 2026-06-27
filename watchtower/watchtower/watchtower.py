@@ -451,9 +451,9 @@ class Player:
         self.paused = threading.Event()
         self.event_aggregator = EventAggregator()
         self.crop_selector = CropSelector()
-        self._event_ctx = None       # (date, event, datapump) while replaying an event
-        self._crop_overlay = None    # cached SelectedCrop (or False = none) per event
-        self._overlay_shown = False  # overlay already composited for this pause/EOF
+        self._event_ctx = None              # (date, event, datapump) while replaying an event
+        self._crop_overlay = None           # cached SelectedCrop (or False = none) per event
+        self._overlay_request = threading.Event()  # set by a genuine pause/EOF, not by load
         self.fps = FPS()
         self.datafeeds = {}
         self.datafeed = None
@@ -512,6 +512,15 @@ class Player:
         self.set_imgdata(render_centered_card(base_image, self._crop_overlay))
         return True
 
+    def request_overlay(self) -> None:
+        """Request the selected-crop overlay on the next paused cycle (§7.1).
+
+        Called by the state manager on a genuine user pause; the player thread
+        sets it directly at EOF. The slow DataFeed selection stays on the player
+        thread (ZMQ sockets are not thread-safe) — this only flips a flag.
+        """
+        self._overlay_request.set()
+
     def _playerThread(self, dataReady, source_queue) -> None:
         self.paused.set()
         image = blank_image(1,1)
@@ -529,7 +538,7 @@ class Player:
             forward = True
             # Reset the selected-crop overlay state for the new source (§7.1)
             self._crop_overlay = None
-            self._overlay_shown = False
+            self._overlay_request.clear()
             self._event_ctx = None
             if cmd[0] == PlayerCommand.EVENT:
                 (view, date, event, size) = cmd[2:]
@@ -558,12 +567,15 @@ class Player:
 
             while source_queue.empty():
                 if self.paused.is_set():
-                    # On pause during an event, raise the selected-crop overlay once (§7.1)
-                    if cmd[0] == PlayerCommand.EVENT and not self._overlay_shown:
-                        self._overlay_shown = True
-                        if self._render_crop_overlay(self.get_imgdata()):
-                            dataReady.set()
+                    # Release stop() promptly, THEN honor an overlay request (§7.1).
+                    # Selection (DataFeed round-trips) runs here on the player thread,
+                    # after idle.set() so it never stalls the pausing caller's wait.
                     self.idle.set()
+                    if self._overlay_request.is_set():
+                        self._overlay_request.clear()
+                        if cmd[0] == PlayerCommand.EVENT and \
+                                self._render_crop_overlay(self.get_imgdata()):
+                            dataReady.set()
                     sleep(0.01)
                 else:
                     if dataReady.is_set():
@@ -619,11 +631,10 @@ class Player:
                                 self.last_frame = datetime.now()
 
                             else:
-                                # End of event — raise the selected-crop overlay (§7.1)
-                                if cmd[0] == PlayerCommand.EVENT and not self._overlay_shown:
-                                    self._overlay_shown = True
-                                    if self._render_crop_overlay(self.get_imgdata()):
-                                        dataReady.set()
+                                # End of event — request the selected-crop overlay (§7.1);
+                                # the paused branch below renders it once paused.
+                                if cmd[0] == PlayerCommand.EVENT:
+                                    self._overlay_request.set()
                                 self.state_manager.request_transition(StateChange.EOF, "PlayerThread")
                                 self.paused.set()
                                 frameidx = 0
@@ -645,7 +656,7 @@ class Player:
         self.last_frame = datetime.now()
         self.paused.clear()
         self.idle.clear()
-        self._overlay_shown = False  # allow the overlay to re-raise on the next pause/EOF (§7.1)
+        self._overlay_request.clear()  # drop any stale overlay request on resume (§7.1)
         self.fps.reset()
 
 class PlayerStateManager:
@@ -722,6 +733,10 @@ class PlayerStateManager:
                         if self.current_state == PlayerState.ERROR:
                             new_state = PlayerState.ERROR
                         elif self.current_state == PlayerState.PLAYING:
+                            # Genuine user pause — request the selected-crop overlay (§7.1).
+                            # Set before stop() so the first paused cycle renders it.
+                            if self.player_command[0] == PlayerCommand.EVENT:
+                                self.app.viewer.request_overlay()
                             self.app.viewer.stop()
                             self.app.player_daemon.stop()
                             self.app.move_next = False
