@@ -135,6 +135,62 @@ flowchart LR
 
 ---
 
+## 4. The OAK capture pipeline — three streams
+
+Section 3 covered how detections reach the tracker. This is the wider data-plane view on an
+OAK node: the device produces three streams in parallel, the host routes each to where it
+belongs, and the crop stream is the high-resolution ground truth the re-identification
+pipeline is built on (the detail a plain camera cannot provide).
+
+```mermaid
+flowchart LR
+    subgraph DEV["OAK camera — DepthAI VPU (on-device)"]
+        CAM["camera sensor"]
+        NN["MobileNet-SSD<br/>detection every frame"]
+        ENC["VideoEncoder<br/>reduced-res scene JPEG"]
+        MANIP["Script + ImageManip<br/>hi-res class-specific crops"]
+        CAM --> NN
+        CAM --> ENC
+        CAM --> MANIP
+    end
+
+    subgraph HOST["Outpost host — Raspberry Pi"]
+        TRK["HostTracker<br/>+ EventManager"]
+        SAMP["EventSampler<br/>phase selection (~3 / traversal)"]
+        SG["SpyGlass<br/>edge inference"]
+    end
+
+    NN -->|detections| TRK
+    TRK -->|"ote: trk / crp"| LOG([log PUB :5565])
+    ENC -->|30 FPS scene| SCN([scene PUB :5567])
+    MANIP --> SAMP
+    SAMP -->|selected crops| CRPUB([crop PUB :5568])
+    SAMP --> SG
+
+    subgraph SINK["Data sink — CamWatcher / DataPump"]
+        IMG[("images/")]
+        CRP[("crops/")]
+        DP["DataPump"]
+    end
+
+    SCN --> IMG
+    CRPUB --> CRP
+    CRP --> DP
+    DP -->|hi-res crops| REID["Sentinel<br/>re-identification"]
+```
+
+- The **scene stream** (reduced resolution, hardware-JPEG) drives live viewing and replay,
+  and is stored by CamWatcher under `images/`.
+- The **detection stream** feeds the source-agnostic tracker (section 3) and the `trk` /
+  `crp` records on the `ote` log.
+- The **crop stream** is the new capability: high-resolution, class-specific crops cut
+  on-device, sampled by phase, stored under `crops/`, and served by DataPump to the
+  Sentinel for re-identification — with selected crops also inspected close to the source by
+  the `SpyGlass`. A picamera node runs the same lifecycle but produces only the scene and
+  detection streams.
+
+---
+
 ## Where this lives in the code
 
 | Concept | Implementation |
@@ -142,9 +198,10 @@ flowchart LR
 | State machine, tracks, transitions | `imagenode/.../hosttracker.py` (`HostTracker`) |
 | Event open/close, `ote` records | `imagenode/.../eventmanager.py` (`EventManager`) |
 | OAK detection feed (device drain) | `imagenode/.../outpost_intake.py` (`OutpostIntake`) |
+| OAK device pipeline (scene / detections / crops) + crop selection | `imagenode/.../oak_camera.py`, `imagenode/.../eventsampler.py`; device setups in `depthai.yaml` |
 | picamera feed (motion-scheduled observe/tick) | `imagenode/.../picamera_intake.py` (`PicameraIntake`) |
 | Per-camera thresholds | each node's `host_vars` `detector.tracker` block — field reference + tuning guidance in [OUTPOST_CONFIGURATION.md](OUTPOST_CONFIGURATION.md) |
 
-> **Diagram sources.** Panels 2 and 3 are Mermaid (rendered inline). The lifecycle
+> **Diagram sources.** Panels 2, 3, and 4 are Mermaid (rendered inline). The lifecycle
 > timeline (panel 1) is kept as ASCII here; if a polished render is wanted it can be
 > promoted to an SVG/PNG in `docs/images/` alongside the other architecture figures.

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="760" height="300" rx="10" fill="#fbfbfd" stroke="#e5e7eb"/>
+  <text x="380" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#1a1a1a">OAK outpost &#8212; three on-device streams</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9aa3ad"/>
+    </marker>
+  </defs>
+
+  <!-- camera -->
+  <rect x="40" y="120" width="170" height="80" rx="8" fill="#2E86AB"/>
+  <text x="125" y="153" text-anchor="middle" font-size="16" font-weight="bold" fill="#ffffff">OAK camera</text>
+  <text x="125" y="175" text-anchor="middle" font-size="12" fill="#dbeefa">on-device NN &#183; VPU</text>
+
+  <!-- flows -->
+  <path d="M210,150 C320,150 350,78 466,78" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M210,160 L466,160" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M210,170 C320,170 350,242 466,242" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- destinations -->
+  <rect x="476" y="50" width="250" height="56" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="492" y="78" font-size="14" font-weight="bold" fill="#1a1a1a">Scene JPEG</text>
+  <text x="492" y="96" font-size="12" fill="#555555">30 FPS &#183; live view &amp; replay</text>
+
+  <rect x="476" y="132" width="250" height="56" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="492" y="160" font-size="14" font-weight="bold" fill="#1a1a1a">Detections</text>
+  <text x="492" y="178" font-size="12" fill="#555555">tracking &amp; events</text>
+
+  <rect x="476" y="214" width="250" height="56" rx="8" fill="#ffffff" stroke="#A23B72" stroke-width="2"/>
+  <text x="492" y="242" font-size="14" font-weight="bold" fill="#A23B72">Hi-res crops</text>
+  <text x="492" y="260" font-size="12" fill="#555555">re-identification</text>
+</svg>

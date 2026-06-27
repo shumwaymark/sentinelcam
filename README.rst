@@ -614,13 +614,12 @@ supplemental edge inference while an event is in progress (face or attribute ext
 source), without engaging the **sentinel**. The result is a remarkable amount of analytical
 performance on an embedded, low-voltage edge device.
 
-.. TODO: new diagram — the OAK three-stream pipeline (detections / scene JPEG / hi-res crops) and how the crops flow to storage + re-ID
+.. image:: docs/images/OAKpipeline.svg
+   :alt: OAK outpost — three on-device streams: scene JPEG, detections, and hi-res crops
 
-The pipeline definition can be found in
-`imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
-See `depthai.yaml <depthai.yaml>`_ for the setups, and
-`Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_ for how the crops flow
-through capture, storage, and analysis.
+See `Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_ for the full
+pipeline — how detections, the scene stream, and the high-resolution crops flow through capture,
+storage, and analysis.
 
 Additional documentation
 ========================
