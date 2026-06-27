@@ -34,6 +34,7 @@ from calendar_page import CalendarPage
 from storage_page import StoragePage
 from health_page import SystemHealthPage
 from sentinel_page import SentinelPerformancePage
+from crop_overlay import CropSelector, render_centered_card
 from heart_icon import HeartIcon
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "watchtower.yaml"))
@@ -449,6 +450,10 @@ class Player:
         self.idle = threading.Event()
         self.paused = threading.Event()
         self.event_aggregator = EventAggregator()
+        self.crop_selector = CropSelector()
+        self._event_ctx = None       # (date, event, datapump) while replaying an event
+        self._crop_overlay = None    # cached SelectedCrop (or False = none) per event
+        self._overlay_shown = False  # overlay already composited for this pause/EOF
         self.fps = FPS()
         self.datafeeds = {}
         self.datafeed = None
@@ -488,6 +493,25 @@ class Player:
     def get_imgdata(self) -> np.ndarray:
         return (self.image)
 
+    def _render_crop_overlay(self, base_image) -> bool:
+        """Composite the event's selected-crop card over base_image and display it.
+
+        Selection is computed once per event and cached (False = no usable crop).
+        Reuses the EventAggregator's DataFeed for the event's datapump. Returns
+        True if an overlay was shown. Never raises — selection/render already
+        fail soft, so a data shortfall just leaves the last frame as-is.
+        """
+        if self._event_ctx is None:
+            return False
+        date, event, datapump = self._event_ctx
+        if self._crop_overlay is None:
+            feed = self.event_aggregator._setPump(datapump)
+            self._crop_overlay = self.crop_selector.select(feed, date, event) or False
+        if not self._crop_overlay:
+            return False
+        self.set_imgdata(render_centered_card(base_image, self._crop_overlay))
+        return True
+
     def _playerThread(self, dataReady, source_queue) -> None:
         self.paused.set()
         image = blank_image(1,1)
@@ -503,8 +527,13 @@ class Player:
             frametimes = []
             frameidx = 0
             forward = True
+            # Reset the selected-crop overlay state for the new source (§7.1)
+            self._crop_overlay = None
+            self._overlay_shown = False
+            self._event_ctx = None
             if cmd[0] == PlayerCommand.EVENT:
                 (view, date, event, size) = cmd[2:]
+                self._event_ctx = (date, event, cmd[1])  # cmd[1] = datapump
                 # For events, retrieve all tracking data and the list of image timestamps. First,
                 # apply a blur effect to the player display as visible feedback to the button press.
                 self.set_imgdata(cv2.blur(image, (15, 15)))
@@ -529,6 +558,11 @@ class Player:
 
             while source_queue.empty():
                 if self.paused.is_set():
+                    # On pause during an event, raise the selected-crop overlay once (§7.1)
+                    if cmd[0] == PlayerCommand.EVENT and not self._overlay_shown:
+                        self._overlay_shown = True
+                        if self._render_crop_overlay(self.get_imgdata()):
+                            dataReady.set()
                     self.idle.set()
                     sleep(0.01)
                 else:
@@ -585,6 +619,11 @@ class Player:
                                 self.last_frame = datetime.now()
 
                             else:
+                                # End of event — raise the selected-crop overlay (§7.1)
+                                if cmd[0] == PlayerCommand.EVENT and not self._overlay_shown:
+                                    self._overlay_shown = True
+                                    if self._render_crop_overlay(self.get_imgdata()):
+                                        dataReady.set()
                                 self.state_manager.request_transition(StateChange.EOF, "PlayerThread")
                                 self.paused.set()
                                 frameidx = 0
@@ -606,6 +645,7 @@ class Player:
         self.last_frame = datetime.now()
         self.paused.clear()
         self.idle.clear()
+        self._overlay_shown = False  # allow the overlay to re-raise on the next pause/EOF (§7.1)
         self.fps.reset()
 
 class PlayerStateManager:

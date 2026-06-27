@@ -28,6 +28,8 @@ License: MIT, see the sentinelcam LICENSE for more details.
 
 import logging
 
+import numpy as np
+
 logger = logging.getLogger("watchtower.crop_overlay")
 
 # Phase preference when more than one crop exists for the chosen subject — the
@@ -172,3 +174,64 @@ class CropSelector:
             return feed.get_tracking_data(date, event, trktype)
         except Exception:
             return None
+
+
+def render_centered_card(scene, selected, dim=0.35, max_w_frac=0.72, max_h_frac=0.62):
+    """Composite the selected crop as a centered card over a dimmed scene (§7.1).
+
+    The chosen kiosk presentation: the scene dims to a backdrop and the high-res
+    crop is shown enlarged and centered with a label caption — the crop is the
+    "this just happened" payoff, the scene is context. The subject's bbox is
+    drawn subtly on the backdrop for a "where in the scene" cue.
+
+    Returns a NEW BGR image — the scene is copied, never modified in place (the
+    caller's frame may be a view into a shared ring buffer). On any decode
+    failure the original scene is returned unchanged so playback is undisturbed.
+    """
+    import cv2
+    import simplejpeg
+    try:
+        crop = simplejpeg.decode_jpeg(selected.jpg, colorspace='BGR')
+    except Exception as e:
+        logger.warning(f"Crop decode failed for overlay: {e}")
+        return scene
+
+    H, W = scene.shape[:2]
+    out = scene.copy()
+
+    # Dim the scene to a backdrop (out *= dim)
+    cv2.addWeighted(out, dim, np.zeros_like(out), 1.0 - dim, 0, out)
+
+    # Subtle subject bbox on the backdrop, for "where in the scene" context
+    if selected.bbox is not None:
+        x1, y1, x2, y2 = selected.bbox
+        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), 1, cv2.LINE_AA)
+
+    # Scale the crop to fit a centered box, preserving aspect
+    ch, cw = crop.shape[:2]
+    scale = min((W * max_w_frac) / cw, (H * max_h_frac) / ch)
+    sw, sh = max(1, int(cw * scale)), max(1, int(ch * scale))
+    crop = cv2.resize(crop, (sw, sh), interpolation=cv2.INTER_AREA)
+    x0, y0 = (W - sw) // 2, (H - sh) // 2
+    out[y0:y0 + sh, x0:x0 + sw] = crop
+
+    # White card border
+    cv2.rectangle(out, (x0 - 2, y0 - 2), (x0 + sw + 1, y0 + sh + 1),
+                  (255, 255, 255), 2)
+
+    # Caption banner along the bottom of the card
+    label = selected.label or selected.classname
+    if label:
+        font, fscale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
+        (tw, th), base = cv2.getTextSize(label, font, fscale, thick)
+        bh = th + base + 16
+        by1 = max(y0, y0 + sh - bh)
+        band = out.copy()
+        cv2.rectangle(band, (x0, by1), (x0 + sw, y0 + sh), (0, 0, 0), -1)
+        cv2.addWeighted(band, 0.55, out, 0.45, 0, out)
+        tx = x0 + max(0, (sw - tw) // 2)
+        ty = y0 + sh - (bh - th) // 2
+        cv2.putText(out, label, (tx, ty), font, fscale,
+                    (255, 255, 255), thick, cv2.LINE_AA)
+
+    return out
