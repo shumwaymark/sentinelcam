@@ -232,9 +232,11 @@ header row included in the data.
   height, int, height of captured images
   type, str, tracking result type
 
-Event detail files always include a header row, with potentially varying data structures depending
-on the type of result data. The following record description is currently used by all event tracking
-result sets. The naming convention for these detail files is: ``EventID_TypeCode.csv``
+Event detail files always include a header row, with the data structure varying by the type of result
+data. Most tracking result sets share the geometry-bearing record described below; some carry a
+type-specific schema instead — for example, crop-correlation records reference a subject and frame
+without a bounding box of their own. The naming convention for these detail files is:
+``EventID_TypeCode.csv``
 
 .. csv-table:: Tracking Event Detail
   :header: "Name", "Type", "Description"
