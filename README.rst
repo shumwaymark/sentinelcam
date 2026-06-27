@@ -98,10 +98,12 @@ the paths leading towards the inner fortifications. Sentries are tasked with obs
 and reporting anything of interest or concern. Such reports should be sent back to central command
 for analysis and decision making.
 
-This analogy represents the underlying concept behind the ``Outpost`` design. Each node monitors the
-field of view, watching for motion. Once motion has occurred a ``SpyGlass`` is deployed for a closer
-look. Whenever one or more recognizable objects have been detected, this is reported and motion through
-the field of view tracked and logged.
+This analogy represents the underlying concept behind the ``Outpost`` design. Each node watches its
+field of view and reports what it sees. When a recognizable subject appears, the node follows it —
+tracking each subject as a distinct identity and reporting its *behavior* through the scene (arrival,
+movement, lingering, departure) as an event. A ``SpyGlass`` can be deployed for a closer look at
+selected frames. The node observes and routes; the heavier analysis is delegated back to central
+command.
 
 The ``Outpost`` is implemented as a ``Detector`` for an **imagenode** camera. This allows it to easily
 slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as supplemental functionality.
@@ -132,49 +134,49 @@ Obtaining this goal on a Raspberry Pi can quickly become a significant challenge
 the pipeline with CPU-intensive tasks such as object identification and tracking.
 
 To achieve the highest publishing frame rate possible, an ``Outpost`` node can employ a ``SpyGlass``
-for closer analysis of motion events. The idea is to keep the pipeline lean for quickly publishing
-each frame, while processing a subset of the images in parallel to drive a feedback loop.
-This is a multiprocessing solution.
+for closer analysis of selected frames. The idea is to keep the main pipeline lean for quickly
+publishing each frame, while heavier per-subject inference runs in parallel. This is a
+multiprocessing solution.
 
-  **Status**: stable working prototype.
-
-The following general strategy provides an overview of this technique.
-
-- Motion detection is applied continually whenever there is nothing of interest within the field
-  of view. This is a relatively quick background subtraction model which easily runs within the main
-  image processing pipeline.
-- A motion event within a region of interest triggers the application of an object identification lens to the spyglass.
-- Each object of interest is logged for tracking.
-- With objects of interest in view, additional lenses may be selected and applied to subsequent frames
-  whenever the spyglass is not already busy.
-- The newest image passing through the pipeline is only provided to the spyglass after results
-  from the prior task have been returned. This signals its availability for new work.
+  **Status**: the tracker-driven lifecycle described below is deployed across the camera fleet.
 
 .. image:: docs/images/SpyGlass.png
    :alt: Outpost to Spyglass inter-process marshalling
 
-This architecture potentially allows for increasingly sophisticated vision analysis models to be
-deployed directly on an ``Outpost`` node. Specialized lenses could be developed for the ``SpyGlass``
-based on the type of event and results from current analysis. The intent is to support the design
-of a cascading algorithm to first inspect, then analyze a subset of selected frames and regions of
-interest as efficiently as possible on multi-core hardware.
+Tracking and event management are handled by a persistent, *source-agnostic* host-side tracker shared
+by every camera node. Rather than reacting to raw motion, the tracker follows each subject as a distinct
+identity and drives events from *behavior* — a subject arriving, crossing the field of view, lingering,
+or departing. Motion is no longer the trigger; it is demoted to a scheduler that decides which frames
+are worth an inference. The same lifecycle runs on every node type — only the source of detections differs.
 
-For example, if a person was detected, is there a face in view? If so, can it be recognized? Was it
-package delivery or a postal carrier? If the object of interest is a vehicle, can the make/model be
-determined? The color? Is there a license plate visible?
+The guiding division of labor: **the Outpost collects and routes; the sentinel thinks.** Each node keeps
+its main pipeline lean enough to publish near 30 frames per second, runs only lightweight per-frame work
+— tracking, event management, selective capture of frames and regions, and optional edge inference on a
+``SpyGlass`` — and hands anything heavier to batch jobs running on the **sentinel** itself.
 
-As a general rule, in-depth analysis tasks such as these are assigned to batch jobs running on the
-**sentinel** itself.
+This division is also what makes the design *commodity-first* without capping its ceiling. A plain
+Raspberry Pi with a standard camera is the on-ramp — accessible, no exotic dependencies, no lock-in —
+and runs the full lifecycle on CPU alone. It works, though CPU-bound inference is modest and
+motion-gated. On better hardware the system becomes what it was imagined to be. A Luxonis OAK camera
+(DepthAI VPU) runs object detection on-device every frame at full rate and hands the Pi's CPU back —
+but the real transformation is *what it can now capture*. Beyond the reduced-resolution scene stream
+used for viewing, the camera produces **high-resolution, class-specific crops taken straight from the
+sensor**, at a fidelity the published frames never carry. Those crops are the ground-truth imagery the
+entire re-identification effort stands on — the genuinely transformative capability here, not a mere
+speed-up. The architecture refuses to choose between the two worlds: the *same* source-agnostic
+lifecycle degrades gracefully down to the bookshelf Pi and scales up to the OAK, with accelerators
+such as an Intel NCS2 or Google Coral fitting in between.
 
-The ``Outpost`` as currently implemented is still considered experimental, and best represents proof
-of concept as an evolving work in progress. Further detail on the design, structure, and operation of
-the ``Outpost`` have been documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
+The closer-analysis ambition is unchanged. If a person is detected, is there a face in view, and can it
+be recognized? Was it a package delivery, or a postal carrier? If the subject is a vehicle, can the make,
+model, or color be determined? Is there a license plate visible? These in-depth questions are the work of
+the re-identification pipeline — the ``Outpost``'s job is to capture the ground-truth imagery that makes
+them answerable.
 
-The motion-driven, cascading-lens approach described above has since evolved. Tracking and event
-management are now handled by a persistent, *source-agnostic* host-side tracker shared by every camera
-node — events are driven by what a subject is doing (arrival, lingering, departure) rather than by raw
-motion, and motion is demoted to scheduling inferences. See
-`Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_ for the high-level concept.
+Further detail on the design, structure, and operation of the ``Outpost`` is documented in
+`Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_. The project's earlier
+motion-driven, cascading-lens lineage — the proof of concept this evolved from — is preserved in
+`YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
 
 Camwatcher design
 -----------------
@@ -591,29 +593,30 @@ expected/routine events and unexpected/new activity deserving of a closer look.
 Luxonis OAK cameras
 ...................
 
-Support for using an OAK camera from *Luxonis* as the primary data collection device has
-recently been incorporated into the ``Outpost``. These devices are an "AI-included" camera
-with an on-board VPU co-processor.
+The ``Outpost`` can use an OAK camera from *Luxonis* as its primary data collection device — an
+"AI-included" camera with an on-board VPU co-processor. Their **DepthAI**
+`software libraries <https://docs.luxonis.com/software>`_ provide for model upload and customizable
+on-device pipelines. The pipeline defined here produces three concurrent outputs, all at 30
+frames/second:
 
-their **DepthAI** `software libraries <https://docs.luxonis.com/software>`_
-provide for model upload and customizable pipelines. The prototype definition provided here
-produces the following outputs from the camera.
+1. **Object detection on every frame** (MobileNetSSD), feeding the host-side tracker directly — no CPU inference required on the Pi.
+2. **A reduced-resolution scene stream**, encoded to JPEG on the camera, for live viewing and publication to the **camwatcher**.
+3. **High-resolution, class-specific crops** cut on-device from the full-resolution sensor frame — the ground-truth imagery for re-identification, at a fidelity the published scene stream cannot carry.
 
-1. MobileNetSSD object detection on every frame
-2. The 640x360 RGB image data ready for OpenCV and passed into the **imagenode** pipeline as the main camera source
-3. The same image data encoded into JPEG, ready for publication to the **camwatcher**
+The first two outputs replace, in dedicated silicon, what a CPU-bound node otherwise does in software.
+The third is genuinely new capability — a plain camera cannot provide it, and it is the foundation
+under the whole re-identification direction. Selected crops are also handed to the ``SpyGlass`` for
+supplemental edge inference while an event is in progress (face or attribute extraction close to the
+source), without engaging the **sentinel**. The result is a remarkable amount of analytical
+performance on an embedded, low-voltage edge device.
 
-All 3 outputs are provided by the camera at 30 frames/second. The ``Outpost`` can easily consume this
-and publish complete object detection results and captured JPEG data for storage by the **camwatcher**.
+.. TODO: new diagram — the OAK three-stream pipeline (detections / scene JPEG / hi-res crops) and how the crops flow to storage + re-ID
 
-In a perfect world, the ``SpyGlass`` could also be deployed as a vehicle for specialized supplemental
-vision processing during a camera event in progress. There are several interesting possibilities.
-Further provisioning with a vision co-processor provides for an incredible amount of analytical
-performance directly on an embedded low-voltage edge device.
-
-The prototype pipeline definition can be found in
+The pipeline definition can be found in
 `imagenode/imagenode/sentinelcam/oak_camera.py <https://github.com/shumwaymark/imagenode/blob/master/imagenode/sentinelcam/oak_camera.py>`_.
-See the `depthai.yaml <depthai.yaml>`_ file for the setups.
+See `depthai.yaml <depthai.yaml>`_ for the setups, and
+`Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_ for how the crops flow
+through capture, storage, and analysis.
 
 Additional documentation
 ========================
@@ -645,7 +648,7 @@ technologies and libraries.
 - Google Coral USB Accelerator
 - TensorFlow Lite
 - MobileNetSSD
-- DepthAI
+- DepthAI v3
 - scikit-learn
 - NumPy
 - imageZMQ
