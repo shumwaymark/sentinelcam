@@ -113,7 +113,12 @@ components:
       - ramrod/
     required_files:
       - ramrod/ramrod_health.py
-    ansible_playbook: deploy-ramrod.yaml
+    # Ramrod code (ramrod_health.py) is deployed by rsync in
+    # sync-ramrod-from-datasink.sh, NOT by an ansible playbook. The playbook
+    # below is config-only (renders ramrod.yaml, run locally on buzz) and is
+    # advisory here — deploy.py only displays it, never runs it. There is no
+    # deploy-ramrod.yaml; the cron-run observer picks up new code on its next tick.
+    ansible_playbook: configure-ramrod.yaml
 
   - name: docs
     description: Documentation files
