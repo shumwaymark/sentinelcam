@@ -13,7 +13,6 @@ import time
 import imutils
 #import simplejpeg
 from collections import namedtuple
-from scipy.spatial import distance as dist
 from sentinelcam.utils import readConfig
 from sentinelcam.datafeed import DataFeed
 from sentinelcam.facedata import FaceBaselines, FaceList, FaceStats
@@ -668,12 +667,11 @@ class VehicleSpeed(Task):
         self.min_markers = cfg['min_markers']
         self.speed_calibration_factor = cfg.get('speed_calibration_factor', 1.0)
 
-        # Tracking parameters
-        self.centroid_max_distance = cfg['centroid_max_distance']
-
-        # Active vehicle trackers: dict[track_id] = VehicleTracker
+        # Per-vehicle trackers, keyed by the persistent HostTracker identity
+        # (the trk objid / tid). Identity is resolved upstream at the outpost —
+        # there is no in-task centroid re-association, which is what caused the
+        # opposite-direction label swaps and parked-car attribution bleed.
         self.trackers = {}
-        self.next_track_id = 1
         self.violation_count = 0
         self.tracking_records_published = 0
         self.vehicles_with_speed = 0
@@ -743,112 +741,70 @@ class VehicleSpeed(Task):
         return None
 
     def _publish_tracking_record(self, tracker, timestamp):
-        """Publish per-frame tracking records"""
-        x1, y1, x2, y2, classname = tracker.bbox
+        """Publish a per-frame vsp record once a speed estimate exists.
 
-        # Format direction for display
-        direction_str = None
-        if tracker.direction == 'LR':
-            direction_str = 'L-to-R'
-        elif tracker.direction == 'RL':
-            direction_str = 'R-to-L'
-
-        # Publish to vsp tracking type with classname field containing speed info
-        if tracker.current_speed is not None:
-            speed_label = f"{tracker.current_speed} mph: {direction_str}" if direction_str else f"{tracker.current_speed} mph"
-        else:
-            speed_label = f"{direction_str}" if direction_str else ""
-
-        if speed_label != "":
-            # Build a standard tracking type data record
-            result = (
-                speed_label,               # Vehicle speed and direction
-                tracker.track_id,          # Track ID
-                int(x1), int(y1),          # Bounding box
-                int(x2), int(y2)
-            )
-
-            # Look up frame offset from timestamp for proper camwatcher correlation
-            offset = self.timestamp_to_offset.get(timestamp, 0)
-            self.publish(result, self.refkey, self.cwUpd, offset_override=offset)
-            self.tracking_records_published += 1
-
-    def _update_trackers(self, detections, timestamp):
-        """Update vehicle trackers with new detections"""
-        # Extract centroids from current detections
-        current_centroids = []
-        current_boxes = []
-        for det in detections:
-            cx, cy = self._get_centroid(det.rect_x1, det.rect_y1, det.rect_x2, det.rect_y2)
-            if self._in_marker_zone(cy):
-                current_centroids.append((cx, cy))
-                current_boxes.append((det.rect_x1, det.rect_y1, det.rect_x2, det.rect_y2, det.classname))
-
-        # If no detections in marker zone this timestamp, skip
-        if len(current_centroids) == 0:
+        The classname field carries the speed only ("{mph} mph"). Direction is
+        intentionally omitted from the end-user label — it is recoverable from
+        the bbox trajectory in the dataframe if ever needed, and need not clutter
+        the replay overlay. objid is the persistent HostTracker tid, so
+        vsp.objid == trk.objid == crp.objid.
+        """
+        if tracker.current_speed is None:
             return
 
-        # Match detections to existing trackers
-        if len(self.trackers) == 0:
-            # No existing trackers, register all as new
-            for i, (cx, cy) in enumerate(current_centroids):
-                tracker = VehicleTracker(self.next_track_id, (cx, cy), current_boxes[i])
-                self.trackers[self.next_track_id] = tracker
-                self.next_track_id += 1
-                # Publish tracking record for this frame
-                self._publish_tracking_record(tracker, timestamp)
-        else:
-            # Match current detections to existing trackers
-            tracker_ids = list(self.trackers.keys())
-            tracker_centroids = [self.trackers[tid].centroid for tid in tracker_ids]
+        x1, y1, x2, y2, classname = tracker.bbox
+        result = (
+            f"{tracker.current_speed} mph",   # Vehicle speed (mph)
+            int(tracker.track_id),            # Persistent HostTracker tid
+            int(x1), int(y1),                 # Bounding box
+            int(x2), int(y2)
+        )
 
-            # Compute distance matrix
-            D = dist.cdist(np.array(tracker_centroids), np.array(current_centroids))
+        # Look up frame offset from timestamp for proper camwatcher correlation
+        offset = self.timestamp_to_offset.get(timestamp, 0)
+        self.publish(result, self.refkey, self.cwUpd, offset_override=offset)
+        self.tracking_records_published += 1
 
-            # Find minimum distance matches
-            rows = D.min(axis=1).argsort()
-            cols = D.argmin(axis=1)[rows]
+    def _process_vehicle(self, objid, rows):
+        """Process one vehicle's full trajectory, keyed by its persistent tid.
 
-            used_rows = set()
-            used_cols = set()
+        Walks the vehicle's detections in timestamp order, detecting marker
+        crossings between consecutive in-zone frames and refining the VASCAR
+        speed after each crossing. Identity is the outpost's persistent
+        HostTracker tid (the trk objid) — no centroid re-association, so two
+        vehicles can never swap identities and a passing vehicle can never bleed
+        onto a parked one.
+        """
+        tracker = VehicleTracker(objid, None, None)
+        prev_cx = None
+        for det in rows.sort_values('timestamp').itertuples():
+            cx, cy = self._get_centroid(det.rect_x1, det.rect_y1, det.rect_x2, det.rect_y2)
+            # Only consider detections at the marker line (road level)
+            if not self._in_marker_zone(cy):
+                continue
 
-            for (row, col) in zip(rows, cols):
-                if row in used_rows or col in used_cols:
-                    continue
-                if D[row, col] > self.centroid_max_distance:
-                    continue
+            tracker.update(
+                (cx, cy),
+                (det.rect_x1, det.rect_y1, det.rect_x2, det.rect_y2, det.classname)
+            )
 
-                # Update existing tracker
-                track_id = tracker_ids[row]
-                prev_cx = self.trackers[track_id].centroid[0]
-                curr_cx = current_centroids[col][0]
-
-                self.trackers[track_id].update(current_centroids[col], current_boxes[col])
-
-                # Check for marker crossings
+            # Marker crossings between this frame and the previous in-zone frame
+            if prev_cx is not None:
                 for i, marker_x in enumerate(self.marker_pixels):
-                    direction = self._check_marker_crossing(prev_cx, curr_cx, marker_x)
+                    direction = self._check_marker_crossing(prev_cx, cx, marker_x)
                     if direction:
-                        self.trackers[track_id].add_marker_crossing(i, direction, timestamp)
+                        tracker.add_marker_crossing(i, direction, det.timestamp)
                         # Recalculate speed after crossing marker
-                        self.trackers[track_id].recalculate_speed(
-                            self.marker_street_positions, self.min_markers, self.speed_calibration_factor
+                        tracker.recalculate_speed(
+                            self.marker_street_positions, self.min_markers,
+                            self.speed_calibration_factor
                         )
+            prev_cx = cx
 
-                # Publish tracking record for this frame
-                self._publish_tracking_record(self.trackers[track_id], timestamp)
+            # Publish per-frame record (no-op until a speed estimate exists)
+            self._publish_tracking_record(tracker, det.timestamp)
 
-                used_rows.add(row)
-                used_cols.add(col)
-
-            # Register new trackers for unused detections (new vehicles entering scene)
-            unused_cols = set(range(len(current_centroids))) - used_cols
-            for col in unused_cols:
-                tracker = VehicleTracker(self.next_track_id, current_centroids[col], current_boxes[col])
-                self.trackers[self.next_track_id] = tracker
-                self.next_track_id += 1
-                # Publish tracking record for this frame
-                self._publish_tracking_record(tracker, timestamp)
+        self.trackers[objid] = tracker
 
     def pipeline(self, frame) -> bool:
         # One-shot pipeline: process all tracking data in single call
@@ -858,16 +814,13 @@ class VehicleSpeed(Task):
         # Initialize markers from first frame
         self._initialize_markers(frame.shape)
 
-        # Process all vehicle detections chronologically
-        frames_with_vehicles = self.vehicles.groupby('timestamp')
-        for timestamp in sorted(frames_with_vehicles.groups.keys()):
-            frame_vehicles = frames_with_vehicles.get_group(timestamp)
-            detections = list(frame_vehicles.itertuples())
-            self._update_trackers(detections, timestamp)
+        # Group by persistent HostTracker identity (objid) and process each
+        # vehicle's trajectory independently — no cross-vehicle re-association.
+        for objid, vehicle_rows in self.vehicles.groupby('objid'):
+            self._process_vehicle(objid, vehicle_rows)
 
-        # Process any remaining trackers at end
-        for track_id in list(self.trackers.keys()):
-            tracker = self.trackers[track_id]
+        # Summarize per-vehicle results (speeds + violations)
+        for objid, tracker in self.trackers.items():
             if tracker.current_speed is not None:
                 self.vehicles_with_speed += 1
             if tracker.current_speed and tracker.current_speed > (self.speed_limit + self.speed_tolerance):
@@ -885,7 +838,7 @@ class VehicleSpeed(Task):
         # Summary: VehicleSpeed, date, event, vehicle_detections, unique_vehicles, vehicles_with_speed, vsp_records, violations
         results = (
             'VehicleSpeed', self.event_date, self.event_id,
-            len(self.vehicles.index), self.next_track_id - 1,
+            len(self.vehicles.index), len(self.trackers),
             self.vehicles_with_speed, self.tracking_records_published,
             self.violation_count
         )

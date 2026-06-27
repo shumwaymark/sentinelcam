@@ -33,7 +33,8 @@ speed_limit_mph: 25           # Speed limit for violation alerts
 speed_tolerance_mph: 5        # Don't alert unless speed > limit + tolerance
 
 # Vehicle tracking parameters
-centroid_max_distance: 50     # Max pixel distance to associate detections across frames
+# Identity now comes from the outpost's persistent HostTracker (the trk objid);
+# the task no longer re-associates detections, so centroid_max_distance is gone.
 min_detection_confidence: 0.5 # Minimum MobileNetSSD confidence to consider detection
 
 # Direction detection
