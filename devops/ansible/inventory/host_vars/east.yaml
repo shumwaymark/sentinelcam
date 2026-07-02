@@ -11,15 +11,12 @@ imagenode_config:
   cameras:
     O1:                          # OAK-1 DepthAI camera
       viewname: Front
-      resolution: (640, 360)
+      resolution: (768, 432)
       framerate: 30
       detector:
         encoder: oak             # oak | cpu (JPEG encoding location)
         detectobjects: none      # SpyGlass not needed with DepthAI
         accelerator: none
-        # §4.10 config-home graduation: the host-tracker config lives at the
-        # detector level for ALL node types (was under depthai: for OAK).
-        # optional host_tracker §8 per-camera overrides; code defaults otherwise.
         tracker:
           min_confidence_new: 0.60
         #   match_iou: 0.30
@@ -52,7 +49,6 @@ imagenode_config:
                 min_iou: 0.50
                 edge_margin: 0.05
                 max_aspect_deviation: 0.15
-        interesting_objects: [person, vehicle, dog, motorcycle, car, truck, bird, cat]
         sentinel_tasks:
           person: GetFaces2
           default: VehicleSpeed

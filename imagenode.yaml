@@ -38,6 +38,7 @@ cameras:
             accelerator: none                    # [none, ncs2, coral]
             tracker:
                 min_confidence_new: 0.50
+                # interesting_classes: [person, vehicle]  # default; override to expand trigger set
             sentinel_tasks:
                 person: GetFaces2                # Priority 1 sentinel task submission for "person" detections
                 default: MobileNetSSD_allFrames  # optional catch-all task, submitted with priority 2

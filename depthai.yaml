@@ -39,6 +39,7 @@ cameras:
             # A tracker DICT enables the unified lifecycle; absent = publish-only.
             tracker:
                 min_confidence_new: 0.60
+                # interesting_classes: [person, vehicle]  # default; override to expand trigger set
             depthai:
                # In production, nn_archive is injected by Ansible from the model registry.
                nn_archive: /home/ops/imagenode/models/depthai/mobilenet-ssd_openvino_2021.4_6shave.blob
@@ -68,7 +69,6 @@ cameras:
                       min_iou: 0.50
                       edge_margin: 0.05
                       max_aspect_deviation: 0.15
-            interesting_objects: [person, vehicle, dog, motorcycle, car, truck, bird, cat]
             sentinel_tasks:
                 person: GetFaces2         # Priority 1 sentinel task submission for "person" detections
                 default: VehicleSpeed     # Default sentinel task for other detections
