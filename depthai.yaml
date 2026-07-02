@@ -1,4 +1,4 @@
-# Settings file imagenode.yaml -- sentinalcam settings version 8, with OAK-1 integration
+# Settings file imagenode.yaml -- SentinelCam version 8, with OAK-1 (DepthAI v3) integration
 ---
 node:
   name: east
@@ -6,21 +6,21 @@ node:
   REP_watcher: False                 # Not recommended for sentinelcam
   queuemax: 50
   send_type: jpg
-  send_threading: False              # Not used with sentinelcam, which primarily uses publishing for image capture and data via ZMQ
+  send_threading: False
   print_settings: False
 hub_address:
   H1: tcp://data1:5555
 cameras:
   O1:                                    # OAK-1 camera
      viewname: Front
-     resolution: (640, 360)
+     resolution: (640, 360)             # must match oak_pipeline scene output size
      framerate: 30
      detectors:
          outpost:
-            encoder: oak                  # encoding workload for image publisher [cpu, oak]
-            publish_cam: 5567             # ZMQ port for image frame publishing
-            publish_log: 5565             # ZMQ port for log publishing, must match logconfig below
-            logconfig:                    # logging configuration dictionary
+            encoder: oak                 # JPEG encoding location [cpu, oak]
+            publish_cam: 5567            # ZMQ port for image frame publishing
+            publish_log: 5565            # ZMQ port for log publishing, must match logconfig below
+            logconfig:                   # logging configuration dictionary
                 version: 1
                 handlers:
                     zmq:
@@ -31,19 +31,44 @@ cameras:
                 root:
                     handlers: [zmq]
                     level: INFO
-            camwatcher: tcp://data1:5566  # optional self-introduction to a running camwatcher as a new outpost
-            spyglass: (640, 360)          # must match camera "resolution" above
-            detectobjects: none           # [none, motion, mobilenetssd, yolov3]
-            accelerator: none             # [none, ncs2, coral]
-            tracker: none                 # [none, dlib, csrt, kcf, boosting, mil, tld, medianflow, mosse]
+            camwatcher: tcp://data1:5566 # optional self-introduction to a running camwatcher
+            spyglass: (640, 360)         # must match camera "resolution" above
+            detectobjects: none          # OAK handles inference on-device via DepthAI pipeline
+            accelerator: none
+            # §4.10: host-tracker config lives at the detector level for ALL node types.
+            # A tracker DICT enables the unified lifecycle; absent = publish-only.
+            tracker:
+                min_confidence_new: 0.60
             depthai:
-               pipeline: MobileNetSSD     # dictionary key to configured pipelines in oak_camera.py module
-               model: /home/ops/imagenode/models/depthai/mobilenet-ssd_openvino_2021.4_6shave.blob  # path to OpenVINO blob
-               images: frames             # queue name for image messages from camera
-               jpegs: jpegs               # queue name for JPEG encoding messages from OAK camera
-               neural_nets:
-                  Q1:  nn                 # queue for neural net results
-            interesting_objects: ['person', 'vehicle', 'dog', 'motorcycle', 'car', 'truck', 'cat']
+               # In production, nn_archive is injected by Ansible from the model registry.
+               nn_archive: /home/ops/imagenode/models/depthai/mobilenet-ssd_openvino_2021.4_6shave.blob
+               crop_publish: 5568        # dedicated ZMQ port for hi-res crop stream (OAK only)
+               lookback_frames: 90       # EventSampler entry-phase lookback depth (~3s at 30fps)
+               oak_pipeline:
+                  jpeg_quality: 90
+                  detection_confidence: 0.5
+                  rotate_180: true
+                  camera_fps: 30
+                  crop_profiles:         # absent keys fall back to validated defaults in oak_camera.py
+                    person:
+                      width: 256
+                      height: 384
+                      padding: 0.15
+                      max_area_fraction: 0.35
+                      min_interval_s: 0.20
+                      min_iou: 0.70
+                      edge_margin: 0.05
+                      max_aspect_deviation: 0.08
+                    vehicle:
+                      width: 512
+                      height: 192
+                      padding: 0.10
+                      max_area_fraction: 0.25
+                      min_interval_s: 0.15
+                      min_iou: 0.50
+                      edge_margin: 0.05
+                      max_aspect_deviation: 0.15
+            interesting_objects: [person, vehicle, dog, motorcycle, car, truck, bird, cat]
             sentinel_tasks:
-                person: GetFaces2          # Priority 1 sentinel task submission for "person" detections
-                default: VehicleSpeed      # Default sentinel task submission for all other detections
+                person: GetFaces2         # Priority 1 sentinel task submission for "person" detections
+                default: VehicleSpeed     # Default sentinel task for other detections

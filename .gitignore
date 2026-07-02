@@ -12,6 +12,15 @@ workspace.code-workspace
 .ssh/
 chandler-vault.yaml
 
+# Not published — CI/workflow config and informal test scripts
+.github/
+tests/
+
+# Dev-only docs (private branch only)
+docs/THERMAL_MONITORING_INTEGRATION.md
+docs/GAMMA4_WORKFLOW.md
+docs/examples/
+
 # Experimental work areas and non-project components
 oak_benchmark/
 copilot_work/
