@@ -1,0 +1,19 @@
+---
+# Sentinel host overrides.
+
+# =============================================================================
+# STUDY HOLD — P0 traffic study (2026-07-07)
+# =============================================================================
+# Ref: dev/P0_TRAFFIC_STUDY_SPEC.md (Recognition Flywheel Phase 0).
+# The east street camera's population metrics (over-limit rate, 85th percentile,
+# speed distribution) need the COMPLETE measured-vehicle population. The baseline
+# vehicle_tracking policy (retention_days 1 / extended_days 2) collapsed every
+# event but >45 mph speeders within two days, starving the study.
+#
+# Hold the full east population for the study window. Self-heals afterward:
+# beyond the window, cleanup resumes speed_cutoff-only thinning as normal.
+#
+# TO RESTORE the baseline when the study concludes: delete this override block
+# (defaults revert to 1 / 2), then re-run deploy-sentinel.yaml.
+sentinel_cleanup_vehicle_retention_days: 60
+sentinel_cleanup_vehicle_extended_days: 60

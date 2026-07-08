@@ -98,6 +98,29 @@ sentinel_maintenance:
 sentinel_shutdown:
   drain_timeout: 60            # seconds to wait for running tasks before force-exit
 
+# Daily cleanup retention policy (DailyCleanup task).
+# These variables render tasks/DailyCleanup.yaml so the deployed policy is
+# re-created from inventory on every run — never hand-edit the file on the node.
+# To tune retention (e.g. a full-population study hold), override the relevant
+# scalar in group_vars or host_vars/<sentinel-host>.yaml, then re-run
+# deploy-sentinel.yaml. Retention logic: an event is KEPT if ANY data type it
+# carries still has value, DELETED only when ALL of it is past retention.
+sentinel_cleanup_run_deletes: true       # false = report only, take no action
+sentinel_cleanup_max_scan_days: 14       # days to scan backwards from run date
+# person_tracking profile (face_quality) — nodes: lab1, alpha5
+sentinel_cleanup_person_retention_days: 2
+sentinel_cleanup_person_min_face_ratio: 0.15
+sentinel_cleanup_person_confidence_threshold: 0.975
+# vehicle_tracking profile (vehicle_interest) — nodes: east
+# retention_days keeps ALL events (incl. non-speed transits); beyond
+# extended_days only vehicles over speed_cutoff survive. Raise both retention
+# knobs to hold the full measured-vehicle population for a traffic study.
+sentinel_cleanup_vehicle_retention_days: 1
+sentinel_cleanup_vehicle_speed_cutoff: 45.0
+sentinel_cleanup_vehicle_extended_days: 2
+# default fallback profile (minimal_retention)
+sentinel_cleanup_default_retention_days: 7
+
 # Ring buffer models - image sizes and buffer lengths
 sentinel_ring_buffer_models:
   default:
