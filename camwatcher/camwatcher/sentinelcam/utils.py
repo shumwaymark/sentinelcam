@@ -49,8 +49,20 @@ class ImageSubscriber(imagezmq.ImageHub):
         self._data: Optional[Tuple[str, bytes]] = None
         self._connection_attempts = 0
         self._max_retries = 3
+        self._configure_socket()
         self._setupPoller()
         self._startThread()
+
+    def _configure_socket(self) -> None:
+        """Socket options, applied before the receiver thread exists.
+
+        ZMQ sockets are not thread-safe: once _startThread() runs, the receiver
+        thread owns the socket and no one else may touch it. Subclasses override
+        here, not after construction. ImageHub connects in its own __init__, so
+        connection-time options take effect on the reconnect the receiver thread
+        makes after its opening _safe_disconnect() — which is the only connection
+        that ever carries data."""
+        pass
 
     def _setupPoller(self) -> None:
         self._poller = zmq.Poller()
@@ -161,6 +173,29 @@ class CropSubscriber(ImageSubscriber):
     overrides only the parse: returns the RAW sidecar text paired with the JPEG
     (the writer parses the correlation key), and view-filters on segment 0.
     """
+    # ZMTP heartbeat — the always-resident crop socket's only liveness check.
+    # An idle SUB transmits nothing after its subscription, so when a publisher
+    # dies without closing its socket (power cut, cable pull, kernel panic) no
+    # FIN or RST ever arrives, the kernel has no reason to probe, and ZMQ never
+    # learns the peer is gone. The connection sits in ESTAB forever while the
+    # rebooted outpost publishes crops to nobody. Observed on east 2026-08-15:
+    # crops silently stopped for 33 hours while the log plane kept delivering
+    # crp records for them. PING/PONG gives the socket its own clock, so a dead
+    # peer is detected on an idle connection and libzmq reconnects.
+    HEARTBEAT_IVL_MS = 15000      # ping an idle publisher every 15s
+    HEARTBEAT_TIMEOUT_MS = 45000  # no pong within 45s: drop and reconnect
+
+    def _configure_socket(self) -> None:
+        self.zmq_socket.setsockopt(zmq.HEARTBEAT_IVL, self.HEARTBEAT_IVL_MS)
+        self.zmq_socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, self.HEARTBEAT_TIMEOUT_MS)
+        # Kernel-level backstop, matching the async log SUB in camwatcher.main()
+        self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
+        self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)
+        self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 10)
+        self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE_CNT, 3)
+        self.zmq_socket.setsockopt(zmq.RECONNECT_IVL, 1000)
+        self.zmq_socket.setsockopt(zmq.RECONNECT_IVL_MAX, 30000)
+
     def _parse_message(self, imagedata):
         text = imagedata[0]
         parts = text.split('|')
@@ -171,11 +206,15 @@ class CropSubscriber(ImageSubscriber):
     def receive(self, timeout=15.0) -> Tuple[str, bytes]:
         """Block until a crop arrives. Unlike the scene receiver this never times
         out or stop()s — the crop socket is legitimately idle for long stretches
-        between events, and ZMQ handles publisher reconnects transparently. (The
-        base receive() timeout path stop()s the receiver, which races a concurrent
-        re-arm; an always-resident crop consumer must not take that path.) The
-        `timeout` arg is accepted for ImageSubscriber signature compatibility but
-        ignored."""
+        between events. (The base receive() timeout path stop()s the receiver,
+        which races a concurrent re-arm; an always-resident crop consumer must
+        not take that path.) The `timeout` arg is accepted for ImageSubscriber
+        signature compatibility but ignored.
+
+        Giving up the timeout also gives up the disconnect/reconnect cycle that
+        re-arming buys the scene writer, so this class carries its own liveness:
+        the ZMTP heartbeat in _configure_socket, plus the cross-plane watchdog in
+        camwatcher (crops written vs crp records) as the outer backstop."""
         self._data_ready.wait()
         self._data_ready.clear()
         assert self._data is not None  # set by the receiver thread before _data_ready

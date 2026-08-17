@@ -135,11 +135,34 @@ class CropStreamWriter:
 
     def __init__(self, node_view, publisher, cropdir):
         self.node_view = node_view
+        self.publisher = publisher
+        self.cropdir = cropdir
+        self.restarts = 0  # watchdog re-arms since startup, reported in HC
         self._frames_written = multiprocessing.Value('L', 0)  # monotonic crop counter for HC
+        self._spawn()
+
+    def _spawn(self):
         self.process = multiprocessing.Process(target=self._crop_subscriber, args=(
-            self._frames_written, publisher, node_view[1], cropdir))
+            self._frames_written, self.publisher, self.node_view[1], self.cropdir))
         self.process.start()
-        logging.debug(f"CropStreamWriter started for {node_view} pid {self.process.pid} in {cropdir}")
+        logging.debug(f"CropStreamWriter started for {self.node_view} pid {self.process.pid} in {self.cropdir}")
+
+    def restart(self):
+        """Re-arm the crop subscriber with a fresh process, hence a fresh socket.
+
+        The only reliable way to abandon a ZMQ connection that the transport
+        still believes is alive (see CropSubscriber's heartbeat note) is to
+        discard the context that owns it. Nothing is lost: the watchdog only
+        calls this after minutes without a written crop, which means the child
+        is parked in receive() rather than mid-write. The crop counter survives
+        the restart — it reconciles against a cumulative crp record count."""
+        self.restarts += 1
+        logging.warning(f"CropStreamWriter re-arm #{self.restarts} for {self.node_view} "
+                        f"(pid {self.process.pid}, {self._frames_written.value} crops written)")
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(timeout=5)
+        self._spawn()
 
     def _set_datedir(self, dir, ymd):
         path = os.path.join(dir, ymd)
@@ -693,7 +716,8 @@ def _build_hc_response():
                 "alive": alive,
                 "pid": writer.process.pid if alive else None,
                 "crops_written": writer._frames_written.value,
-                "crp_records": _crp_record_counts.get(nv, 0)
+                "crp_records": _crp_record_counts.get(nv, 0),
+                "restarts": writer.restarts
             }
     # SentinelAgent liveness
     agent_alive = _sentinel_agent.process.is_alive() if _sentinel_agent is not None else None
@@ -805,6 +829,49 @@ async def alert_sender():
         except Exception:
             logging.exception("Alert sender trapped exception")
 
+async def crop_writer_watchdog(interval=60, grace=180, max_grace=3600):
+    """Cross-plane liveness check on the crop subscribers.
+
+    A crop reaches the datasink over two independent sockets: the `crp`
+    correlation record on the log plane, the JPEG on the crop plane. They fail
+    independently, and the failure is silent — the index keeps claiming crops
+    that have no file behind them, which downstream reads back as a placeholder
+    image rather than an error (east, 2026-08-15).
+
+    So: when the log plane says crops are being published and no file has been
+    written for `grace` seconds, the crop socket is not delivering, whatever the
+    reason, and the writer is re-armed. CropSubscriber's ZMTP heartbeat should
+    get there first; this is the backstop that does not care about the cause.
+    Idleness is not a stall — with no crp records arriving there is nothing to
+    expect, so the stall clock only runs when the two planes disagree."""
+    logging.info("crop writer watchdog started")
+    last = {}  # (node,view) -> (crp_records, crops_written, last_progress, strikes)
+    while True:
+        await asyncio.sleep(interval)
+        now = datetime.now()
+        with threadLock:
+            writers = list(crop_writers.items())
+        for nv, writer in writers:
+            crp, crops = _crp_record_counts.get(nv, 0), writer._frames_written.value
+            (prev_crp, prev_crops, progress, strikes) = last.get(nv, (crp, crops, now, 0))
+            if crops > prev_crops:
+                progress, strikes = now, 0  # crops landing again; clean slate
+            elif crp == prev_crp:
+                progress = now              # nothing published, nothing to expect
+            else:
+                # Back off on repeat re-arms. A re-arm that does not restore the
+                # stream means the fault is upstream — publisher down, network
+                # partition — and respawning on a fixed cycle just adds noise to
+                # an outage the datasink cannot fix from this end.
+                patience = min(grace * (2 ** strikes), max_grace)
+                if (now - progress).total_seconds() > patience:
+                    logging.error(f"Crop stream stalled for {nv}: {crp - prev_crp} crp records "
+                                  f"on the log plane, no crop written in {patience:.0f}s. Re-arming.")
+                    with threadLock:
+                        writer.restart()
+                    progress, strikes, crops = now, strikes + 1, writer._frames_written.value
+            last[nv] = (crp, crops, progress, strikes)
+
 async def main():
     _data = CFG['data']
     logging.config.dictConfig(CFG['logconfigs']['camwatcher_internal'])
@@ -838,7 +905,8 @@ async def main():
     try:
         await asyncio.gather(control_loop(asyncREP, asyncSUB),
                              process_logs(asyncSUB, agent),
-                             alert_sender())
+                             alert_sender(),
+                             crop_writer_watchdog())
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
     except Exception:  # traceback will appear in log

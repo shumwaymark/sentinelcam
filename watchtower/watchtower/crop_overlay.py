@@ -37,6 +37,11 @@ logger = logging.getLogger("watchtower.crop_overlay")
 # facing away). Tolerate the US/UK spelling either way.
 PHASE_PREFERENCE = ("centre", "center", "entry", "far")
 
+# Smallest crop worth showing. Real crops are hundreds of pixels on a side
+# (256x384 person, 512x192 vehicle); anything at this scale is the datapump's
+# 1x1 missing-file placeholder, not a subject. See _usable_crop.
+MIN_CROP_PX = 32
+
 
 class SelectedCrop:
     """One chosen crop for an event, ready for the overlay render (slice 2)."""
@@ -87,7 +92,7 @@ class CropSelector:
                 label = classname
 
             jpg = feed.get_crop_jpg(date, event, objid, seqnum, classname, phase)
-            if not jpg:
+            if not self._usable_crop(jpg):
                 return None
 
             bbox = self._bbox_for(feed, date, event, objid, crow["timestamp"])
@@ -155,6 +160,25 @@ class CropSelector:
     # ------------------------------------------------------------------
     #  Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _usable_crop(jpg):
+        """False for the datapump's missing-file placeholder.
+
+        A crp record whose JPEG never landed is a normal outcome — the record
+        and the image travel over separate sockets and fail separately (§4.4).
+        The datapump answers a missing crop with a 1x1 black pixel rather than
+        an error, and the render path would faithfully enlarge that into a black
+        card filling the kiosk. Reject it here so the caller falls back to the
+        scene: a missing crop should read as absent, not as broken."""
+        if not jpg:
+            return False
+        try:
+            import simplejpeg
+            h, w = simplejpeg.decode_jpeg_header(jpg)[:2]
+            return w >= MIN_CROP_PX and h >= MIN_CROP_PX
+        except Exception:
+            return True  # unreadable header — let the render path have its say
 
     @staticmethod
     def _parse_mph(classname):
