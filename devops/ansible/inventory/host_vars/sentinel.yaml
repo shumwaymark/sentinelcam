@@ -13,7 +13,29 @@
 # Hold the full east population for the study window. Self-heals afterward:
 # beyond the window, cleanup resumes speed_cutoff-only thinning as normal.
 #
-# TO RESTORE the baseline when the study concludes: delete this override block
-# (defaults revert to 1 / 2), then re-run deploy-sentinel.yaml.
+# TO RESTORE the baseline when the study concludes:
+#   1. Delete this override block (defaults revert to 1 / 2).
+#   2. Raise sentinel_cleanup_max_scan_days below to cover the whole hold —
+#      NOT optional. Cleanup only scans max_scan_days (14) backwards, so every
+#      date older than that window is unreachable forever: reverting retention
+#      alone thins the last two weeks and leaves the entire held population on
+#      disk permanently. Set it to at least (days since 2026-07-07) + 14 for one
+#      catch-up run, then drop it back to the default.
+#   3. Re-run deploy-sentinel.yaml.
 sentinel_cleanup_vehicle_retention_days: 60
 sentinel_cleanup_vehicle_extended_days: 60
+
+# Catch-up scan window. Uncomment and size per step 2 above when releasing the
+# hold; the default (14) is correct for steady-state operation.
+# sentinel_cleanup_max_scan_days: 90
+
+# =============================================================================
+# DELETES ENABLED — inventory is the source of truth
+# =============================================================================
+# Stated explicitly here because the deployed DailyCleanup.yaml on this node had
+# been hand-edited to run_deletes: false, which the role default (true) would
+# have silently reverted on the next deploy. The policy belongs in inventory, so
+# it is written down: cleanup deletes. Set to false for a report-only dry run —
+# the task publishes the same per-date report either way, ending with the
+# deleted count and the run_deletes flag it ran under.
+sentinel_cleanup_run_deletes: true

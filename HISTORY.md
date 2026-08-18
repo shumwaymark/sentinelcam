@@ -31,6 +31,32 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## Unreleased
+
+### Fixed
+
+- **Crop stream liveness.** An outpost that loses power leaves the **camwatcher** crop
+  subscriber holding a half-open connection: an idle SUB socket transmits nothing, so no
+  FIN ever arrives and neither the kernel nor ZMQ notices the peer is gone. The rebooted
+  outpost then publishes crops to a subscriber that no longer exists. The scene stream
+  self-heals because its writer re-arms per event; the always-resident crop subscriber had
+  given up that cycle and had no liveness check of its own. It now carries a ZMTP heartbeat
+  and TCP keepalive, matching what the log subscriber already used — which is why the log
+  plane survived the outage that took out the crop plane. A cross-plane watchdog backs it
+  up: `crp` records arriving on the log plane with no crop file written means the crop
+  socket is not delivering, whatever the cause, and the writer is re-armed (with backoff,
+  and reported in the health check). The **watchtower** crop overlay now rejects the
+  datapump's missing-file placeholder, so a crop that never landed reads as absent — the
+  scene frame — rather than as a black card.
+
+### Changed
+
+- **Daily cleanup retention policy is now inventory-driven.** The deployed
+  `DailyCleanup.yaml` renders from `sentinel_cleanup_*` variables in the **sentinel** role,
+  overridable per host, and is regenerated on every deploy. Retention is no longer a file to
+  be hand-edited on the node. Includes a documented study-hold override for holding a
+  complete measured-vehicle population on a street camera across a traffic study.
+
 ## 0.3.0-alpha - 2026-06-27
 
 The headline of this release is the **OAK outpost redesign** and the **high-resolution
