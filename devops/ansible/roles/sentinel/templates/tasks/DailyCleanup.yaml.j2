@@ -29,6 +29,10 @@ retention_profiles:
     retention_days: {{ sentinel_cleanup_person_retention_days }}
     min_face_ratio: {{ sentinel_cleanup_person_min_face_ratio }}
     confidence_threshold: {{ sentinel_cleanup_person_confidence_threshold }}
+{% if sentinel_cleanup_person_scene_retention_days %}
+    scene_retention_days: {{ sentinel_cleanup_person_scene_retention_days }}   # scene frames expire here; event survives
+    scene_expiry_band: {{ sentinel_cleanup_scene_expiry_band }}
+{% endif %}
     nodes: [lab1, alpha5]
 
   # Vehicle-focused outposts (driveway, street cameras)
@@ -39,6 +43,10 @@ retention_profiles:
     retention_days: {{ sentinel_cleanup_vehicle_retention_days }}    # Base retention (keeps all events, incl. non-speed)
     speed_cutoff: {{ sentinel_cleanup_vehicle_speed_cutoff }}        # Speed events of interest beyond extended_days
     extended_days: {{ sentinel_cleanup_vehicle_extended_days }}      # Full-population retention window
+{% if sentinel_cleanup_vehicle_scene_retention_days %}
+    scene_retention_days: {{ sentinel_cleanup_vehicle_scene_retention_days }}   # scene frames expire here; event survives
+    scene_expiry_band: {{ sentinel_cleanup_scene_expiry_band }}
+{% endif %}
     nodes: [east]
 
   # Archive outposts - never auto-delete
@@ -50,3 +58,7 @@ retention_profiles:
   default:
     strategy: minimal_retention
     retention_days: {{ sentinel_cleanup_default_retention_days }}
+{% if sentinel_cleanup_default_scene_retention_days %}
+    scene_retention_days: {{ sentinel_cleanup_default_scene_retention_days }}   # scene frames expire here; event survives
+    scene_expiry_band: {{ sentinel_cleanup_scene_expiry_band }}
+{% endif %}

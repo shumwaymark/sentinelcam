@@ -1,12 +1,11 @@
 %YAML 1.0
 ---
-# DailyCleanup.yaml — REFERENCE EXAMPLE ONLY.
-# The DEPLOYED policy is rendered by Ansible from the sentinel role variables
-# (`sentinel_cleanup_*` in roles/sentinel/defaults/main.yaml) via
-# devops/ansible/roles/sentinel/templates/tasks/DailyCleanup.yaml.j2, with
-# per-host overrides in inventory/host_vars/<sentinel-host>.yaml. To change the
-# live policy, edit those variables and re-run deploy-sentinel.yaml — not this
-# file. The values below mirror the current baseline defaults.
+# DailyCleanup.yaml  — EXAMPLE. The deployed file is rendered from Ansible;
+# this copy is the reference for what that template produces.
+# Source of truth: the `sentinel_cleanup_*` variables in
+# roles/sentinel/defaults/main.yaml, overridable in group_vars or
+# host_vars/<sentinel-host>.yaml. Change the policy there and re-run
+# deploy-sentinel.yaml; this file is regenerated every deploy.
 #
 # RETENTION LOGIC: Each event is evaluated based on ALL data types it contains.
 # An event is KEPT if ANY data type has value (quality faces, speed data, etc.)
@@ -14,10 +13,10 @@
 
 # Set this to True to delete the data.
 # If False, take no action and only produce the report of data to be deleted.
-run_deletes: True
+run_deletes: true
 
 # Maximum number of days to scan backwards from run date
-max_scan_days: 14
+max_scan_days: 45
 
 # Retention profiles define cleanup strategies per outpost node
 # Each profile evaluates ALL data types present in each event
@@ -28,29 +27,38 @@ retention_profiles:
   # If event also has other valuable data (pets, etc.), keeps that too
   person_tracking:
     strategy: face_quality
-    retention_days: 2               # Base retention period
-    min_face_ratio: 0.15            # Safety: minimum face detection ratio
-    confidence_threshold: 0.975     # Keep if recognition confidence above this
+    retention_days: 2
+    min_face_ratio: 0.15
+    confidence_threshold: 0.975
+
+    scene_retention_days: 30   # scene frames expire here; event survives
+    scene_expiry_band: 3
+
     nodes: [lab1, alpha5]
 
   # Vehicle-focused outposts (driveway, street cameras)
   # Evaluates: vehicle speed data (vsp) - keeps speed measurements longer
   # If event also has faces, evaluates those too
-  # NOTE: a study hold currently raises east's retention to 60/60 in
-  # host_vars/sentinel.yaml (P0 traffic study); baseline shown here.
   vehicle_tracking:
     strategy: vehicle_interest
-    retention_days: 1               # Base retention (keeps all events, incl. non-speed)
-    speed_cutoff: 45.0              # Speed events of interest beyond extended_days
-    extended_days: 2                # Full-population retention window
+    retention_days: 1    # Base retention (keeps all events, incl. non-speed)
+    speed_cutoff: 45.0        # Speed events of interest beyond extended_days
+    extended_days: 2      # Full-population retention window
+
+    scene_retention_days: 30   # scene frames expire here; event survives
+    scene_expiry_band: 3
+
     nodes: [east]
 
   # Archive outposts - never auto-delete
   archive_all:
     strategy: never_delete
-    nodes: []
+    nodes: []                       # Add nodes to preserve all data
 
   # Default fallback - simple time-based
   default:
     strategy: minimal_retention
     retention_days: 7
+
+    scene_retention_days: 30   # scene frames expire here; event survives
+    scene_expiry_band: 3

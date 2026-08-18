@@ -378,6 +378,7 @@ class DailyCleanup(Task):
         from collections import defaultdict
 
         total_deleted = 0
+        total_expired = 0
         total_scanned = 0
         dates_processed = 0
 
@@ -413,25 +414,28 @@ class DailyCleanup(Task):
                 dates_processed += 1
 
                 # Track stats per strategy for this date
-                date_stats = defaultdict(lambda: {'total': 0, 'deleted': 0})
+                date_stats = defaultdict(lambda: {'total': 0, 'deleted': 0, 'expired': 0})
 
                 # Group events by node for profile-specific processing
                 for node in cwIndx['node'].unique():
                     node_events = cwIndx[cwIndx['node'] == node]
-                    profile_name, deleted_count, event_count = self._process_node_events(
+                    profile_name, deleted_count, event_count, expired_count = self._process_node_events(
                         node, node_events, scan_date_str, event_age_days
                     )
                     date_stats[profile_name]['total'] += event_count
                     date_stats[profile_name]['deleted'] += deleted_count
+                    date_stats[profile_name]['expired'] += expired_count
                     total_deleted += deleted_count
+                    total_expired += expired_count
 
-                # Generate daily summary if any deletions occurred
+                # Generate daily summary if anything was deleted or had its scenes expired
                 date_total_deleted = sum(s['deleted'] for s in date_stats.values())
-                if date_total_deleted > 0:
+                date_total_expired = sum(s['expired'] for s in date_stats.values())
+                if date_total_deleted > 0 or date_total_expired > 0:
                     summary_parts = [
-                        f"{strategy}[{stats['total']},{stats['deleted']}]"
+                        f"{strategy}[{stats['total']},{stats['deleted']},{stats['expired']}]"
                         for strategy, stats in sorted(date_stats.items())
-                        if stats['deleted'] > 0
+                        if stats['deleted'] > 0 or stats['expired'] > 0
                     ]
                     self.publish(f"DailyCleanup {scan_date_str} age:{event_age_days}d: {' '.join(summary_parts)}")
 
@@ -439,7 +443,9 @@ class DailyCleanup(Task):
                 self.publish(f"DailyCleanup error processing {scan_date_str}: {str(e)}")
                 continue
 
-        stats = f"DailyCleanup completed: processed {dates_processed} dates, scanned {total_scanned} events, deleted {total_deleted} ({self.performing_deletes})"
+        stats = (f"DailyCleanup completed: processed {dates_processed} dates, "
+                 f"scanned {total_scanned} events, deleted {total_deleted}, "
+                 f"scenes expired {total_expired} ({self.performing_deletes})")
         self.publish(stats)
         return False
 
@@ -489,7 +495,50 @@ class DailyCleanup(Task):
             for event in delete_evts:
                 self.dataFeed.delete_event(date_str, event)
 
-        return (profile_name, len(delete_evts), total_events)
+        # Scene expiry runs on its own clock over whatever survived (see
+        # dev/SCENE_RETENTION_PLAN.md). Frames are ~99% of the store and the first thing to
+        # lose value; the record of what happened — index row, tracking CSVs, crops — stays
+        # on the retention clock above.
+        deleted = set(delete_evts)
+        expired = self._expire_scenes(profile, date_str, event_age_days,
+                                      [e for e in all_events if e not in deleted])
+
+        return (profile_name, len(delete_evts), total_events, expired)
+
+    def _expire_scenes(self, profile, date_str, event_age_days, events) -> int:
+        """Expire scene frames for events past this profile's scene window.
+
+        Independent of the retention verdict: an event kept forever by policy still loses its
+        frames here. A profile with no `scene_retention_days` expires nothing, so no node
+        changes behavior until its profile opts in.
+
+        Only events crossing the threshold within `scene_expiry_band` days are touched.
+        Without that band every nightly run would re-issue deletes for every already-expired
+        event still inside the scan window — thousands of round trips, each queued against a
+        purge thread that deliberately paces itself at one command every two seconds. The band
+        is wide enough to absorb a few missed nightly runs.
+
+        Note the scan window must reach past the scene window for any of this to fire:
+        `max_scan_days` of 14 against a 30-day scene policy expires nothing, ever.
+        """
+        scene_days = profile.get('scene_retention_days')
+        if scene_days is None:
+            return 0
+        band = profile.get('scene_expiry_band', 3)
+        if not (scene_days < event_age_days <= scene_days + band):
+            return 0
+        if not self.performing_deletes:
+            return len(events)  # report-only: what a live run would have expired
+        expired = 0
+        for event in events:
+            try:
+                reply = self.dataFeed.delete_event(date_str, event, scope='images')
+                if reply == b'Locked':
+                    continue  # model ground truth — preserved in full, frames included
+                expired += 1
+            except Exception as e:
+                self.publish(f"DailyCleanup scene expiry failed for {date_str}/{event}: {str(e)}")
+        return expired
 
     def _extract_speed(self, classname):
         try:

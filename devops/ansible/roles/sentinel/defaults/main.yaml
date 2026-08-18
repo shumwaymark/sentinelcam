@@ -120,6 +120,24 @@ sentinel_cleanup_vehicle_speed_cutoff: 45.0
 sentinel_cleanup_vehicle_extended_days: 2
 # default fallback profile (minimal_retention)
 sentinel_cleanup_default_retention_days: 7
+# Scene retention — a SECOND, independent clock, applied to events the retention
+# policy above decided to keep. Scene frames are ~99% of the data store and the
+# first thing to lose value; the record of what happened (index row, tracking
+# CSVs, crops) stays on the retention clock. An event whose scenes expire is
+# still indexed, still carries its data, and simply cannot be replayed as video.
+# Locked events (model ground truth) are exempt and keep everything.
+# null = never expire, so no node changes behavior until its profile opts in.
+# NOTE: sentinel_cleanup_max_scan_days must reach PAST the scene window or none
+# of this ever fires — a 14-day scan against a 30-day scene policy expires
+# nothing. See dev/SCENE_RETENTION_PLAN.md.
+sentinel_cleanup_person_scene_retention_days: ~
+sentinel_cleanup_vehicle_scene_retention_days: ~
+sentinel_cleanup_default_scene_retention_days: ~
+# Days past the scene window in which an event is still eligible for expiry.
+# Bounds the nightly work: without it every run re-issues deletes for every
+# already-expired event still inside the scan window. Wide enough to absorb a
+# few missed nightly runs; widen it for a one-time catch-up sweep.
+sentinel_cleanup_scene_expiry_band: 3
 
 # Ring buffer models - image sizes and buffer lengths
 sentinel_ring_buffer_models:

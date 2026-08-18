@@ -25,9 +25,35 @@
 sentinel_cleanup_vehicle_retention_days: 60
 sentinel_cleanup_vehicle_extended_days: 60
 
-# Catch-up scan window. Uncomment and size per step 2 above when releasing the
-# hold; the default (14) is correct for steady-state operation.
-# sentinel_cleanup_max_scan_days: 90
+# =============================================================================
+# SCENE RETENTION — 30 days (dev/SCENE_RETENTION_PLAN.md)
+# =============================================================================
+# Scene frames are ~99% of the store (measured 2026-08-17: images 360 G, crops
+# 2.0 G, CSVs 604 M) and the first thing to lose value. Events keep their index
+# row, tracking data, and crops on the retention clock above; only the replay
+# footage expires here. ~190 G steady state at the current 6.4 GB/day.
+sentinel_cleanup_person_scene_retention_days: 30
+sentinel_cleanup_vehicle_scene_retention_days: 30
+sentinel_cleanup_default_scene_retention_days: 30
+
+# The scan window must reach PAST the scene window or expiry never fires: the
+# default 14 against a 30-day scene policy expires nothing, ever. 45 covers the
+# 30-day window plus the 3-day expiry band with room for missed runs.
+#
+# NOTE this also deepens the reach of the retention pass, from 14 days to 45.
+# With deletes enabled, the first run after this change sweeps person_tracking
+# and default-profile backlog from 15-45 days ago that was previously
+# unreachable. Expected and intended — but it is a one-time larger-than-usual
+# deletion, so read one report-only run before enabling if that matters.
+sentinel_cleanup_max_scan_days: 45
+
+# CATCH-UP SWEEP (one-time, then revert to the values above).
+# To drain accumulated backlog — the study hold, or the pre-scene-retention
+# image store — BOTH knobs must be widened. max_scan_days alone does nothing:
+# the expiry band gates which events are eligible once a date is in reach, so a
+# deep scan with a 3-day band still only touches events 31-33 days old.
+# sentinel_cleanup_max_scan_days: 400
+# sentinel_cleanup_scene_expiry_band: 400
 
 # =============================================================================
 # DELETES ENABLED — inventory is the source of truth
