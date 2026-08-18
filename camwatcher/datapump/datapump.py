@@ -285,13 +285,20 @@ def main():
                     pump.send_jpg(reply, jpeg)
                     metrics.end()
                     continue
-                elif request['cmd'] == 'del':  # delete event data
+                elif request['cmd'] in ('del', 'delimg'):  # delete event data, or expire its scenes
+                    # 'del' removes the event entirely; 'delimg' removes only the scene frames
+                    # and leaves the event (index row, tracking CSVs, crops) intact. Separate
+                    # commands rather than one command with a scope field: an older datapump
+                    # receiving 'delimg' rejects it as unrecognized instead of silently reading
+                    # it as a full delete, and this deletion is not reversible.
                     (date, event) = (request['date'], request['evt'])
                     if facelist.event_locked(date, event):
+                        # A locked event is model ground truth — preserve the original in full,
+                        # frames included. Applies to scene expiry exactly as it does to delete.
                         reply = b'Locked'
                     else:
                         camwatcher_control = {}
-                        camwatcher_control['cmd'] = 'DelEvt'
+                        camwatcher_control['cmd'] = 'DelEvt' if request['cmd'] == 'del' else 'DelImg'
                         camwatcher_control['date'] = date
                         camwatcher_control['event'] = event
                         log.debug(f"camwatcher send request {camwatcher_control}")

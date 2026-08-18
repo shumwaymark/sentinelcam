@@ -208,6 +208,7 @@ class CSVindex:
 
     CSV_new = 1
     CSV_delete = 2
+    CSV_delete_images = 3
 
     def __init__(self, indxQ, alertQ):
         self.process = multiprocessing.Process(target=self._run, args=(indxQ, alertQ))
@@ -259,6 +260,22 @@ class CSVindex:
                     }
                 }
                 _sentinel_alert.put(alert)
+
+            elif cmd == CSVindex.CSV_delete_images:
+                # Scene expiry. The event SURVIVES: index row, tracking CSVs, and crops are all
+                # left alone and only the scene frames are purged. Retention for the replay
+                # footage is a separate clock from retention for the record of what happened —
+                # the frames are 99% of the storage and the first thing to lose its value.
+                #
+                # Deliberately silent: no DEL alert. The event still exists and must stay in
+                # every subscriber's event list. A kiosk holding a cached frame list for this
+                # event discovers the expiry on access, where the datapump's missing-file
+                # placeholder is treated as end-of-data.
+                # Quiet and idempotent: an event whose frames are already gone is a normal
+                # re-issue (the expiry band overlaps runs), not a failure to log.
+                (_date, _event) = msg
+                _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} "
+                          f"2>/dev/null | xargs -r rm")
 
     def _purge_loop(self, delQ):
         while True:
@@ -790,6 +807,12 @@ async def control_loop(control_socket, log_socket):
                 elif request['cmd'] == 'DelEvt':
                     # TODO: This code not currently restricted by FaceList.event_locked() control
                     dateIndxQ.put((CSVindex.CSV_delete, (request['date'], request['event'])))
+                elif request['cmd'] == 'DelImg':
+                    # Scene expiry: drop the frames, keep the event (index row, CSVs, crops).
+                    # A separate command rather than a scope field on DelEvt so that an older
+                    # camwatcher cannot mistake it for a full delete — it falls through to the
+                    # error branch below and removes nothing.
+                    dateIndxQ.put((CSVindex.CSV_delete_images, (request['date'], request['event'])))
                 elif request['cmd'] == 'HC':
                     result = json.dumps(_build_hc_response())
                 else:

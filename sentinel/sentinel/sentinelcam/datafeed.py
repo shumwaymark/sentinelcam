@@ -246,8 +246,21 @@ class DataFeed(imagezmq.ImageSender):
         result = self.pump_action(DataFeed.STG_RPT, {'cmd': 'str'})
         return result
 
-    def delete_event(self, date, event) -> str:
-        request = {'cmd': 'del', 'date': date, 'evt': event}
+    def delete_event(self, date, event, scope='all') -> str:
+        """Delete an event, or expire only its scene frames.
+
+        scope='all'    — remove the event entirely: index row, tracking CSVs, scene
+                         frames, crops. Broadcasts a DEL alert to subscribers.
+        scope='images' — remove only the scene frames. The event survives, still
+                         indexed and still carrying its tracking data and crops; it
+                         simply can no longer be replayed as video.
+
+        A datapump that predates scene expiry rejects the 'images' scope outright
+        rather than treating it as a full delete — deliberate, since the deletion
+        cannot be undone.
+        """
+        cmd = 'del' if scope == 'all' else 'delimg'
+        request = {'cmd': cmd, 'date': date, 'evt': event}
         return self.pump_action(DataFeed.DEL_EVT, request)
 
     def health_check(self) -> str:
