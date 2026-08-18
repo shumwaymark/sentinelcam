@@ -822,8 +822,8 @@ class SentinelSubscriber:
                                 if evtkey in view_events:
                                     eventQueue.put((EventListUpdater.EventList_DELETE, viewkey, evtkey))
                                     view_events.remove(evtkey)
+                                    daemon_logger.debug(f"Sentinel subscriber purged deleted eventkey {evtkey} from view {viewkey}")
                                     break
-                            daemon_logger.debug(f"Sentinel subscriber purged deleted eventkey {evtkey} from view {viewkey}")
                 except (KeyError, ValueError):
                     pass
                 except Exception as e:
