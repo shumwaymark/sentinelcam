@@ -33,7 +33,47 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ## Unreleased
 
+### Added
+
+- **Scene retention — replay footage now expires on its own clock.** Retention had one
+  granularity: an event was worth keeping or it was deleted entirely, index row, tracking
+  CSVs, scene frames, and crops together. That is the wrong shape for a store whose scene
+  frames are 99% of the bytes and the first thing to lose their value. Measured on the
+  primary data sink: 360 GB of scene frames against 2.0 GB of crops and 604 MB of CSVs —
+  the entire analytical corpus, everything the recognition work consumes, is 0.7% of the
+  store.
+
+  Scene frames are now expired independently of the event-retention verdict. An event past
+  its scene window survives in full — still indexed, still carrying its tracking data and
+  its high-resolution crops — it simply can no longer be replayed as video. What expires is
+  the footage, not the record of what happened. Events locked as model ground truth are
+  exempt and keep everything.
+
+  The mechanism is a scoped deletion (`DataFeed.delete_event(..., scope='images')`) carried
+  through the **datapump** and **camwatcher** on its own wire command, so that a data sink
+  which predates the feature rejects it outright rather than reading it as a full delete.
+  Policy lives with the rest of retention, per profile in the **sentinel** role's
+  `DailyCleanup` task: `scene_retention_days` (absent means never, so no node changes
+  behavior until it opts in) and `scene_expiry_band`, which bounds each nightly run to the
+  events actually crossing the threshold. Note that `max_scan_days` must reach past the
+  scene window or expiry never fires at all.
+
+  The **watchtower** closes the loop: an event whose frames have expired now presents its
+  selected-crop card over an empty backdrop, captioned as having no video, instead of a
+  blank thumbnail. The crop outlives the scene by design, so the kiosk can still say what
+  happened — which is the premise the whole trade rests on. Video export and the speed
+  montage skip expired frames rather than writing black ones.
+
 ### Fixed
+
+- **Missing scene frames replayed as full-screen black.** The datapump answers a missing
+  image with a 1×1 placeholder rather than an error, and the **watchtower** player assigns
+  each decoded frame into a ring buffer slot — where a 1×1 image *broadcasts* across the
+  entire slot. An event with absent frames therefore replayed as silent full-screen black,
+  raising nothing and logging nothing. Latent until now, since nothing removed frames from
+  a surviving event; scene retention would have made it routine. The placeholder test the
+  crop overlay already used is now applied wherever a frame is fetched, and an event with
+  no images reports end-of-data instead of raising into the player's error state.
 
 - **Crop stream liveness.** An outpost that loses power leaves the **camwatcher** crop
   subscriber holding a half-open connection: an idle SUB socket transmits nothing, so no
