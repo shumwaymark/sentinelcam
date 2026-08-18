@@ -21,6 +21,7 @@ import pandas as pd
 import requests
 import subprocess
 import simplejpeg
+from crop_overlay import usable_jpeg
 import time
 from base64 import urlsafe_b64encode
 from datetime import datetime, timedelta
@@ -356,7 +357,13 @@ class SpeedMontage:
                         frames_in_subevent = 0
 
                 try:
+                    # A frame whose file is gone comes back as the datapump's 1x1
+                    # placeholder, not an error — skip it rather than write a black frame
+                    # into the montage (scene frames expire; see crop_overlay).
                     jpeg = feed.get_image_jpg(date, event, frametime)
+                    if not usable_jpeg(jpeg):
+                        logger.info(f"Skipping expired frame {date}/{event} {frametime}")
+                        continue
                     frame = simplejpeg.decode_jpeg(jpeg, colorspace='BGR')
 
                     # Draw tracking overlays

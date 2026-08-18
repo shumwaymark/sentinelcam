@@ -43,6 +43,30 @@ PHASE_PREFERENCE = ("centre", "center", "entry", "far")
 MIN_CROP_PX = 32
 
 
+def usable_jpeg(jpg, min_px=MIN_CROP_PX):
+    """False for the datapump's missing-file placeholder.
+
+    The datapump answers a missing image — scene frame or crop — with a 1x1 black
+    pixel rather than an error, so a caller cannot tell "gone" from "here it is"
+    by checking for an exception. Both planes need this test, and the scene plane
+    needs it badly: a 1x1 frame assigned into a player ring buffer slot BROADCASTS
+    across the whole slot, filling it with black. Undetected, an event whose frames
+    have been expired replays as full-screen black rather than reporting no video.
+
+    Returns True for anything that decodes to at least min_px on both sides, and
+    for anything whose header will not parse — an unreadable JPEG is a different
+    problem, left to the caller's own error handling.
+    """
+    if not jpg:
+        return False
+    try:
+        import simplejpeg
+        h, w = simplejpeg.decode_jpeg_header(jpg)[:2]
+        return w >= min_px and h >= min_px
+    except Exception:
+        return True
+
+
 class SelectedCrop:
     """One chosen crop for an event, ready for the overlay render (slice 2)."""
 
@@ -163,22 +187,13 @@ class CropSelector:
 
     @staticmethod
     def _usable_crop(jpg):
-        """False for the datapump's missing-file placeholder.
+        """False for the datapump's missing-file placeholder (see usable_jpeg).
 
         A crp record whose JPEG never landed is a normal outcome — the record
         and the image travel over separate sockets and fail separately (§4.4).
-        The datapump answers a missing crop with a 1x1 black pixel rather than
-        an error, and the render path would faithfully enlarge that into a black
-        card filling the kiosk. Reject it here so the caller falls back to the
-        scene: a missing crop should read as absent, not as broken."""
-        if not jpg:
-            return False
-        try:
-            import simplejpeg
-            h, w = simplejpeg.decode_jpeg_header(jpg)[:2]
-            return w >= MIN_CROP_PX and h >= MIN_CROP_PX
-        except Exception:
-            return True  # unreadable header — let the render path have its say
+        Rejecting the placeholder here makes the caller fall back to the scene:
+        a missing crop should read as absent, not as broken."""
+        return usable_jpeg(jpg)
 
     @staticmethod
     def _parse_mph(classname):

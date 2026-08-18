@@ -34,7 +34,7 @@ from calendar_page import CalendarPage
 from storage_page import StoragePage
 from health_page import SystemHealthPage
 from sentinel_page import SentinelPerformancePage
-from crop_overlay import CropSelector, render_centered_card
+from crop_overlay import CropSelector, render_centered_card, usable_jpeg
 from heart_icon import HeartIcon
 
 CFG = readConfig(os.path.join(os.path.expanduser("~"), "watchtower.yaml"))
@@ -110,6 +110,14 @@ dataLock = threading.Lock()
 def blank_image(w, h) -> np.ndarray:
     img = np.zeros((h, w, 3), dtype=np.uint8)
     return img
+
+def draw_header(image, text) -> None:
+    """Caption an event thumbnail: white text on a semi-transparent band, top left."""
+    (text_width, _), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+    overlay = image.copy()
+    cv2.rectangle(overlay, (15, 20), (30 + text_width, 50 + baseline), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
+    cv2.putText(image, text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
 def redx_image(w, h) -> np.ndarray:
     img = blank_image(w, h)
@@ -292,11 +300,25 @@ class PlayerDaemon:
                     if (eventdate, eventid) != (date, event):
                         (date, event) = (eventdate, eventid)
                         ringbuffer.reset()
-                        frametimes = feed.get_image_list(eventdate, eventid)
-                        jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[0])
-                        ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
                         forward = True
-                        frameidx = 1
+                        frameidx = 0
+                        try:
+                            frametimes = feed.get_image_list(eventdate, eventid)
+                        except DataFeed.ImageSetEmpty:
+                            # Scene frames expired (or never landed). The event itself is
+                            # still here — tracking data and crops are untouched — there is
+                            # simply no video. Start with an empty ring so the daemon
+                            # reports EOF immediately instead of raising into ERROR.
+                            frametimes = []
+                            daemon_logger.info(f"No scene frames for {eventdate}/{eventid}")
+                        if frametimes:
+                            jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[0])
+                            if usable_jpeg(jpeg):
+                                ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
+                                frameidx = 1
+                            else:
+                                frametimes = []
+                                daemon_logger.info(f"Scene frames unreadable for {eventdate}/{eventid}")
                 except KeyError as keyval:
                     daemon_logger.error(f"PlayerDaemon internal key error '{keyval}'")
                     stateQueue.put(DaemonState.ERROR)
@@ -325,6 +347,14 @@ class PlayerDaemon:
                             if (forward and frameidx < len(frametimes)) or (not forward and frameidx > -1):
                                 try:
                                     jpeg = feed.get_image_jpg(eventdate, eventid, frametimes[frameidx])
+                                    if not usable_jpeg(jpeg):
+                                        # Frames expired mid-replay, or a cached frame list
+                                        # outlived them. The placeholder would broadcast into
+                                        # the ring slot as full-screen black; stop instead.
+                                        daemon_logger.info(
+                                            f"Scene frames gone mid-replay for {eventdate}/{eventid}")
+                                        error_occurred = True
+                                        continue
                                     ringbuffer.put(simplejpeg.decode_jpeg(jpeg, colorspace='BGR'))
                                     frameidx = frameidx + 1 if forward else frameidx - 1
                                 except Exception as e:
@@ -971,15 +1001,7 @@ class EventListUpdater:
                 if selected:
                     image = render_centered_card(image, selected)
 
-                header_text = f"{view} {frametimes[sample_frame].strftime('%I:%M %p - %A %B %d, %Y')}"
-                # Get text size for background rectangle
-                (text_width, text_height), baseline = cv2.getTextSize(header_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
-                # Draw semi-transparent background
-                overlay = image.copy()
-                cv2.rectangle(overlay, (15, 20), (30 + text_width, 50 + baseline), (0, 0, 0), -1)
-                cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
-                # Draw text on top
-                cv2.putText(image, header_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                draw_header(image, f"{view} {frametimes[sample_frame].strftime('%I:%M %p - %A %B %d, %Y')}")
 
                 if not selected:
                     for (name, classname, x1, y1, x2, y2) in refresults[sample_frame]:
@@ -990,6 +1012,15 @@ class EventListUpdater:
                 logger.error(f"No tracking data for event {event}, returning first image.")
                 return (frametimes[0], blank_image(imgsize[0], imgsize[1]))
             else:
+                # No scene frames: expired on the scene-retention clock, or never landed.
+                # The crop outlives the scene by design, so show the crop card over an empty
+                # backdrop rather than a blank rectangle — the event still has something to
+                # say about itself, which is the whole premise of expiring frames early.
+                selected = self.crop_selector.select(feed, day, event)
+                if selected:
+                    image = render_centered_card(blank_image(imgsize[0], imgsize[1]), selected)
+                    draw_header(image, f"{view} - no video")
+                    return (datetime.now(), image)
                 logger.error(f"Failed to gather images for event {event}")
                 return (datetime.now(), blank_image(imgsize[0], imgsize[1]))
         except (DataFeed.TrackingSetEmpty, DataFeed.ImageSetEmpty):
