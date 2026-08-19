@@ -445,10 +445,14 @@ class DeploymentTool:
         print("\n" + "-"*60)
         print("Deployment Summary")
         print("-"*60)
+        # The whole chain -- bastion, data sink, ramrod, Ansible -- has already run
+        # synchronously by the time we get here; its output is printed above. Saying
+        # anything is "in progress" invited the reader to think a finished run had hung.
         print("[+] Package created and uploaded")
-        print("[+] Internal processing initiated")
-        print("[>] Code transfer to data sink in progress")
-        print("[>] Ramrod will deploy via Ansible")
+        print("[+] Internal processing complete")
+        print("[+] Ramrod deployment finished -- see DEPLOYMENT SUMMARY above")
+        print("    (a component with no deploy flag is skipped; 'no change' means")
+        print("     the node already matched what was shipped)")
         
         # Show relevant playbooks
         playbooks = []

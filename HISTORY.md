@@ -161,6 +161,16 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   and rendered alongside the derived ones, so replay of historical events survives a camera
   resize. An entry can be dropped once the event data at that size has aged out.
 
+- **A deployment now reports a verdict, not just a transcript.** A full-fleet run emits
+  a couple of hundred lines of Ansible output — complete, and worth keeping, but a failed
+  task or a service that quietly restarted does not stand out in it, and a component that
+  changed nothing looks identical to one that did the work. An aggregate callback plugin
+  now records each playbook's outcome as it runs, alongside the unchanged detailed output
+  rather than in place of it, and the pipeline renders a short table at the end: per host,
+  what changed, which services were restarted, and any failure with the task that caused
+  it. The restart line is the one that matters, being the actual production consequence of
+  a deployment. Reporting is wrapped so that it cannot itself fail a deployment.
+
 ## 0.3.0-alpha - 2026-06-27
 
 The headline of this release is the **OAK outpost redesign** and the **high-resolution

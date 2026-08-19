@@ -153,6 +153,12 @@ fi
 log "Executing deployments using current playbook structure..."
 cd "$ANSIBLE_HOME"
 
+# Start each run with an empty summary: the callback appends one record per playbook,
+# and stale records from the previous deployment would report work that did not happen.
+DEPLOY_SUMMARY="$ANSIBLE_HOME/logs/deployment_summary.jsonl"
+export SENTINELCAM_DEPLOY_SUMMARY="$DEPLOY_SUMMARY"
+: > "$DEPLOY_SUMMARY"
+
 # Deploy each flagged component using appropriate code-only playbook
 deployment_success=true
 for component in "${deploy_components[@]}"; do
@@ -197,6 +203,18 @@ for component in "${deploy_components[@]}"; do
         deployment_success=false
     fi
 done
+
+# Condense the run. Playbook detail above is the record; this is the read.
+SUMMARY_RENDERER="$SENTINELCAM_HOME/devops/scripts/deployment/render-deployment-summary.py"
+if [ -f "$SUMMARY_RENDERER" ]; then
+    python3 "$SUMMARY_RENDERER" "$DEPLOY_SUMMARY" 2>&1 | tee -a "$LOG_FILE"
+    # The renderer reports a host-level verdict the per-playbook exit codes can miss.
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+        deployment_success=false
+    fi
+else
+    log "WARNING: summary renderer not found at $SUMMARY_RENDERER"
+fi
 
 # Overall deployment status
 if [ "$deployment_success" = true ]; then
