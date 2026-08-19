@@ -25,6 +25,13 @@ ring_buffers:
 {%     endfor %}
 {%   endif %}
 {% endfor %}
+{% for retired in watchtower_retired_resolutions | default([]) %}
+{%   set resolution_key = '%dx%d' | format(retired[0], retired[1]) %}
+{%   if resolution_key not in ring_buffers_generated %}
+{%     set _ = ring_buffers_generated.update({resolution_key: retired}) %}
+  {{ resolution_key }}: (({{ retired[0] }}, {{ retired[1] }}), 5)   # retired size, replay only
+{%   endif %}
+{% endfor %}
 
 # The list of known datapumps - auto-generated from unique datasinks in outpost registry
 datapumps:

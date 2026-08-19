@@ -9,6 +9,11 @@
 
 # Configuration
 ANSIBLE_HOME="/home/ops/sentinelcam/devops/ansible"
+# Ansible only reads ansible.cfg from the current directory, and this script is
+# invoked from the caller's cwd (the ssh login dir, not ANSIBLE_HOME). Without
+# this, every ansible run here loses vault_password_file and dies on the first
+# encrypted group_var -- which reads as "unreachable" and blocks the deployment.
+export ANSIBLE_CONFIG="$ANSIBLE_HOME/ansible.cfg"
 VALIDATION_LOG="$ANSIBLE_HOME/logs/production_validation_$(date +%Y%m%d_%H%M%S).log"
 INVENTORY="$ANSIBLE_HOME/inventory/production.yaml"
 
@@ -62,10 +67,13 @@ fi
 validation_failed=false
 for group in $TARGET_GROUPS; do
     log "Testing connectivity to group: $group..."
-    if ansible "$group" -i "$INVENTORY" -m ping --timeout 5 --one-line 2>/dev/null; then
+    # Keep stderr: an ansible startup failure (bad config, vault, inventory) is
+    # not the same thing as an unreachable node, and must not be silenced.
+    if ping_output=$(ansible "$group" -i "$INVENTORY" -m ping --timeout 5 --one-line 2>&1); then
         log "[+] Group $group is reachable"
     else
         log "WARNING: Some nodes in $group are unreachable"
+        log "$ping_output"
         validation_failed=true
     fi
 done

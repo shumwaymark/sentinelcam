@@ -181,7 +181,12 @@ for component in "${deploy_components[@]}"; do
     if [ -f "$playbook" ]; then
         log "Deploying $component using $playbook..."
 
-        if ansible-playbook -i inventory/production.yaml "$playbook" --tags deploy; then
+        # code + config. Configuration templates and the sentinel task YAMLs are
+        # part of a release, not provisioning: shipping code without them leaves
+        # nodes running new code against stale settings. Service units are left out
+        # deliberately -- they change rarely, and a unit rewrite is a restart-semantics
+        # change worth making on purpose (`--tags service` by hand).
+        if ansible-playbook -i inventory/production.yaml "$playbook" --tags deploy,config; then
             log "[+] $component deployment completed successfully"
         else
             log "ERROR: $component deployment failed"

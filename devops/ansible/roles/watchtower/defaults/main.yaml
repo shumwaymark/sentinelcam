@@ -60,3 +60,10 @@ watchtower_video_export:
   vps_export_path: "/var/www/sentinelcam_exports"
   vps_base_url: "https://www.swanriversystems.com/sentinelcam_exports"
 
+# Scene resolutions no longer published by any live camera, but still present in
+# historical event data. Ring buffers must be allocated for these too: the buffer set
+# is derived from the CURRENT outpost registry, so a camera that changes size silently
+# retires its old resolution and every event recorded at that size loses its replay
+# buffer. Retiring a resolution is a registry edit; keeping replay working is this list.
+# Format matches the registry: [width, height].
+watchtower_retired_resolutions: []

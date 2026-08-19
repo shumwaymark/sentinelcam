@@ -56,6 +56,13 @@ bastion_interface_internal: enp1s0u1u4    # Internal/LAN interface (can be set f
 #   - Each view publishes on standard imagenode ports (unless overridden)
 #   - One outpost node is processed by exactly ONE datasink (outpost -> datasink is many-to-one)
 #
+# Resolutions retired from the registry but still present in recorded events. East
+# moved 640x360 -> 768x432; events captured before that change still need a matching
+# ring buffer on the watchtower or they cannot be replayed. Drop an entry only once
+# the event data at that size has aged out of retention.
+watchtower_retired_resolutions:
+  - [640, 360]                # east, retired on the move to 768x432
+
 sentinelcam_outposts:
   outpost:                    # Outpost node name
     hostname: lab1            # Inventory hostname of this outpost
