@@ -244,10 +244,16 @@ class CSVindex:
                 result = subprocess.run(_sh, shell=False, capture_output=True, text=True)
                 if result.returncode != 0:
                     logging.error(f"CSVindex index delete error {result.returncode} for {_date}/{_event}")
-                _delQ.put(f"rm {os.path.join(_csvdir, _date, ''.join([_event,'*']))}")
-                _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} | xargs rm")
+                # Not every event owns every kind of data — a picamera node publishes no crops
+                # at all, an event whose scenes already expired owns no frames, and a short
+                # traversal may produce neither. Missing data is a normal outcome of deletion,
+                # not a failure to log: quiet the globs so a real purge error stays visible.
+                _delQ.put(f"rm -f {os.path.join(_csvdir, _date, ''.join([_event,'*']))}")
+                _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} "
+                          f"2>/dev/null | xargs -r rm")
                 if _cropdir:  # remove any OAK crop JPEGs for this event
-                    _delQ.put(f"ls {os.path.join(_cropdir, _date, ''.join([_event,'*']))} | xargs rm")
+                    _delQ.put(f"ls {os.path.join(_cropdir, _date, ''.join([_event,'*']))} "
+                              f"2>/dev/null | xargs -r rm")
                 # Send deletion alert to sentinel for re-broadcast to subscribers
                 alert = {
                     'task': 'ALERT',
