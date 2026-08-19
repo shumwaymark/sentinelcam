@@ -89,6 +89,53 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   datapump's missing-file placeholder, so a crop that never landed reads as absent — the
   scene frame — rather than as a black card.
 
+- **A restart shredded whatever the camwatcher was recording.** There was no signal
+  handling at all, so the SIGTERM from a service restart killed the interpreter where it
+  stood. The shutdown path never ran, and neither did the CSV writer's close — which is what
+  actually commits a tracking file, since rows are written in text mode and none of them
+  reach disk until the file closes. An event caught in flight was therefore left as a
+  *zero-byte* file: its header still sitting in a buffer that died with the process, the
+  file itself already truncated by the open that created it. Worse than losing the event,
+  that file raises on read rather than parsing as a short one, so the damage surfaced later
+  and somewhere else.
+
+  The camwatcher now catches the signal and shuts down deliberately. An event still in
+  flight gets a brief drain — long enough for the outpost to deliver its `end`, in which
+  case the event closes the normal way with its post-event tasks submitted and nothing lost
+  at all. Whatever is still open when the drain expires is committed short, which is the
+  part that matters: a valid CSV of what was seen before the lights went out. Children are
+  then reaped in order, with `CSVindex` last, since it owns the event index and every writer
+  above it may still be queueing rows at it on the way out.
+
+  This required a change to the systemd unit, and the two are a matched pair. The default
+  `KillMode=control-group` signals every process in the unit at once, which would kill the
+  child processes out from under the parent trying to shut them down in sequence. The unit
+  now specifies `KillMode=mixed`, handing the camwatcher sole responsibility for its own
+  children — so any child added later must be reaped explicitly, or it will orphan and stall
+  the exit.
+
+- **A late crop record destroyed its event's crop data.** The crop stream is not bracketed
+  by start and end the way tracking is, so a crop arriving after its event had already
+  closed re-originated the synthetic `crp` start — re-opening the correlation file for
+  writing and truncating everything the completed event had recorded there. The crop JPEGs
+  survived on disk but became unreachable through the documented join, since the records
+  that addressed them were gone. Seven events in a single day on the street camera, with
+  lags of five, twelve, and thirty-nine minutes between an event closing and a straggler
+  arriving for it. Correlation files are now appended rather than rewritten, the header and
+  index row are first-time-only work, and each crop record is flushed on arrival — it may
+  never see the `end` that would otherwise close its file. Why a crop record can land
+  thirty-nine minutes late is a separate question, still open, and upstream on the outpost.
+
+- **The deployment pipeline's final stage had never run.** Package delivery and the Ansible
+  sync to the ramrod node both worked, and then nothing deployed — every deployment had to
+  be driven by hand from the ramrod. The pre-deployment gate invoked `ansible` from the
+  calling shell's working directory rather than the Ansible home, so `ansible.cfg` was never
+  read and the vault password file with it. Every connectivity probe died on the first
+  encrypted group variable, and because the gate discarded standard error, a configuration
+  failure was reported as unreachable nodes and misdiagnosed as a network problem for well
+  over a year. The gate now sets `ANSIBLE_CONFIG` explicitly, which survives any working
+  directory, and logs what actually failed.
+
 ### Changed
 
 - **Daily cleanup retention policy is now inventory-driven.** The deployed
@@ -96,6 +143,23 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   overridable per host, and is regenerated on every deploy. Retention is no longer a file to
   be hand-edited on the node. Includes a documented study-hold override for holding a
   complete measured-vehicle population on a street camera across a traffic study.
+
+- **Deployments now carry configuration alongside code.** The pipeline deployed code only,
+  which meant a release could land new code on a node still reading stale settings, and left
+  the **sentinel** task definitions to be shipped by hand. Configuration templates and the
+  sentinel task YAMLs are part of a release, not part of provisioning, and now deploy with
+  the code that expects them. Systemd unit files stay excluded on purpose: they change
+  rarely, and rewriting one changes restart semantics — worth doing deliberately rather than
+  as a side effect of shipping a bug fix.
+
+  This was gated on a latent hazard in the **watchtower** configuration. Its ring buffers
+  are generated from the resolutions in the current outpost registry, so a camera that
+  changes size silently retires the old one, and every event already recorded at that size
+  loses the buffer it needs to be replayed. The running kiosk had been hand-patched to keep
+  a retired resolution alive; shipping configuration automatically would have quietly undone
+  that on the first deployment. Retired resolutions are now recorded in the site registry
+  and rendered alongside the derived ones, so replay of historical events survives a camera
+  resize. An entry can be dropped once the event data at that size has aged out.
 
 ## 0.3.0-alpha - 2026-06-27
 
