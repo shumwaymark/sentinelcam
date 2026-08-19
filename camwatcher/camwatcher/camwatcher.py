@@ -14,13 +14,14 @@ import logging
 import logging.config
 import multiprocessing
 import shutil
+import signal
 import subprocess
 import threading
 import traceback
 import queue
 import zmq
 import pandas as pd
-from time import sleep
+from time import sleep, monotonic
 from datetime import date, datetime
 from zmq.asyncio import Context as AsyncContext
 from sentinelcam.camdata import CamData
@@ -31,6 +32,7 @@ CFG = readConfig(os.path.join(os.path.expanduser("~"), "camwatcher.yaml"))
 outposts = {}                        # outpost image subscribers by (node,view)
 crop_writers = {}                    # OAK crop subscribers by (node,view); only crop-publishing nodes
 outpost_health = {}                  # per-outpost health tracking by node name
+adhoc_agents = {}                    # ad hoc SentinelAgents spawned via the 'Agent' control command
 _event_meta = {}                     # (node,view,event) -> (camsize, start_ts), cached from the trk 'start'
 _crp_active = set()                  # (node,view,event) with an open crp correlation file
 _crp_record_counts = {}              # (node,view) -> total crp records captured; HC reconciliation vs crops written
@@ -38,6 +40,17 @@ threadLock = threading.Lock()        # coordinate updates to list of outpost sub
 dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer
 dateIndxQ = multiprocessing.Queue()  # for creating new camwatcher index entries
 sentinel_alertQ = multiprocessing.Queue()  # for sending alerts to sentinel
+
+# Shutdown pacing. The drain gives an outpost a moment to deliver the `end` for any
+# event still in flight, so a restart landing mid-event can close it the normal way --
+# post-event tasks submitted and all -- instead of truncating it. Events routinely run
+# longer than this, so the wait is a courtesy rather than a guarantee: whatever is still
+# open when it expires gets closed cleanly anyway, which is the part that matters. The
+# damage being avoided is a tracking CSV left at zero bytes, its header still sitting in
+# a buffer that died with the process.
+SHUTDOWN_DRAIN_SECS = 5.0    # wait for outposts to close events already under way
+SHUTDOWN_QUEUE_SECS = 5.0    # wait for queued CSV rows and index entries to land
+SHUTDOWN_JOIN_SECS = 5.0     # per-child wait on terminate, and again on kill
 
 _start_time = datetime.now()         # process start time for uptime tracking
 _events_today = multiprocessing.Value('L', 0)  # event counter for current date
@@ -85,6 +98,7 @@ class ImageStreamWriter:
         return path
 
     def _image_subscriber(self, writeImages, frames_written, eventQueue, publisher, view, outdir):
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)  # see the note in _crop_subscriber
         receiver = ImageSubscriber(publisher, view)
         while True:
             eventID = eventQueue.get()
@@ -174,6 +188,11 @@ class CropStreamWriter:
         return path
 
     def _crop_subscriber(self, frames_written, publisher, view, outdir):
+        # The parent installs an asyncio signal handler for SIGTERM, and a child
+        # forked after that point inherits it -- pointing at an event loop that
+        # does not run here. A re-armed crop subscriber is exactly such a child.
+        # Restore the default disposition so the parent's terminate() is obeyed.
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
         receiver = CropSubscriber(publisher, view)
         receiver.start()
         while True:
@@ -391,10 +410,21 @@ class CSVwriter:
                 try:
                     _recType = _data['type']
                     if _recType == 'start':
+                        # A `start` is not always the first one for this file. Crop records
+                        # can arrive after their event has already ended -- the crop stream
+                        # is not bracketed by start/end, so a late one re-originates the
+                        # synthetic start and lands back here. Opening 'wt' truncated the
+                        # completed event's crop data on the way past, leaving a zero-byte
+                        # file and its crops unreachable through the documented join. Append
+                        # instead, and treat header and index row as first-time-only work.
+                        _fname = _data['id'] + '_' + _tag + '.csv'
+                        _fresh = not os.path.exists(os.path.join(
+                            self._folder, _data['timestamp'][:10], _fname))
                         f = open(os.path.join(self._set_index(
-                            _node, _view, _data['id'], _data['timestamp'], _data['camsize'], _tag, _data['new']),
-                            _data['id'] + '_' + _tag + '.csv'), mode='wt')
-                        f.write(self._header(_tag))  # column headers per record type
+                            _node, _view, _data['id'], _data['timestamp'], _data['camsize'],
+                            _tag, _data['new'] and _fresh), _fname), mode='at')
+                        if _fresh:
+                            f.write(self._header(_tag))  # column headers per record type
                         self._openfiles[_ref] = f # add to list
                     elif _recType == 'end':
                         logging.debug(f"CSVwriter closing file for {_ref}")
@@ -402,6 +432,11 @@ class CSVwriter:
                         del self._openfiles[_ref] # remove from list
                     elif _recType == _tag:
                         self._openfiles[_ref].write(self._format_row(_tag, _data))
+                        if _tag == 'crp':
+                            # A handful of rows per event, against thousands of trk rows, and
+                            # a late one may never see the `end` that would close the file.
+                            # Cheap enough to make every crop correlation durable on arrival.
+                            self._openfiles[_ref].flush()
                     else:
                         logging.warning(f"Tracking type {_recType} from {_ref} ignored by CSVwriter")
                 except KeyError as keyval:
@@ -413,9 +448,21 @@ class CSVwriter:
         for f in self._openfiles.values():
             f.close()
 
-    def close(self):
+    def close(self, drain_timeout=SHUTDOWN_QUEUE_SECS):
+        """Stop the writer thread, flushing whatever is still queued.
+
+        The thread's exit path closes every open file, which is what actually
+        commits a tracking CSV: rows are written in text mode and none of them
+        reach disk until the close. Draining the queue before raising the stop
+        flag lets the queued tail land in the file rather than dying with the
+        thread -- the difference between a short event and an empty one."""
+        deadline = monotonic() + drain_timeout
+        while not self._dataQ.empty() and monotonic() < deadline:
+            sleep(0.05)
         self._stop = True
-        self._thread.join()
+        self._thread.join(timeout=drain_timeout)
+        if self._thread.is_alive():
+            logging.warning("CSVwriter thread did not stop, open files may be incomplete")
 
 # -------------------------------------------------------------------
 # --------------     Sentinel Agent definition       ----------------
@@ -665,6 +712,26 @@ async def dispatch_logger(topics, msg):
     else:
         logging.critical(f"Outpost logging disruption [{'.'.join(topics)}] {msg}")
 
+def _recover_camsize(eventID, timestamp) -> tuple:
+    """Recover an event's scene size from the index when it is not held in memory.
+
+    Only reached for an event already under way when this process started, which
+    means a restart landed mid-event. The size is still on record in the index row
+    the previous process wrote, so read it back from there rather than stamping the
+    crp row 0x0 -- a bogus camsize outlives the restart and misreports the event to
+    everything downstream. A miss yields the honest unknown."""
+    idxfile = os.path.join(CFG['data']['csvfiles'], timestamp[:10], 'camwatcher.csv')
+    try:
+        with open(idxfile) as index:
+            for line in index:
+                cols = line.rstrip('\n').split(',')
+                if len(cols) == 7 and cols[3] == eventID and cols[4] not in ('0', ''):
+                    return (int(cols[4]), int(cols[5]))
+    except (OSError, ValueError) as e:
+        logging.error(f"camsize recovery failed for event {eventID}: {str(e)}")
+    logging.warning(f"no camsize on record for event {eventID}, crp index row carries 0x0")
+    return (0, 0)
+
 async def dispatch_ote(node, ote_data, sentinel_agent):
     try:
         ote = json.loads(ote_data)
@@ -683,7 +750,9 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
             crp_ref = (node, view, eventID, 'crp')
             if ekey not in _crp_active:
                 _crp_active.add(ekey)
-                _camsize, _start_ts = _event_meta.get(ekey, ((0, 0), ote['timestamp']))
+                _camsize, _start_ts = _event_meta.get(ekey, (None, ote['timestamp']))
+                if _camsize is None:  # event predates this process -- recover from the index
+                    _camsize = _recover_camsize(eventID, _start_ts)
                 dbLogMsgQ.put((crp_ref, {
                     "view": view, "id": eventID, "timestamp": _start_ts,
                     "type": "start", "new": True, "camsize": _camsize,
@@ -817,7 +886,6 @@ def _build_hc_response():
 
 async def control_loop(control_socket, log_socket):
     logging.info("camwatcher control loop started")
-    _agents = {}  # list of dynamically requested ad hoc agents
     while True:
         result = 'OK'
         msg = await control_socket.recv()
@@ -841,14 +909,14 @@ async def control_loop(control_socket, log_socket):
                 elif request['cmd'] == 'Agent':
                     # Used to dynamically spawn ad hoc Sentinel Agents within a running camwatcher.
                     name = request['name']
-                    if name not in _agents:
+                    if name not in adhoc_agents:
                         new_agent = {}
                         new_agent['name'] = name
                         new_agent['requests'] = request['requests']
                         new_agent['publisher'] = request['publisher']
                         new_agent['datapump'] = request['datapump']
                         new_agent['datasink'] = request['datasink']
-                        _agents[name] = SentinelAgent(new_agent, dateIndxQ, name)
+                        adhoc_agents[name] = SentinelAgent(new_agent, dateIndxQ, name)
                 elif request['cmd'] == 'DelEvt':
                     # TODO: This code not currently restricted by FaceList.event_locked() control
                     dateIndxQ.put((CSVindex.CSV_delete, (request['date'], request['event'])))
@@ -940,6 +1008,69 @@ async def crop_writer_watchdog(interval=60, grace=180, max_grace=3600):
                     progress, strikes, crops = now, strikes + 1, writer._frames_written.value
             last[nv] = (crp, crops, progress, strikes)
 
+async def _await_quiet_outposts(timeout) -> bool:
+    """Wait out any event still in flight, up to `timeout` seconds."""
+    deadline = monotonic() + timeout
+    while _event_meta or _crp_active:
+        if monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.1)
+    return True
+
+def _reap(name, proc) -> None:
+    """Terminate a child process, escalating if it will not go."""
+    if proc is None or not proc.is_alive():
+        return
+    proc.terminate()
+    proc.join(timeout=SHUTDOWN_JOIN_SECS)
+    if proc.is_alive():
+        logging.warning(f"{name} (pid {proc.pid}) ignored SIGTERM, killing")
+        proc.kill()
+        proc.join(timeout=SHUTDOWN_JOIN_SECS)
+
+async def _shutdown(csv, csvidx, agent, workers) -> None:
+    """Bring camwatcher down without shredding whatever it was recording.
+
+    Order matters here. Outposts are told to stop first, so no new frames arrive
+    for an event about to be cut short. The worker tasks come next, then the CSV
+    writer -- whose thread is what actually commits the tracking files -- and only
+    then the children. CSVindex goes last of all: it owns the event index, and
+    every writer above it may still be queueing index rows on the way out."""
+    inflight = sorted({evt for (_node, _view, evt) in set(_event_meta) | _crp_active})
+    if inflight:
+        logging.warning(f"shutdown with {len(inflight)} event(s) in flight: {', '.join(inflight)}")
+        if await _await_quiet_outposts(SHUTDOWN_DRAIN_SECS):
+            logging.info("in-flight events closed normally during drain")
+        else:
+            logging.warning("drain expired, closing remaining events short of their 'end'")
+
+    with threadLock:
+        for writer in outposts.values():
+            writer.stop()
+
+    for task in workers:
+        task.cancel()
+    await asyncio.gather(*workers, return_exceptions=True)
+
+    csv.close()  # joins the writer thread, committing every open tracking CSV
+
+    with threadLock:
+        for node_view, writer in outposts.items():
+            _reap(f"ImageStreamWriter {node_view}", writer.process)
+        for node_view, writer in crop_writers.items():
+            _reap(f"CropStreamWriter {node_view}", writer.process)
+    _reap("SentinelAgent", agent.process)
+    for name, adhoc in adhoc_agents.items():
+        # KillMode=mixed hands the parent sole responsibility for its children, and
+        # these are non-daemon processes: an unreaped one stalls interpreter exit.
+        _reap(f"SentinelAgent '{name}'", adhoc.process)
+
+    # Index rows written on the way out are still draining toward CSVindex.
+    deadline = monotonic() + SHUTDOWN_QUEUE_SECS
+    while not dateIndxQ.empty() and monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    _reap("CSVindex", csvidx.process)
+
 async def main():
     _data = CFG['data']
     logging.config.dictConfig(CFG['logconfigs']['camwatcher_internal'])
@@ -970,19 +1101,38 @@ async def main():
             if 'crops' in _nodecfg:  # OAK outposts only — picamera nodes publish no crop stream
                 crop_writers[node_view] = CropStreamWriter(node_view, _nodecfg['crops'], _data["crops"])
             asyncSUB.connect(_nodecfg['logger'])
+    # Signal handling is installed here, after every child has been forked, so that
+    # none of them inherit a handler bound to this process's event loop. Without it
+    # SIGTERM kills the interpreter where it stands: the `finally` below never runs,
+    # the CSV writer never closes its files, and an event in flight is left as a
+    # zero-byte tracking file that raises on read instead of parsing as a short one.
+    workers = [asyncio.ensure_future(coro) for coro in (
+        control_loop(asyncREP, asyncSUB),
+        process_logs(asyncSUB, agent),
+        alert_sender(),
+        crop_writer_watchdog())]
+    stop_event = asyncio.Event()
+    stopper = asyncio.ensure_future(stop_event.wait())
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(signum, stop_event.set)
     try:
-        await asyncio.gather(control_loop(asyncREP, asyncSUB),
-                             process_logs(asyncSUB, agent),
-                             alert_sender(),
-                             crop_writer_watchdog())
+        await asyncio.wait([*workers, stopper], return_when=asyncio.FIRST_COMPLETED)
+        if stop_event.is_set():
+            log.warning('SIGTERM or SIGINT received, shutting down')
+        else:
+            for task in workers:  # a worker fell over on its own, surface why
+                if task.done() and task.exception() is not None:
+                    raise task.exception()
     except (KeyboardInterrupt, SystemExit):
         log.warning('Ctrl-C was pressed or SIGTERM was received')
     except Exception:  # traceback will appear in log
         log.exception('Unanticipated error with no Exception handler.')
     finally:
+        stopper.cancel()
+        await _shutdown(csv, _csvidx, agent, workers)
         asyncREP.close()
         asyncSUB.close()
-        csv.close()
         log.info("camwatcher shutdown")
 
 if __name__ == '__main__' :

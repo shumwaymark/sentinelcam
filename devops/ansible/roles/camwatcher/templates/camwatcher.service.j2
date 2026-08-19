@@ -14,6 +14,15 @@ Group={{ sentinelcam_group }}
 Restart=always
 RestartSec=5
 ExecStart={{ sentinelcam_services.python_executable }} -u {{ camwatcher_install_path }}/camwatcher.py
+# CamWatcher forks and manages its own children (stream writers, CSVindex, the
+# sentinel agent), and on SIGTERM it closes them down in a deliberate order so an
+# event caught in flight is committed rather than truncated. The default
+# KillMode=control-group would SIGTERM that whole set at once, killing the children
+# out from under the parent that is trying to shut them down cleanly. `mixed` sends
+# the signal to the main process alone and leaves the ordering to CamWatcher; the
+# timeout is the backstop that SIGKILLs anything still standing.
+KillMode=mixed
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target
