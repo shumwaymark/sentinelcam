@@ -8,6 +8,7 @@ License: MIT, see the sentinelcam LICENSE for more details.
 
 import os
 import asyncio
+import glob
 import json
 import logging
 import logging.config
@@ -210,6 +211,12 @@ class CSVindex:
     CSV_delete = 2
     CSV_delete_images = 3
 
+    # Purge pacing: yield briefly every this many files unlinked, and once between
+    # globs, so deletion stays background work without stretching minutes of unlinks
+    # into hours. See _purge_loop for the measurements behind these.
+    PURGE_YIELD_FILES = 100
+    PURGE_YIELD_SECS = 0.05
+
     def __init__(self, indxQ, alertQ):
         self.process = multiprocessing.Process(target=self._run, args=(indxQ, alertQ))
         self.process.start()
@@ -244,16 +251,14 @@ class CSVindex:
                 result = subprocess.run(_sh, shell=False, capture_output=True, text=True)
                 if result.returncode != 0:
                     logging.error(f"CSVindex index delete error {result.returncode} for {_date}/{_event}")
-                # Not every event owns every kind of data — a picamera node publishes no crops
-                # at all, an event whose scenes already expired owns no frames, and a short
-                # traversal may produce neither. Missing data is a normal outcome of deletion,
-                # not a failure to log: quiet the globs so a real purge error stays visible.
-                _delQ.put(f"rm -f {os.path.join(_csvdir, _date, ''.join([_event,'*']))}")
-                _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} "
-                          f"2>/dev/null | xargs -r rm")
+                # Not every event owns every kind of data — a picamera node publishes no
+                # crops at all, an event whose scenes already expired owns no frames, and a
+                # short traversal may produce neither. A glob that matches nothing is a
+                # normal outcome of deletion, and the purge loop treats it as one.
+                _delQ.put(os.path.join(_csvdir, _date, _event + '*'))
+                _delQ.put(os.path.join(_imgdir, _date, _event + '*'))
                 if _cropdir:  # remove any OAK crop JPEGs for this event
-                    _delQ.put(f"ls {os.path.join(_cropdir, _date, ''.join([_event,'*']))} "
-                              f"2>/dev/null | xargs -r rm")
+                    _delQ.put(os.path.join(_cropdir, _date, _event + '*'))
                 # Send deletion alert to sentinel for re-broadcast to subscribers
                 alert = {
                     'task': 'ALERT',
@@ -280,17 +285,51 @@ class CSVindex:
                 # Quiet and idempotent: an event whose frames are already gone is a normal
                 # re-issue (the expiry band overlaps runs), not a failure to log.
                 (_date, _event) = msg
-                _delQ.put(f"ls {os.path.join(_imgdir, _date, ''.join([_event,'*']))} "
-                          f"2>/dev/null | xargs -r rm")
+                _delQ.put(os.path.join(_imgdir, _date, _event + '*'))
+
+    def _purge_files(self, pattern) -> int:
+        """Unlink everything matching a glob, yielding as the work is done.
+
+        Returns the number of files removed. A pattern matching nothing removes
+        nothing and is not an error — see the note at the CSV_delete producer."""
+        removed = 0
+        for i, path in enumerate(glob.glob(pattern), start=1):
+            try:
+                os.unlink(path)
+                removed += 1
+            except FileNotFoundError:
+                pass  # already gone; purging is idempotent by design
+            if i % CSVindex.PURGE_YIELD_FILES == 0:
+                sleep(CSVindex.PURGE_YIELD_SECS)
+        return removed
 
     def _purge_loop(self, delQ):
+        """Delete data files for removed events and expired scenes.
+
+        Deletion is background work and must not compete with the writers for the
+        datasink's resources — but the throttle has to be aimed at the resource
+        actually under contention. Measured on data1 (Pi 5, NVMe): unlinking a
+        full event's 300 frames takes 9ms, and nearly all the cost of the previous
+        shell-out implementation was spawning sh+ls+xargs+rm per glob, not disk.
+        A flat 2s sleep per command therefore paced ~9ms of work with 2000ms of
+        idling; and since get() already blocks on an empty queue, it did nothing
+        whatsoever except when a backlog existed — precisely when the work should
+        have been moving. One night's cleanup stretched two minutes of unlinks
+        across eight hours, overlapping every other overnight job instead of
+        finishing well ahead of them.
+
+        So: unlink directly, no subprocess, and yield by files handled rather than
+        by glob issued, so the pause tracks the work actually done."""
         while True:
-            cmd = delQ.get()
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            if result.returncode != 0:
-                logging.warning(f"CSVindex data deletion failure {result.returncode} from '{cmd}'")
+            pattern = delQ.get()
+            try:
+                removed = self._purge_files(pattern)
+                if removed:
+                    logging.debug(f"CSVindex purged {removed} files matching '{pattern}'")
+            except Exception:
+                logging.exception(f"CSVindex data deletion failure for '{pattern}'")
             delQ.task_done()
-            sleep(2)
+            sleep(CSVindex.PURGE_YIELD_SECS)
 
 # Disk I/O CSV writer thread
 class CSVwriter:
