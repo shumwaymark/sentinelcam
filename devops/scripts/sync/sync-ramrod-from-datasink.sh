@@ -117,37 +117,12 @@ if [ ${#deploy_components[@]} -eq 0 ]; then
     deploy_components=("datapump" "camwatcher" "outpost" "watchtower" "sentinel")
 fi
 
-# Determine which Ansible host groups are actually needed for this deployment
-validation_groups=()
-for component in "${deploy_components[@]}"; do
-    case $component in
-        "datapump"|"camwatcher")
-            [[ " ${validation_groups[*]} " =~ " datasinks " ]] || validation_groups+=("datasinks")
-            ;;
-        "outpost")
-            [[ " ${validation_groups[*]} " =~ " outposts " ]] || validation_groups+=("outposts")
-            ;;
-        "watchtower")
-            [[ " ${validation_groups[*]} " =~ " watchtowers " ]] || validation_groups+=("watchtowers")
-            ;;
-        "sentinel")
-            [[ " ${validation_groups[*]} " =~ " sentinels " ]] || validation_groups+=("sentinels")
-            ;;
-    esac
-done
-
-# Run production validation against only the groups we're deploying to
-log "Running production validation for groups: ${validation_groups[*]}..."
-if [ -f "$SENTINELCAM_HOME/devops/scripts/deployment/production-validation.sh" ]; then
-    if "$SENTINELCAM_HOME/devops/scripts/deployment/production-validation.sh" ${validation_groups[*]}; then
-        log "[+] Production validation passed"
-    else
-        log "ERROR: Production validation failed"
-        exit 1
-    fi
-else
-    log "WARNING: Production validation script not found - skipping validation"
-fi
+# No pre-flight gate. The gate that used to sit here measured the ramrod's own disk,
+# memory and load -- which say nothing about the nodes being deployed to -- and then
+# pre-pinged hosts that Ansible itself reports on a second later, more accurately. Its
+# only real function is now covered better by the deployment summary, which reports
+# unreachable hosts per component and exits non-zero. Ansible fails a play on an
+# unreachable host regardless, so nothing is lost by trusting it.
 
 # Execute deployments using current ansible implementation
 log "Executing deployments using current playbook structure..."

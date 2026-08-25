@@ -168,7 +168,6 @@ check_control_node_health() {
     fi
     
     # Check production validation script
-    check_health "Production Validation Script" "test -x $SCRIPT_DIR/production-validation.sh" "success"
     
     # Check last deployment status
     if [ -f "~/sentinelcam/devops/ansible/logs/last_deployment.status" ]; then

@@ -7,7 +7,6 @@ This directory contains shell scripts and utilities that support SentinelCam Dev
 ```
 scripts/
 ├── deployment/                        # Deployment pipeline scripts
-│   ├── production-validation.sh
 │   ├── promote-to-production.sh
 │   ├── rollback-to-last-stable.sh
 │   └── deployment-health-monitor.sh
