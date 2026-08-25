@@ -353,6 +353,18 @@ class JobTasking:
     # --------------------------------------------------------------------------------------------------
     def taskHost(self, engineName, pump, taskCFG, accelerator, taskQ, _ringbuff, ringLatency):
     # --------------------------------------------------------------------------------------------------
+        # The parent owns this child's lifecycle, and reaps it with kill() -- see
+        # JobTasking.terminate(). Ignore SIGTERM explicitly so that a stop signal delivered
+        # to the whole control group (systemd's default KillMode) cannot cut a running task
+        # out from under the graceful drain, which needs its engines alive to finish the
+        # work in flight before state is serialized.
+        #
+        # This has been the behavior all along, but only by accident: the child is forked
+        # after loop.add_signal_handler(SIGTERM, ...) installs a no-op handler in the parent,
+        # and inherits it. Forking engines earlier, or reworking the signal wiring, would
+        # have silently removed the protection -- with jobs disappearing on restart as the
+        # only symptom. Make it explicit and independent of that ordering.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:
             ring_start_sum, ring_start_max, ring_start_count, ring_next_sum, ring_next_max, ring_next_count = ringLatency
             taskpump = pump
