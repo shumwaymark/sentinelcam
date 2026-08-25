@@ -171,6 +171,28 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   it. The restart line is the one that matters, being the actual production consequence of
   a deployment. Reporting is wrapped so that it cannot itself fail a deployment.
 
+  With that in place the pre-flight validation gate has been removed rather than kept.
+  It measured the ramrod's own disk, memory and load — which say nothing about the nodes
+  being deployed to — and then pre-pinged hosts that Ansible reports on a second later
+  and more accurately. The one question it existed to answer is now answered better, per
+  component and with a reason attached, by the summary above.
+
+- **A sentinel engine's immunity to SIGTERM is now stated rather than inherited.** The
+  graceful shutdown lets running tasks finish before state is serialized, which requires
+  that its task engines outlive the stop signal — and systemd signals every process in the
+  control group, not just the one it started. The engines did survive that, but only
+  because they are forked after the event loop installs its own no-op signal handler and
+  quietly inherit it. Forking them earlier, or reworking the signal wiring, would have
+  removed the protection with no more symptom than jobs disappearing across a restart.
+  The child now sets the disposition itself. Nothing behaves differently today; the
+  arrangement simply no longer depends on the order two unrelated lines happen to run in.
+
+  The drain was exercised under load for the first time in the process: eight jobs
+  submitted against events carrying face-detection and recognition results, the service
+  restarted with six queued and two running. Every running task was allowed to finish,
+  none timed out, the queue was carried across the restart in the state checkpoint and
+  ran to completion afterward, and no result file was left partially written.
+
 ## 0.3.0-alpha - 2026-06-27
 
 The headline of this release is the **OAK outpost redesign** and the **high-resolution
