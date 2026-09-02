@@ -47,13 +47,37 @@ sentinel_cleanup_default_scene_retention_days: 30
 # deletion, so read one report-only run before enabling if that matters.
 sentinel_cleanup_max_scan_days: 45
 
-# CATCH-UP SWEEP (one-time, then revert to the values above).
-# To drain accumulated backlog — the study hold, or the pre-scene-retention
-# image store — BOTH knobs must be widened. max_scan_days alone does nothing:
-# the expiry band gates which events are eligible once a date is in reach, so a
-# deep scan with a 3-day band still only touches events 31-33 days old.
-# sentinel_cleanup_max_scan_days: 400
-# sentinel_cleanup_scene_expiry_band: 400
+# CATCH-UP SWEEP (one night, then revert every line of this block).
+#
+# Nightly expiry only ever reaches the dates crossing the threshold, so
+# everything that predates the day scene retention went live keeps its frames
+# forever. Measured 2026-09-02: 108.8 GB across 1,025,813 files in 257 date
+# folders, back to 2022-02-09 — but only 9,529 events, since the old dates
+# predate the high-volume street camera. Roughly ten minutes of purge-thread
+# work to reclaim a fifth of the volume.
+#
+# THREE things must change together, and the third is the one that bites:
+#
+#   1. max_scan_days — reach. Must exceed the age of the oldest date.
+#   2. scene_expiry_band — eligibility. Reach alone does nothing: a deep scan
+#      with the standard 3-day band still only touches events 31-33 days old.
+#   3. retention_days on EVERY profile — raised out of the way, so the deep scan
+#      expires frames without also deleting the events themselves. Otherwise a
+#      2000-day scan applies normal retention to five years of history and
+#      deletes the record — CSVs and crops included — which is the opposite of
+#      the point. Retention short-circuits on `age <= retention_days`, so a
+#      large value keeps everything.
+#
+# sentinel_cleanup_max_scan_days: 2000
+# sentinel_cleanup_scene_expiry_band: 2000
+# sentinel_cleanup_person_retention_days: 99999
+# sentinel_cleanup_vehicle_retention_days: 99999
+# sentinel_cleanup_default_retention_days: 99999
+#
+# Run: uncomment, deploy `devops sentinel`, let the 00:00 run go, confirm the
+# reclaim, then re-comment and redeploy. Files left behind afterward are
+# orphans — image files whose index row is already gone — which event-scoped
+# expiry cannot reach and which need their own sweep.
 
 # =============================================================================
 # DELETES ENABLED — inventory is the source of truth
