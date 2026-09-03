@@ -236,6 +236,12 @@ class CSVindex:
     PURGE_YIELD_FILES = 100
     PURGE_YIELD_SECS = 0.05
 
+    # How long a deliberate stop will wait for queued purges to finish. Bounded so
+    # a deep queue cannot hold the service down, and kept under the parent's reap
+    # patience for this child (see _shutdown) so the drain is never cut short by
+    # the SIGKILL escalation it is trying to avoid.
+    PURGE_DRAIN_SECS = 20.0
+
     def __init__(self, indxQ, alertQ):
         self.process = multiprocessing.Process(target=self._run, args=(indxQ, alertQ))
         self.process.start()
@@ -250,6 +256,39 @@ class CSVindex:
         _thread.daemon = True
         _thread.start()
         _sentinel_alert = alertQ
+
+        def _drain_and_exit(signum, frame):
+            """Finish the queued purges before going down.
+
+            An event delete removes its index row synchronously and queues the file
+            removal to _purge_loop. Dying with that queue non-empty strands the files
+            with nothing left pointing at them — no index row means no retention pass
+            can ever reach them again. That is where this sink's orphans came from: a
+            datasink bounced while a purge was still draining. Reproducible on any
+            plain `systemctl restart`, since the parent's shutdown deliberately drains
+            index commands INTO this process before reaping it.
+
+            unfinished_tasks is what Queue.join() waits on; polling it gives the same
+            guarantee with a deadline. Whatever is left over is logged plainly and
+            stays recoverable with datapump/orphan_sweep.py.
+            """
+            pending = _delQ.unfinished_tasks
+            if pending:
+                logging.info(f"CSVindex draining {pending} queued purge(s) before exit")
+                deadline = monotonic() + CSVindex.PURGE_DRAIN_SECS
+                while _delQ.unfinished_tasks and monotonic() < deadline:
+                    sleep(0.05)
+                left = _delQ.unfinished_tasks
+                if left:
+                    logging.warning(
+                        f"CSVindex exiting with {left} purge(s) unfinished — those files "
+                        f"are now orphaned; reclaim with datapump/orphan_sweep.py")
+                else:
+                    logging.info("CSVindex purge queue drained")
+            logging.shutdown()
+            os._exit(0)
+
+        signal.signal(signal.SIGTERM, _drain_and_exit)
         while True:
             (cmd, msg) = indxQ.get()
 
@@ -1017,12 +1056,16 @@ async def _await_quiet_outposts(timeout) -> bool:
         await asyncio.sleep(0.1)
     return True
 
-def _reap(name, proc) -> None:
-    """Terminate a child process, escalating if it will not go."""
+def _reap(name, proc, timeout=SHUTDOWN_JOIN_SECS) -> None:
+    """Terminate a child process, escalating if it will not go.
+
+    `timeout` is per child because they do not all have the same amount to finish:
+    most have nothing, while CSVindex may still be unlinking files for events whose
+    index rows are already gone."""
     if proc is None or not proc.is_alive():
         return
     proc.terminate()
-    proc.join(timeout=SHUTDOWN_JOIN_SECS)
+    proc.join(timeout=timeout)
     if proc.is_alive():
         logging.warning(f"{name} (pid {proc.pid}) ignored SIGTERM, killing")
         proc.kill()
@@ -1069,7 +1112,10 @@ async def _shutdown(csv, csvidx, agent, workers) -> None:
     deadline = monotonic() + SHUTDOWN_QUEUE_SECS
     while not dateIndxQ.empty() and monotonic() < deadline:
         await asyncio.sleep(0.05)
-    _reap("CSVindex", csvidx.process)
+    # CSVindex last, and with room to drain: it is the one child that still owes the
+    # filesystem work on the way out (CSVindex.PURGE_DRAIN_SECS), and killing it early
+    # is what orphans files. Stays inside the unit's TimeoutStopSec.
+    _reap("CSVindex", csvidx.process, timeout=CSVindex.PURGE_DRAIN_SECS + SHUTDOWN_JOIN_SECS)
 
 async def main():
     _data = CFG['data']
