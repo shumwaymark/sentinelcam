@@ -35,6 +35,7 @@ outpost_health = {}                  # per-outpost health tracking by node name
 adhoc_agents = {}                    # ad hoc SentinelAgents spawned via the 'Agent' control command
 _event_meta = {}                     # (node,view,event) -> (camsize, start_ts), cached from the trk 'start'
 _crp_active = set()                  # (node,view,event) with an open crp correlation file
+_inflight_seen = {}                  # (node,view,event) -> monotonic() of last report; ages the two above
 _crp_record_counts = {}              # (node,view) -> total crp records captured; HC reconciliation vs crops written
 threadLock = threading.Lock()        # coordinate updates to list of outpost subscribers
 dbLogMsgQ = queue.Queue()            # log data content messages for CSV writer
@@ -48,6 +49,19 @@ sentinel_alertQ = multiprocessing.Queue()  # for sending alerts to sentinel
 # open when it expires gets closed cleanly anyway, which is the part that matters. The
 # damage being avoided is a tracking CSV left at zero bytes, its header still sitting in
 # a buffer that died with the process.
+# An event counts as in flight only while its outpost is still reporting on it.
+# _event_meta and _crp_active are keyed by event and cleared on `end`, so an event
+# that never gets one — the outpost restarted mid-event, the log message never
+# arrived, a late crop re-opened a key after its event closed — leaks its entry for
+# the life of the process. Observed: 196 of them accumulated over a two-week run,
+# about thirteen a day. The memory is irrelevant; the damage is that
+# _await_quiet_outposts() waits on those structures being empty, so a single stale
+# key makes the shutdown drain unable to ever succeed. Every restart then burned the
+# full timeout and reported closing events short of their `end` — a courtesy that had
+# silently stopped working. Age them out instead.
+INFLIGHT_MAX_AGE = 900.0     # seconds without a report before an event is not in flight
+INFLIGHT_SWEEP_SECS = 300.0  # how often those abandoned keys are released
+
 SHUTDOWN_DRAIN_SECS = 5.0    # wait for outposts to close events already under way
 SHUTDOWN_QUEUE_SECS = 5.0    # wait for queued CSV rows and index entries to land
 SHUTDOWN_JOIN_SECS = 5.0     # per-child wait on terminate, and again on kill
@@ -780,6 +794,7 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
         ote2db = ((node, view, eventID, 'trk'), ote)
         ekey = (node, view, eventID)
         if ote["type"] == 'trk':
+            _inflight_seen[ekey] = monotonic()
             dbLogMsgQ.put(ote2db)
         elif ote["type"] == 'crp':
             # Crop correlation record (OAK). The crop stream is not bracketed by
@@ -796,10 +811,12 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
                     "view": view, "id": eventID, "timestamp": _start_ts,
                     "type": "start", "new": True, "camsize": _camsize,
                 }))
+            _inflight_seen[ekey] = monotonic()
             dbLogMsgQ.put((crp_ref, ote))
             _crp_record_counts[node_view] = _crp_record_counts.get(node_view, 0) + 1
         elif ote["type"] == 'start':
             _event_meta[ekey] = (ote['camsize'], ote['timestamp'])
+            _inflight_seen[ekey] = monotonic()
             dbLogMsgQ.put(ote2db)
             if node_view in outposts:
                 # Start image subscriber / JPEG file writer
@@ -812,6 +829,7 @@ async def dispatch_ote(node, ote_data, sentinel_agent):
                 dbLogMsgQ.put(((node, view, eventID, 'crp'), {"type": "end"}))
                 _crp_active.discard(ekey)
             _event_meta.pop(ekey, None)
+            _inflight_seen.pop(ekey, None)
             if node_view in outposts:
                  # Stop image subscriber
                 outposts[node_view].stop()
@@ -1004,6 +1022,32 @@ async def alert_sender():
         except Exception:
             logging.exception("Alert sender trapped exception")
 
+async def inflight_reaper(interval=INFLIGHT_SWEEP_SECS):
+    """Release bookkeeping for events that will never report an `end`.
+
+    Recency alone is enough to keep the shutdown drain honest, but the entries would
+    still accumulate for the life of the process. Dropping them keeps the structures
+    bounded and — more usefully — makes the loss visible: a steady trickle here means
+    events are routinely going unclosed, which is worth knowing rather than absorbing
+    silently. Releasing a key is safe in both directions: a late crop re-originates
+    its synthetic start, which CSVwriter appends without a duplicate index row, and a
+    missing camsize is recovered from the index."""
+    logging.info("in-flight event reaper started")
+    while True:
+        await asyncio.sleep(interval)
+        now = monotonic()
+        stale = [k for k in set(_event_meta) | _crp_active
+                 if now - _inflight_seen.get(k, 0.0) >= INFLIGHT_MAX_AGE]
+        for k in stale:
+            _event_meta.pop(k, None)
+            _crp_active.discard(k)
+            _inflight_seen.pop(k, None)
+        if stale:
+            events = sorted({evt for (_node, _view, evt) in stale})
+            logging.warning(f"released {len(events)} event(s) that never reported an 'end': "
+                            f"{', '.join(events[:8])}{' ...' if len(events) > 8 else ''}")
+
+
 async def crop_writer_watchdog(interval=60, grace=180, max_grace=3600):
     """Cross-plane liveness check on the crop subscribers.
 
@@ -1047,10 +1091,21 @@ async def crop_writer_watchdog(interval=60, grace=180, max_grace=3600):
                     progress, strikes, crops = now, strikes + 1, writer._frames_written.value
             last[nv] = (crp, crops, progress, strikes)
 
+def _inflight_events(max_age=INFLIGHT_MAX_AGE) -> set:
+    """Events whose outpost is still reporting on them.
+
+    Membership in _event_meta / _crp_active only says an `end` has not been seen,
+    which is not the same thing: an abandoned event sits there forever. Recency is
+    what distinguishes the two, so consult this rather than the raw structures."""
+    now = monotonic()
+    return {k for k in set(_event_meta) | _crp_active
+            if now - _inflight_seen.get(k, 0.0) < max_age}
+
+
 async def _await_quiet_outposts(timeout) -> bool:
     """Wait out any event still in flight, up to `timeout` seconds."""
     deadline = monotonic() + timeout
-    while _event_meta or _crp_active:
+    while _inflight_events():
         if monotonic() >= deadline:
             return False
         await asyncio.sleep(0.1)
@@ -1079,7 +1134,7 @@ async def _shutdown(csv, csvidx, agent, workers) -> None:
     writer -- whose thread is what actually commits the tracking files -- and only
     then the children. CSVindex goes last of all: it owns the event index, and
     every writer above it may still be queueing index rows on the way out."""
-    inflight = sorted({evt for (_node, _view, evt) in set(_event_meta) | _crp_active})
+    inflight = sorted({evt for (_node, _view, evt) in _inflight_events()})
     if inflight:
         logging.warning(f"shutdown with {len(inflight)} event(s) in flight: {', '.join(inflight)}")
         if await _await_quiet_outposts(SHUTDOWN_DRAIN_SECS):
@@ -1156,7 +1211,8 @@ async def main():
         control_loop(asyncREP, asyncSUB),
         process_logs(asyncSUB, agent),
         alert_sender(),
-        crop_writer_watchdog())]
+        crop_writer_watchdog(),
+        inflight_reaper())]
     stop_event = asyncio.Event()
     stopper = asyncio.ensure_future(stop_event.wait())
     loop = asyncio.get_running_loop()
