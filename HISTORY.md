@@ -66,6 +66,40 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
+- **A wedged inference accelerator stalled outpost detection, silently and indefinitely.**
+  The **outpost** would stop reporting events while its live scene feed carried on
+  untroubled. Caught live on a Coral-equipped node: the heartbeat ran on at 32 fps with its
+  `looks` counter frozen at the same value across twelve consecutive reports — the main loop,
+  the scene publisher and the frame rate all perfectly healthy while detection was dead. The
+  inference child was still alive, still holding the USB device open, its libusb event thread
+  still polling, and its main thread parked in a futex: the runtime waiting on a completion
+  callback that was never going to arrive. The kernel log's last word on the device was the
+  process start, eighty minutes earlier.
+
+  Nothing raises. There is no USB reset, no kernel event, no exception, no error return —
+  only a reply that never comes. A deadline is therefore the only detector available, and
+  killing the child is the only recovery, because the blocking call sits in C holding the
+  device file descriptor where no signal handler runs and no stop flag is ever read. That is
+  also why the restart that clears it has always taken so long: the wedged child cannot
+  service SIGTERM, so the shutdown waits out its timeout.
+
+  The watchdog is deliberately *not* "time since the request was sent". A healthy result may
+  sit on the wire unconsumed for a long while — during a quiet scene the outpost never
+  collects it, and the request/reply pairing is left intact by design — so that test would
+  fire on a perfectly healthy idle camera. The discriminator is the wire itself: an answered
+  request is readable whatever the caller does about it. Nothing readable, for this long,
+  means the child never answered.
+
+  `SpyGlass` gains the deadline and a `recycle()`; `LensTasking` gains the ability to kill its
+  child and stand up a fresh one — rebuilding the IPC wire, whose socket is stranded
+  mid-transaction and cannot be reused, while the shared frame buffer is plain memory and is
+  kept. The recycle handshake is bounded: blocking the main loop on a child that may never
+  come up would turn a detection outage into a total outpost stall, which is worse than the
+  fault being recovered. Configured per camera as `spyglass_timeout` (default 30 seconds, 0
+  disables), which must clear a cold start since the child loads its model before it can
+  answer. A recycle announces itself on its own log line rather than in the heartbeat, whose
+  shape is a parsing contract with the **camwatcher**.
+
 - **Deploying the sentinel deleted its state file.** Code deployment is an `rsync --delete`
   into the component's install directory, which makes the destination match the source exactly.
   Runtime state lives in that same directory, and the exclusion list had grown to cover

@@ -47,6 +47,12 @@ cameras:
             spyglass: {{ camera.resolution | string }}
             detectobjects: {{ camera.detector.detectobjects | default('none') }}
             accelerator: {{ camera.detector.accelerator | default('none') }}
+            # Seconds an unanswered SpyGlass inference may stand before the child is
+            # presumed wedged and replaced. A USB accelerator can stop answering with
+            # no error, no exception and no kernel event -- there is nothing to catch,
+            # only a reply that never comes -- so a deadline is the sole detector.
+            # 0 disables. Must clear a cold start (model load + 3s settle).
+            spyglass_timeout: {{ camera.detector.spyglass_timeout | default(30) }}
 {% if camera.detector.tracker is defined and camera.detector.tracker is mapping %}
             # §4.10: host-tracker config (a dict) opts this node into the unified
             # lifecycle. Lives at the detector level for ALL node types (OAK + picamera);

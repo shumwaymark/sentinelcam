@@ -36,6 +36,10 @@ cameras:
             spyglass: (640, 480)                 # must match camera "resolution" above
             detectobjects: mobilenetssd          # [none, mobilenetssd]
             accelerator: none                    # [none, ncs2, coral]
+            spyglass_timeout: 30                 # sec an unanswered inference may stand
+                                                 # before the child is presumed wedged and
+                                                 # replaced; 0 disables. Must clear a cold
+                                                 # start (model load + 3s settle).
             tracker:
                 min_confidence_new: 0.50
                 # interesting_classes: [person, vehicle]  # default; override to expand trigger set
