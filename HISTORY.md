@@ -66,6 +66,20 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
+- **Deploying the sentinel deleted its state file.** Code deployment is an `rsync --delete`
+  into the component's install directory, which makes the destination match the source exactly.
+  Runtime state lives in that same directory, and the exclusion list had grown to cover
+  `models/`, `sockets/` and `tasks/` — but not `state.json`, a bare file at the root of the
+  sentinel's target. Every sentinel deploy therefore erased the job history and reset the engine
+  health record, including `total_restarts`, so the `max_auto_restarts` lifetime give-up counter
+  had effectively never accumulated across a deploy. Found by dry-running the real rsync against
+  each node, which also turned up the outpost's `depthai` device cache going the same way.
+
+  Both exclusions added, and the two deployment paths — local on the primary data sink, pull for
+  every other node — reconciled: the local one had silently been missing `tasks/`. The same dry
+  run now reports nothing deleted on either node. The list carries a note that these entries are
+  load-bearing, since the failure is silent and only shows up as data that quietly went missing.
+
 - **A wedged Coral accelerator hung a task engine indefinitely, and nothing could see it.**
   A `GetFaces` job would stop returning, the queue would back up behind it, and the Coral's
   LED would sit there steadily flashing until someone happened to check. Restarting the task

@@ -57,6 +57,12 @@
 
 # For PRIMARY data sink: deploy from local current_deployment directory
 # Secondary datasinks will use remote deployment from primary
+# RUNTIME STATE LIVES INSIDE THE DEPLOYMENT TARGET, so every exclusion below is
+# load-bearing: `--delete` makes the destination match the source exactly, and
+# anything here is generated on the node and belongs to no component's source
+# tree. Dropping one silently destroys live data on the next deploy -- state.json
+# was missed until a sentinel deploy erased its job history and reset the
+# lifetime auto-restart accounting. Keep this list identical in both tasks.
 - name: "Deploy source code locally on primary data sink"
   ansible.builtin.synchronize:
     src: "{{ code_source_path }}/{{ item.source }}/"
@@ -70,6 +76,9 @@
       - "--exclude=*.swp"
       - "--exclude=models/"
       - "--exclude=sockets/"
+      - "--exclude=tasks/"
+      - "--exclude=state.json"    # sentinel: maintenance.state_file
+      - "--exclude=.cache/"       # outpost: depthai device/telemetry cache
     owner: yes
     group: yes
   delegate_to: "{{ inventory_hostname }}"  # Run locally on the data sink
@@ -90,6 +99,7 @@
       rsync -avz --delete
       --exclude=*.pyc --exclude=__pycache__ --exclude=*.log --exclude=.git --exclude=*.swp
       --exclude=models/ --exclude=sockets/ --exclude=tasks/
+      --exclude=state.json --exclude=.cache/
       {{ primary_datasink }}:{{ sentinelcam_deployment_source }}/{{ item.source }}/
       {{ item.dest }}/
   become: false
