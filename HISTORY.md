@@ -66,6 +66,42 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
+- **The OAK event plane was never shut down.** Every restart of an OAK outpost logged an
+  ERROR traceback — `RuntimeError('zmq gc socket requested during shutdown')` — published to
+  the log plane. Harmless in effect, since the process was going away regardless, but an
+  ERROR-level traceback on every restart is exactly what hides a *real* publisher fault, the
+  same way the nightly purge-glob failures hid real deletion errors.
+
+  The **outpost**'s two event-plane threads, `ScenePublisher` and `OutpostIntake`, are daemon
+  threads with working `stop()` methods that nothing ever called. On SIGTERM the main thread
+  ran `closeall()` and exited while the publisher kept pulling frames off the device queue and
+  calling `send_jpg`, until pyzmq's garbage collector refused it a socket during interpreter
+  teardown. The ordering in the log was the proof: the error landed 29 ms *after* "Exiting
+  imagenode.py".
+
+  The hook already existed — imagenode's `closeall()` calls `camera.cam.stop()` for every
+  camera, which on an OAK node lands on `OAKcamera.stop()`, which was `pass`. The wiring is
+  less obvious than it looks: the framework builds the `OAKcamera` shim in `Camera.__init__`
+  *after* `setup_detectors` has already constructed the `Outpost` and run `setup_OAK`, so
+  `setup_OAK` cannot hand the threads to the shim directly. They are registered instead on a
+  class-level plane registry keyed by viewname, which the shim drains on stop.
+
+  Teardown now runs in the only order that works — stop and join both threads, then stop the
+  device pipeline, then close the sockets those threads were publishing to. `OakCamera.close()`
+  had existed since the redesign with no callers at all, so the device pipeline had never been
+  stopped on any restart. The scene publisher is a process-wide singleton shared across views
+  and closes only once the last plane is down. A thread that misses its join budget warns and
+  teardown continues rather than stalling the shutdown.
+
+  Wiring the join exposed a latent bug that had been waiting for a caller: both thread classes
+  stored their stop flag as `self._stop`, shadowing `threading.Thread._stop` — an internal
+  method that `_wait_for_tstate_lock()` calls from *both* `join()` and `is_alive()`. Every
+  such call against a finished thread raised `TypeError: 'Event' object is not callable`. It
+  had never fired because nothing had ever joined these threads or checked their liveness. The
+  flag is now `_halt`, and `ScenePublisher` additionally treats a `RuntimeError` naming
+  "during shutdown" as a stop signal rather than a logged traceback, as belt and braces for a
+  lost race under SIGKILL or a join timeout.
+
 - **Missing scene frames replayed as full-screen black.** The datapump answers a missing
   image with a 1×1 placeholder rather than an error, and the **watchtower** player assigns
   each decoded frame into a ring buffer slot — where a 1×1 image *broadcasts* across the
