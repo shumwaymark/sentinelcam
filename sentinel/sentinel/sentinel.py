@@ -456,6 +456,7 @@ class JobTasking:
                     self.jobreq = taskQ.get()
                     eoj_status = TaskEngine.TaskDONE  # assume success
                     nextTask = None
+                    task = None
                     try:
                         if self.jobreq.datapump != taskpump:
                             taskpump = self.jobreq.datapump
@@ -563,6 +564,18 @@ class JobTasking:
                         failCnt = 0
                     finally:
                         publisher.send(msgpack.packb((eoj_status, self.jobreq.jobID)))
+                        # Release the task -- and with it any accelerator handle it
+                        # owns -- BEFORE the next one is constructed. On a Coral
+                        # engine each task's __init__ calls make_interpreter(), which
+                        # opens the EdgeTPU; because Python evaluates the right-hand
+                        # side of `task = TaskFactory(...)` before rebinding, the
+                        # previous task's interpreter would otherwise still hold the
+                        # single-context device while the next one opens it and swaps
+                        # the on-chip model. GetFaces, second in the standard chain
+                        # behind MobileNetSSD_allFrames, hit that window on every
+                        # event -- which is why it was the task that wedged and object
+                        # detection never was. Refcounting frees it here immediately.
+                        task = None
 
             # Limit on successive failures exceeded
             msg = (TaskEngine.TaskBOMB, f"{engineName}: JobTasking failure limit exceeded.")
@@ -836,7 +849,17 @@ class JobManager:
         self._asyncSUB = _asyncSUB
         # Health heuristic configuration
         _hcfg = CFG.get('health', {})
-        self._low_frame_threshold = _hcfg.get('low_frame_threshold', 5)
+        # Coral degradation is a RATE collapse, judged only on jobs long enough for
+        # the rate to mean anything (a short job's rate is dominated by model-load
+        # overhead). Measured on Alpha over 888 completed jobs: with min_rate_frames
+        # 20, the healthy 2nd percentile is 16.5 fps and the median 26.0, so 8.0 fps
+        # is a genuine collapse -- exactly 1 of 770 healthy jobs sits below it, and
+        # strike_limit requires three in a row.
+        self._low_rate_threshold = _hcfg.get('low_rate_threshold', 8.0)
+        self._min_rate_frames = _hcfg.get('min_rate_frames', 20)
+        # Wall-clock ceiling on a running job; 0 disables. Per-task `runtime_limit`
+        # in task_list overrides it.
+        self._job_runtime_limit = _hcfg.get('job_runtime_limit', 0)
         self._strike_limit = _hcfg.get('strike_limit', 3)
         self._fail_strike_limit = _hcfg.get('fail_strike_limit', 5)
         self._max_auto_restarts = _hcfg.get('max_auto_restarts', 10)
@@ -913,9 +936,31 @@ class JobManager:
         # Restart failed or limit exceeded — remove from engine pool
         del self.engines[engineName]
 
+    def _runtime_limit_for(self, engine) -> float:
+        """Seconds a job on this engine may run before it is treated as hung.
+
+        Per-task `runtime_limit` in task_list overrides the `job_runtime_limit`
+        health default. 0 (or absent) disables the check.
+        """
+        jobreq = getattr(engine, 'jobreq', None)
+        if jobreq is not None:
+            taskcfg = self.taskmenu.get(jobreq.jobTask) or {}
+            limit = taskcfg.get('runtime_limit')
+            if limit:
+                return float(limit)
+        return float(self._job_runtime_limit)
+
     def _check_engine_health(self, engine, engineName) -> None:
-        """Evaluate engine health counters and trigger restart if thresholds exceeded."""
-        # Check consecutive low-frame completions (Coral degradation signature)
+        """Evaluate engine health counters and trigger restart if thresholds exceeded.
+
+        Covers the two failure modes that produce a COMPLETION event: a degraded
+        accelerator (rate collapse) and outright errors. The third -- a job that
+        never completes at all -- is the runtime deadline's, in the service loop.
+        """
+        # Consecutive degraded completions (accelerator rate collapse). The counter
+        # keeps the name `consecutive_low_frames` because it is serialized into the
+        # state file and rendered by the watchtower's sentinel page; what feeds it is
+        # now the frame RATE, not the frame count.
         if engine.health.consecutive_low_frames >= self._strike_limit:
             if engine.health.total_restarts >= self._max_auto_restarts:
                 logging.critical(f"Engine '{engineName}' exceeded lifetime auto-restart "
@@ -1655,7 +1700,22 @@ class JobManager:
                                 engine.health.consecutive_failures += 1
                             else:
                                 engine.health.consecutive_failures = 0
-                            if engine.accelerator == 'coral' and task_stats[0] <= self._low_frame_threshold:
+                            # Degradation is a RATE collapse, not a short job. This
+                            # previously tested the frame COUNT, which a legitimate
+                            # short event trips: a person in view with no faces for
+                            # the duration yields a handful of frames at a perfectly
+                            # healthy rate (9% of GetFaces jobs land at <=5 frames),
+                            # and three in a row restarted a working engine. Only the
+                            # interleaved high-count MobileNetSSD jobs kept resetting
+                            # the counter -- accidental protection, not a rule.
+                            # Judge on the rate, on a COMPLETED job with enough frames
+                            # to measure. The other two failure modes have their own
+                            # detectors: a job that never completes is the runtime
+                            # deadline's, and outright errors are consecutive_failures'.
+                            if (engine.accelerator == 'coral'
+                                    and tag == TaskEngine.TaskDONE
+                                    and task_stats[0] >= self._min_rate_frames
+                                    and task_stats[1] <= self._low_rate_threshold):
                                 engine.health.consecutive_low_frames += 1
                             else:
                                 engine.health.consecutive_low_frames = 0
@@ -1700,6 +1760,7 @@ class JobManager:
             # Service the ring buffers for running tasks.
             runningTasks = 0
             dead_engines = []
+            overrun_engines = []
             for engineName in list(self.engines):
                 engine = self.engines[engineName]
                 if engine.is_alive():
@@ -1715,8 +1776,21 @@ class JobManager:
                                 engine.send_response(engine.ringBuffer.get())
                         if engine.cursor:
                             self._feedNext(engine)
-                        # TODO: Need a mechanism to cleanly shutdown a
-                        # running task in the event of DataFeed timeouts.
+                        # A job that never ends. The Coral EdgeTPU's invoke() is an
+                        # uninterruptible blocking call into libedgetpu: once the
+                        # device wedges, the child sits inside C where no signal
+                        # handler runs and no stop flag is read, the job never
+                        # completes, and the queue backs up behind it until someone
+                        # notices. Every other health check keys off a COMPLETION
+                        # event, so this is the one failure none of them can see.
+                        limit = self._runtime_limit_for(engine)
+                        task_start = getattr(engine, 'task_start', None)
+                        if limit and task_start is not None:
+                            ran = time.monotonic() - task_start
+                            if ran > limit:
+                                jobreq = getattr(engine, 'jobreq', None)
+                                overrun_engines.append(
+                                    (engineName, jobreq.jobTask if jobreq else '?', ran, limit))
                 else:
                     dead_engines.append(engineName)
             for engineName in dead_engines:
@@ -1724,6 +1798,33 @@ class JobManager:
                     break
                 logging.error(f"TaskEngine '{engineName}' found dead, attempting restart.")
                 self._restart_engine(engineName)
+
+            for engineName, taskName, ran, limit in overrun_engines:
+                if self._stop or self._draining.is_set():
+                    break
+                engine = self.engines.get(engineName)
+                if engine is None:
+                    continue
+                if engine.health.total_restarts >= self._max_auto_restarts:
+                    logging.critical(
+                        f"TaskEngine '{engineName}' job '{taskName}' hung "
+                        f"({ran:.0f}s > {limit:.0f}s) but the lifetime auto-restart "
+                        f"limit ({self._max_auto_restarts}) is exhausted — engine left as is")
+                    continue
+                logging.critical(
+                    f"TaskEngine '{engineName}' job '{taskName}' exceeded its runtime limit "
+                    f"({ran:.0f}s > {limit:.0f}s) — restarting. A blocked accelerator call "
+                    f"cannot be interrupted in-process; killing the child is the only exit.")
+                # restart() fails the in-flight job, kills the child, resets the ring
+                # buffers and re-forks with a full handshake.
+                if engine.restart(self._default_pump):
+                    engine.health.last_restart = datetime.now()
+                    engine.health.total_restarts += 1
+                    engine.health.consecutive_low_frames = 0
+                    engine.health.consecutive_failures = 0
+                else:
+                    logging.critical(f"TaskEngine '{engineName}' restart failed after hang")
+                    self._restart_engine(engineName)
 
             # Assign jobs ondeck to available engines
             if runningTasks < len(self.engines):

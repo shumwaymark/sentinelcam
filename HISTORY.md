@@ -66,6 +66,52 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
+- **A wedged Coral accelerator hung a task engine indefinitely, and nothing could see it.**
+  A `GetFaces` job would stop returning, the queue would back up behind it, and the Coral's
+  LED would sit there steadily flashing until someone happened to check. Restarting the task
+  engine always cleared it. The same signature appeared on the **outpost** with a Coral
+  attached: events stop publishing, the LED flashes, and the imagenode restart takes an
+  unusually long time to complete.
+
+  `Interpreter.invoke()` is an uninterruptible blocking call into libedgetpu. Once the device
+  wedges, the child process sits inside C where no Python signal handler runs and no stop flag
+  is ever read — which is why the shutdown drags: SIGTERM cannot land, and systemd has to wait
+  out its stop timeout and SIGKILL. There is no in-process escape from that state; killing the
+  child is the only exit.
+
+  What made it *always* `GetFaces` and never object detection was the release point. Each task
+  opens the EdgeTPU in its `__init__` via `make_interpreter()`, and Python evaluates the right
+  side of `task = TaskFactory(...)` before rebinding — so the previous task's interpreter was
+  still holding the single-context device while the next one opened it and swapped the on-chip
+  model. `GetFaces` sits second in the standard chain behind `MobileNetSSD_allFrames`, so it
+  landed in that window on every event. The task is now released before the next is built.
+
+  The **sentinel** gains a wall-clock ceiling on a running job — `job_runtime_limit`, with a
+  per-task `runtime_limit` override — enforced in the job manager's service loop, where a
+  standing TODO had asked for exactly this. Both existing health heuristics key off a
+  *completion* event, so neither could ever observe a job that does not finish. On a breach the
+  engine takes the proven restart path: the in-flight job is failed, the child killed, ring
+  buffers reset, and a fresh child forked. The three detectors are now disjoint — the deadline
+  owns "never finished", the strike counter owns "finished slowly", and the failure counter
+  owns "errored".
+
+- **Coral degradation scored the frame count, and restarted healthy engines.** The strike
+  counter flagged any job completing with five frames or fewer as a degraded accelerator. That
+  is a workload measure, not a performance one: an event with a person in view but no face
+  showing for its duration legitimately yields a handful of frames at a perfectly normal rate.
+  Across a retained history of 898 jobs on the coral engine the old rule flagged 34 — one at a
+  single frame and 5.63 fps, another at five frames and 10.81 fps — and 26 of them were
+  `GetFaces`. Only the interleaved high-count `MobileNetSSD_allFrames` jobs kept resetting the
+  streak before it reached the limit, which is accidental protection rather than a rule.
+
+  The frame *rate* was already being measured and stored alongside the count, and simply was
+  not consulted. Degradation is now judged on the rate (`low_rate_threshold`), on completed
+  jobs only, and only where the job carried enough frames for the rate to mean anything
+  (`min_rate_frames`) — a short job's rate is dominated by fixed model-load overhead. Replayed
+  against the same history the new rule flags 1 job of 898, while a simulated genuine collapse
+  still trips the restart. The counter keeps its `consecutive_low_frames` name, since that is
+  serialized into the state file and rendered on the watchtower's sentinel page.
+
 - **The OAK event plane was never shut down.** Every restart of an OAK outpost logged an
   ERROR traceback — `RuntimeError('zmq gc socket requested during shutdown')` — published to
   the log plane. Harmless in effect, since the process was going away regardless, but an

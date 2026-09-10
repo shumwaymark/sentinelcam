@@ -52,13 +52,18 @@ task_list:
 {% if task_config.alias is defined %}
         alias: {{ task_config.alias }}
 {% endif %}
+{% if task_config.runtime_limit is defined %}
+        runtime_limit: {{ task_config.runtime_limit }}
+{% endif %}
 {% endfor %}
 
 # Engine health heuristics for automatic degradation detection
 health:
-  low_frame_threshold: {{ sentinel_health.low_frame_threshold }}
+  low_rate_threshold: {{ sentinel_health.low_rate_threshold }}
+  min_rate_frames: {{ sentinel_health.min_rate_frames }}
   strike_limit: {{ sentinel_health.strike_limit }}
   fail_strike_limit: {{ sentinel_health.fail_strike_limit }}
+  job_runtime_limit: {{ sentinel_health.job_runtime_limit }}
   restart_cooldown: {{ sentinel_health.restart_cooldown }}
   max_auto_restarts: {{ sentinel_health.max_auto_restarts }}
 

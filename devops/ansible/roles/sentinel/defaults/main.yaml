@@ -82,9 +82,22 @@ debug_mode: false
 
 # Engine health heuristic configuration
 sentinel_health:
-  low_frame_threshold: 5       # frames below this count flag a low-frame completion
-  strike_limit: 3              # consecutive low-frame jobs before triggering restart
+  # Accelerator degradation is a RATE collapse, not a short job. Scoring the
+  # frame count restarted healthy engines: a legitimate event with a subject in
+  # view but nothing to detect for the duration yields a handful of frames at a
+  # perfectly normal rate. Only jobs of at least min_rate_frames are scored,
+  # because a short job's rate is dominated by model-load overhead. Measured on
+  # a coral engine over 888 completed jobs: healthy p02 16.5 fps, median 26.0.
+  low_rate_threshold: 8.0      # frames/sec at or below this scores as degraded
+  min_rate_frames: 20          # a job smaller than this is not scored at all
+  strike_limit: 3              # consecutive degraded jobs before triggering restart
   fail_strike_limit: 5         # consecutive outright failures before restart
+  # Wall-clock ceiling on a RUNNING job. The strike/fail counters both key off a
+  # COMPLETION event, so neither can see a job that never ends -- which is what a
+  # wedged USB accelerator produces, since its blocking call sits in C where no
+  # signal handler runs and no stop flag is read. 0 disables the check; a
+  # per-task `runtime_limit` overrides it.
+  job_runtime_limit: 900       # seconds
   restart_cooldown: 300        # seconds between automatic restarts per engine
   max_auto_restarts: 10        # lifetime limit before giving up
 
