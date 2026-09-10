@@ -100,6 +100,18 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   answer. A recycle announces itself on its own log line rather than in the heartbeat, whose
   shape is a parsing contract with the **camwatcher**.
 
+  The same fault also cost 91 seconds on every restart, and that turned out to be a second
+  bug. Python's `multiprocessing` joins every non-daemon child at interpreter exit — unbounded,
+  and sending SIGTERM only to daemon children, which would not have helped since a child
+  blocked in a C call cannot service a signal at all. So the shutdown logged cleanly in 13
+  milliseconds and then sat in dead air until the service manager's stop timeout expired and
+  SIGKILLed the group. All of it after the last log line, which is why this only ever presented
+  as *"the restart takes a while"*. `LensTasking.terminate()` already did the right thing —
+  SIGKILL, then join — and nothing called it: the third teardown found this release to exist
+  with no caller. It is now an `atexit` hook, which holds however the process exits and needs no
+  change to the imagenode framework; `atexit` runs last-registered-first and `multiprocessing`
+  registers its handler at import time, so this one runs before that join is ever attempted.
+
 - **Deploying the sentinel deleted its state file.** Code deployment is an `rsync --delete`
   into the component's install directory, which makes the destination match the source exactly.
   Runtime state lives in that same directory, and the exclusion list had grown to cover
