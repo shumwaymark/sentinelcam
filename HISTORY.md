@@ -150,19 +150,26 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   change to the imagenode framework; `atexit` runs last-registered-first and `multiprocessing`
   registers its handler at import time, so this one runs before that join is ever attempted.
 
-- **Deploying the sentinel deleted its state file.** Code deployment is an `rsync --delete`
-  into the component's install directory, which makes the destination match the source exactly.
-  Runtime state lives in that same directory, and the exclusion list had grown to cover
-  `models/`, `sockets/` and `tasks/` — but not `state.json`, a bare file at the root of the
-  sentinel's target. Every sentinel deploy therefore erased the job history and reset the engine
-  health record, including `total_restarts`, so the `max_auto_restarts` lifetime give-up counter
-  had effectively never accumulated across a deploy. Found by dry-running the real rsync against
-  each node, which also turned up the outpost's `depthai` device cache going the same way.
+- **Code deployment deleted runtime state from the install directory.** Deployment is an
+  `rsync --delete` into each component's install directory, which makes the destination match
+  the source exactly. Runtime state lives in that same directory, and the exclusion list had
+  grown to cover `models/`, `sockets/` and `tasks/` — but not the **sentinel**'s `state.json`,
+  a bare file at the root of its target, nor the **outpost**'s `depthai` device cache. Found by
+  dry-running the real rsync with the real flags from each node, which reported both as
+  deletions; after the fix the same dry run reports nothing deleted, and the device cache
+  survived its next deploy intact.
 
-  Both exclusions added, and the two deployment paths — local on the primary data sink, pull for
-  every other node — reconciled: the local one had silently been missing `tasks/`. The same dry
-  run now reports nothing deleted on either node. The list carries a note that these entries are
-  load-bearing, since the failure is silent and only shows up as data that quietly went missing.
+  Both exclusions added, and the two deployment paths — local on the primary data sink, pull
+  for every other node — reconciled: the local one had silently been missing `tasks/`. The list
+  carries a note that these entries are load-bearing, since the failure is silent and surfaces
+  only as data that quietly went missing.
+
+  Worth recording precisely, because the symptom that led here has a second and more mundane
+  cause: `state.json` is *also* absent after any restart by design, since `load_state()` unlinks
+  the file once it has been read. The job history is not lost when that happens — it is seeded
+  back into the task list and re-checkpointed. So the deletion this fixes mattered for deploys
+  that do **not** restart the service, and for the file's survival between them, rather than for
+  the disappearance first observed.
 
 - **A wedged Coral accelerator hung a task engine indefinitely, and nothing could see it.**
   A `GetFaces` job would stop returning, the queue would back up behind it, and the Coral's
