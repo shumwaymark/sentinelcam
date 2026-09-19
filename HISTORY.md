@@ -66,6 +66,44 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 
 ### Fixed
 
+- **Accelerator degradation was scored on the job's wall clock, restarting a healthy engine
+  daily.** The rate rule introduced alongside the interpreter-release fix flagged 12% of
+  perfectly good jobs, spending ten automatic restarts in nine days. The device was never
+  degraded: bucketing completed jobs by size fits `elapsed ≈ 2.83s fixed + images / 26.8 fps`,
+  a true inference throughput indistinguishable from what was measured before the change.
+
+  What moved was the metric. Releasing each task's interpreter before building the next —
+  correct, and the entire point of that fix — removed the device overlap, so every job now
+  pays a full cold model load inside the measured window. A thirty-image job spends 72% of
+  its elapsed time before the first frame is ever scored, and reads about 8 fps on hardware
+  running flat out. The wall-clock rate therefore tracks job *size* as much as device health:
+  6.8 fps median for small jobs against 19.7 for large ones. The replay that justified the
+  threshold had been run against data from before the release fix, so it could not have caught
+  this — two changes in one commit, one silently moving the measurement the other judged.
+
+  Degradation is now scored on throughput with a configurable `startup_allowance` discounted,
+  which makes the metric size-independent: every job size converges on ~27 fps, against a
+  2.9× spread before, so the threshold finally means one thing — "under 30% of normal" —
+  regardless of how big the job was. The wall-clock rate is unchanged and still reported; it
+  is a fair operational number, just not a health signal.
+
+- **The engine restart budget disarmed itself the longer the system stayed up.**
+  `max_auto_restarts` counted restarts since the **sentinel** process started, so an engine
+  that recovered normally once a day exhausted a limit of ten inside nine days and was left
+  with no self-healing — the detector still firing, every restart refused, and the only remedy
+  a restart of the sentinel itself. The guard exists for a genuine fault: a long batch job
+  overheating the accelerator into thermal throttling, which a restart clears. That fault is
+  recoverable and recurring, so restarts legitimately repeat over a long-lived process, and a
+  budget keyed to uptime is guaranteed to run out — the better the service is at staying up,
+  the more certainly it does.
+
+  The budget is now a trailing window (`restart_window_hours`), pruned by wall time on every
+  read. Thermal recovery at once or twice an hour never approaches it; a genuine restart loop,
+  where restarting does not help, still spends it within the hour and stops. The ledger is
+  persisted and restored with the rest of engine health — without that it would come back as
+  plain strings, be dropped on restore, and hand every engine a fresh full budget on each
+  restart, reintroducing the same bug from the other side.
+
 - **A wedged inference accelerator stalled outpost detection, silently and indefinitely.**
   The **outpost** would stop reporting events while its live scene feed carried on
   untroubled. Caught live on a Coral-equipped node: the heartbeat ran on at 32 fps with its
