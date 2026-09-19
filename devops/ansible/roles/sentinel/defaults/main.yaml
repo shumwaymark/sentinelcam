@@ -88,7 +88,14 @@ sentinel_health:
   # perfectly normal rate. Only jobs of at least min_rate_frames are scored,
   # because a short job's rate is dominated by model-load overhead. Measured on
   # a coral engine over 888 completed jobs: healthy p02 16.5 fps, median 26.0.
-  low_rate_threshold: 8.0      # frames/sec at or below this scores as degraded
+  # Scored on throughput with fixed per-job startup discounted, NOT on the job's
+  # wall-clock rate -- that number is dominated by model load and so tracks job
+  # SIZE as much as device health, which restarted a healthy engine ~daily.
+  # Measured on a coral engine: elapsed ~= 2.83s fixed + images / 26.8 fps.
+  # Discounted, every job size converges on ~27 fps, so this threshold finally
+  # means one thing: 8.0 is "under 30% of normal throughput".
+  startup_allowance: 3.0       # sec of fixed per-job cost to discount
+  low_rate_threshold: 8.0      # corrected frames/sec at or below this = degraded
   min_rate_frames: 20          # a job smaller than this is not scored at all
   strike_limit: 3              # consecutive degraded jobs before triggering restart
   fail_strike_limit: 5         # consecutive outright failures before restart

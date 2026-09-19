@@ -59,6 +59,7 @@ task_list:
 
 # Engine health heuristics for automatic degradation detection
 health:
+  startup_allowance: {{ sentinel_health.startup_allowance }}
   low_rate_threshold: {{ sentinel_health.low_rate_threshold }}
   min_rate_frames: {{ sentinel_health.min_rate_frames }}
   strike_limit: {{ sentinel_health.strike_limit }}

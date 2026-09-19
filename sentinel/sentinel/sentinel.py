@@ -718,6 +718,30 @@ class TaskEngine:
     def get_image_rate(self) -> float:
         return round((self.get_image_cnt() / (time.monotonic() - self.task_start)), 2)
 
+    def get_inference_rate(self, startup_allowance: float) -> float:
+        """Throughput with fixed per-job startup discounted. Health metric only.
+
+        get_image_rate() measures the whole job wall clock, which on an
+        accelerator engine is dominated by model load rather than inference.
+        Measured on a coral engine: elapsed ~= 2.83s fixed + images / 26.8 fps,
+        so a 30-image job spends 72% of its elapsed time before the first frame
+        is ever scored, and its wall-clock rate reads ~8 fps on a device running
+        at full speed. Judging health on that number flags every small job.
+
+        Discounting the fixed cost makes the metric size-independent -- every job
+        bucket from 1 to 200+ images converges on ~27 fps -- so a single
+        threshold finally means the same thing for a 20-image job and a 200-image
+        one. Returns +inf for a job that finished inside the allowance: too short
+        to say anything about, so never scored.
+        """
+        n = self.get_image_cnt()
+        if n < 1:
+            return 0.0
+        window = (time.monotonic() - self.task_start) - startup_allowance
+        if window <= 0.0:
+            return float('inf')
+        return round(n / window, 2)
+
     def get_ring_latency(self) -> tuple:
         """Read ring latency from shared memory. Returns (start_avg, start_max, next_avg, next_max)."""
         sc = self._ring_start_count.value
@@ -857,6 +881,9 @@ class JobManager:
         # strike_limit requires three in a row.
         self._low_rate_threshold = _hcfg.get('low_rate_threshold', 8.0)
         self._min_rate_frames = _hcfg.get('min_rate_frames', 20)
+        # Fixed per-job cost (model load) discounted before judging throughput.
+        # Measured at ~2.83s on a coral engine; see get_inference_rate().
+        self._startup_allowance = _hcfg.get('startup_allowance', 3.0)
         # Wall-clock ceiling on a running job; 0 disables. Per-task `runtime_limit`
         # in task_list overrides it.
         self._job_runtime_limit = _hcfg.get('job_runtime_limit', 0)
@@ -1712,10 +1739,18 @@ class JobManager:
                             # to measure. The other two failure modes have their own
                             # detectors: a job that never completes is the runtime
                             # deadline's, and outright errors are consecutive_failures'.
+                            # NB: scored on get_inference_rate(), NOT task_stats[1].
+                            # task_stats[1] is job wall-clock throughput -- a useful
+                            # operational number, reported and displayed as such --
+                            # but it is dominated by fixed model-load cost and is
+                            # therefore a function of job SIZE as much as of device
+                            # health. Thresholding it restarted a perfectly healthy
+                            # engine roughly once a day.
                             if (engine.accelerator == 'coral'
                                     and tag == TaskEngine.TaskDONE
                                     and task_stats[0] >= self._min_rate_frames
-                                    and task_stats[1] <= self._low_rate_threshold):
+                                    and engine.get_inference_rate(
+                                        self._startup_allowance) <= self._low_rate_threshold):
                                 engine.health.consecutive_low_frames += 1
                             else:
                                 engine.health.consecutive_low_frames = 0
