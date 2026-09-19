@@ -86,6 +86,13 @@ def deserialize_state(json_str) -> dict:
     for health in state.get('engine_health', {}).values():
         if health.get('last_restart') is not None:
             health['last_restart'] = datetime.fromisoformat(health['last_restart'])
+        # The rolling restart budget is a trailing time window; without this the
+        # ledger comes back as bare strings, is filtered out on restore, and every
+        # sentinel restart hands each engine a fresh full budget.
+        if health.get('restart_times'):
+            health['restart_times'] = [
+                datetime.fromisoformat(t) if isinstance(t, str) else t
+                for t in health['restart_times']]
     # Convert diagnostics start_time
     diag = state.get('diagnostics', {})
     if diag.get('start_time') is not None:

@@ -67,6 +67,7 @@ health:
   job_runtime_limit: {{ sentinel_health.job_runtime_limit }}
   restart_cooldown: {{ sentinel_health.restart_cooldown }}
   max_auto_restarts: {{ sentinel_health.max_auto_restarts }}
+  restart_window_hours: {{ sentinel_health.restart_window_hours }}
 
 # State maintenance: daily summaries, checkpointing, and history trimming
 maintenance:

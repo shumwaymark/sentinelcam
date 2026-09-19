@@ -602,8 +602,31 @@ class EngineHealth:
         self.consecutive_failures = 0
         self.consecutive_low_frames = 0
         self.last_restart = None        # datetime
-        self.total_restarts = 0
+        self.total_restarts = 0         # cumulative since this process started (display)
+        # Timestamps of automatic restarts, for the rolling budget. The budget is
+        # deliberately time-based rather than a count since startup: the fault it
+        # guards against -- a batch job overheating the accelerator into thermal
+        # throttling -- is RECOVERABLE and RECURRING, so a restart legitimately
+        # happens again and again over a long-lived process. A per-uptime cap
+        # disarms itself: nine days of normal operation exhausted a limit of ten,
+        # after which the engine had no self-healing left at all.
+        self.restart_times = deque(maxlen=128)
         self.restart_cooldown = cooldown  # seconds between automatic restarts
+
+    def restarts_within(self, hours) -> int:
+        """Automatic restarts inside the trailing window, pruning what fell out."""
+        if not hours:
+            return 0
+        cutoff = datetime.now() - timedelta(hours=hours)
+        while self.restart_times and self.restart_times[0] < cutoff:
+            self.restart_times.popleft()
+        return len(self.restart_times)
+
+    def note_restart(self) -> None:
+        now = datetime.now()
+        self.last_restart = now
+        self.total_restarts += 1
+        self.restart_times.append(now)
 
 class TaskEngine:
 
@@ -890,6 +913,12 @@ class JobManager:
         self._strike_limit = _hcfg.get('strike_limit', 3)
         self._fail_strike_limit = _hcfg.get('fail_strike_limit', 5)
         self._max_auto_restarts = _hcfg.get('max_auto_restarts', 10)
+        # Trailing window the restart budget is measured over. 0 restores the old
+        # per-uptime behaviour. With restart_cooldown at 300s a genuine restart
+        # loop -- one where restarting does not help -- saturates the budget in
+        # under an hour and stops; thermal recovery, which runs perhaps once or
+        # twice an hour and works, never approaches it.
+        self._restart_window_hours = _hcfg.get('restart_window_hours', 6)
         self._queue_depth = 0
         self._queue_hwm = 0
         self._queue_latency = 0.0
@@ -929,10 +958,15 @@ class JobManager:
                     eng = self.engines[name]
                     lr = health_data.get('last_restart')
                     eng.health.last_restart = lr if isinstance(lr, datetime) else None
-                    logging.info(f"Engine '{name}' health restored: "
-                                 f"{eng.health.total_restarts} prior restarts")
-                    # Reset total_restarts from recovered state to avoid exceeding auto-restart limit
+                    eng.health.restart_times.extend(
+                        t for t in health_data.get('restart_times', []) if isinstance(t, datetime))
+                    # total_restarts is a display counter for THIS process; the gate
+                    # is restarts_within(), which prunes by wall time on every read.
                     eng.health.total_restarts = 0
+                    logging.info(
+                        f"Engine '{name}' health restored: "
+                        f"{eng.health.restarts_within(self._restart_window_hours)} restarts "
+                        f"inside the {self._restart_window_hours}h budget window")
         self._setPump(default_pump)
         self.taskmenu = taskCFG
         self._stop = False
@@ -989,9 +1023,10 @@ class JobManager:
         # state file and rendered by the watchtower's sentinel page; what feeds it is
         # now the frame RATE, not the frame count.
         if engine.health.consecutive_low_frames >= self._strike_limit:
-            if engine.health.total_restarts >= self._max_auto_restarts:
-                logging.critical(f"Engine '{engineName}' exceeded lifetime auto-restart "
-                                 f"limit ({self._max_auto_restarts}), no further restarts")
+            if engine.health.restarts_within(self._restart_window_hours) >= self._max_auto_restarts:
+                logging.critical(f"Engine '{engineName}' exceeded its restart budget "
+                                 f"({self._max_auto_restarts} in {self._restart_window_hours}h), "
+                                 f"no further restarts until the window clears")
                 engine.health.consecutive_low_frames = 0
                 return
             if engine.health.last_restart is None or \
@@ -1000,16 +1035,16 @@ class JobManager:
                                 f"{engine.health.consecutive_low_frames} consecutive low-frame "
                                 f"completions, triggering restart")
                 if engine.restart(self._default_pump):
-                    engine.health.last_restart = datetime.now()
-                    engine.health.total_restarts += 1
+                    engine.health.note_restart()
                 engine.health.consecutive_low_frames = 0
                 engine.health.consecutive_failures = 0
             return
         # Check consecutive outright failures
         if engine.health.consecutive_failures >= self._fail_strike_limit:
-            if engine.health.total_restarts >= self._max_auto_restarts:
-                logging.critical(f"Engine '{engineName}' exceeded lifetime auto-restart "
-                                 f"limit ({self._max_auto_restarts}), no further restarts")
+            if engine.health.restarts_within(self._restart_window_hours) >= self._max_auto_restarts:
+                logging.critical(f"Engine '{engineName}' exceeded its restart budget "
+                                 f"({self._max_auto_restarts} in {self._restart_window_hours}h), "
+                                 f"no further restarts until the window clears")
                 engine.health.consecutive_failures = 0
                 return
             if engine.health.last_restart is None or \
@@ -1018,8 +1053,7 @@ class JobManager:
                                 f"{engine.health.consecutive_failures} consecutive failures, "
                                 f"triggering restart")
                 if engine.restart(self._default_pump):
-                    engine.health.last_restart = datetime.now()
-                    engine.health.total_restarts += 1
+                    engine.health.note_restart()
                 engine.health.consecutive_failures = 0
                 engine.health.consecutive_low_frames = 0
 
@@ -1323,6 +1357,9 @@ class JobManager:
                 'consecutive_low_frames': h.consecutive_low_frames,
                 'consecutive_failures': h.consecutive_failures,
                 'last_restart': h.last_restart.isoformat() if h.last_restart else None,
+                # The budget is a trailing WINDOW, so it has to survive a restart of
+                # the sentinel itself -- otherwise a deploy silently refills it.
+                'restart_times': [t.isoformat() for t in h.restart_times],
                 'job_count': h.job_count,
             }
         return result
@@ -1840,11 +1877,12 @@ class JobManager:
                 engine = self.engines.get(engineName)
                 if engine is None:
                     continue
-                if engine.health.total_restarts >= self._max_auto_restarts:
+                if engine.health.restarts_within(self._restart_window_hours) >= self._max_auto_restarts:
                     logging.critical(
                         f"TaskEngine '{engineName}' job '{taskName}' hung "
-                        f"({ran:.0f}s > {limit:.0f}s) but the lifetime auto-restart "
-                        f"limit ({self._max_auto_restarts}) is exhausted — engine left as is")
+                        f"({ran:.0f}s > {limit:.0f}s) but its restart budget is spent "
+                        f"({self._max_auto_restarts} in {self._restart_window_hours}h) "
+                        f"— engine left as is until the window clears")
                     continue
                 logging.critical(
                     f"TaskEngine '{engineName}' job '{taskName}' exceeded its runtime limit "
@@ -1853,8 +1891,7 @@ class JobManager:
                 # restart() fails the in-flight job, kills the child, resets the ring
                 # buffers and re-forks with a full handshake.
                 if engine.restart(self._default_pump):
-                    engine.health.last_restart = datetime.now()
-                    engine.health.total_restarts += 1
+                    engine.health.note_restart()
                     engine.health.consecutive_low_frames = 0
                     engine.health.consecutive_failures = 0
                 else:

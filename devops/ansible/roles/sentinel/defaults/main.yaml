@@ -106,7 +106,16 @@ sentinel_health:
   # per-task `runtime_limit` overrides it.
   job_runtime_limit: 900       # seconds
   restart_cooldown: 300        # seconds between automatic restarts per engine
-  max_auto_restarts: 10        # lifetime limit before giving up
+  # Restart budget, measured over a TRAILING WINDOW rather than since startup.
+  # The fault this guards -- a long batch job overheating the accelerator into
+  # thermal throttling -- is recoverable and recurring, so restarts legitimately
+  # repeat over a long-lived process. A per-uptime cap disarms itself: nine days
+  # of ordinary operation exhausted a limit of ten, after which the engine had no
+  # self-healing left. With restart_cooldown at 300s a genuine loop (one where
+  # restarting does not help) spends the budget in under an hour and stops.
+  # 0 hours restores the old per-uptime behaviour.
+  max_auto_restarts: 10        # restarts allowed inside the window
+  restart_window_hours: 6      # trailing window the budget is measured over
 
 # State maintenance configuration
 sentinel_maintenance:
