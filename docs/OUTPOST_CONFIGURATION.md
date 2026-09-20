@@ -162,6 +162,11 @@ performance too; know what else is running.
 > Do not guess this value — determine the true size passing through the pipeline and
 > state it.
 
+**Under Ansible you do not set this by hand.** The imagenode template renders it from
+`camera.resolution`, so the two cannot drift apart. The warning above matters when
+something else changes the pipeline image size after capture — which is the real reason
+`resize_width` is to be avoided on an outpost.
+
 ### `ROI` — motion region of interest
 
 ```yaml

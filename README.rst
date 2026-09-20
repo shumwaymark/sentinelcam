@@ -643,7 +643,7 @@ technologies and libraries.
 - Raspberry Pi 5
 - Raspberry Pi OS, *Debian 12 (bookworm)*
 - Python 3.11
-- OpenCV 4.1.1
+- OpenCV 4.11
 - OpenVINO
 - picamera2
 - Luxonis OAK-1
@@ -662,7 +662,6 @@ technologies and libraries.
 - MessagePack
 - OpenFace
 - Ansible
-- Dlib
 
 Acknowledgements
 ================

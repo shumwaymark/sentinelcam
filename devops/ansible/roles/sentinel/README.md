@@ -78,18 +78,53 @@ no service restart needed after config-only changes.
 
 ### Engine Health Monitoring
 
-The sentinel tracks per-engine health heuristics and triggers automatic restarts when
-degradation is detected. Particularly relevant for Google Coral accelerators which can
-exhibit a pattern of completing jobs with near-zero frames processed.
+The sentinel tracks per-engine health and restarts an engine automatically when it
+degrades. Particularly relevant for Google Coral accelerators, which fail by slowing
+down or wedging rather than by raising.
 
 ```yaml
 sentinel_health:
-  low_frame_threshold: 5       # frames below this flag a low-frame completion
-  strike_limit: 3              # consecutive low-frame jobs before restart
-  fail_strike_limit: 5         # consecutive failures before restart
-  restart_cooldown: 300        # seconds between restarts per engine
-  max_auto_restarts: 10        # lifetime limit before permanent removal
+  startup_allowance: 3.0       # sec of fixed per-job cost discounted before scoring
+  low_rate_threshold: 8.0      # corrected frames/sec at or below this = degraded
+  min_rate_frames: 20          # jobs smaller than this are not scored at all
+  strike_limit: 3              # consecutive degraded jobs before restart
+  fail_strike_limit: 5         # consecutive outright failures before restart
+  job_runtime_limit: 900       # wall-clock ceiling on a RUNNING job; 0 disables
+  restart_cooldown: 300        # seconds between automatic restarts per engine
+  max_auto_restarts: 10        # restarts allowed inside the window below
+  restart_window_hours: 6      # trailing window the budget is measured over
 ```
+
+**Three disjoint detectors.** Each owns a distinct failure, and the separation is
+deliberate:
+
+| Detector | Owns | Keyed off |
+|----------|------|-----------|
+| `job_runtime_limit` | "never finished" | a running job's wall clock |
+| `strike_limit` | "finished slowly" | completion, scored on throughput |
+| `fail_strike_limit` | "failed outright" | completion |
+
+A wedged accelerator produces a job that never ends — its blocking call sits in C
+where no Python signal handler runs and no stop flag is read. Both strike counters key
+off a *completion* event, so neither can observe that state; only the deadline can. A
+per-task `runtime_limit` overrides the global ceiling.
+
+**Degradation is scored on throughput, not on the job's wall clock.** The wall-clock
+rate is dominated by model load and therefore tracks job *size* as much as device
+health — on a Coral engine, `elapsed ≈ 2.83s fixed + images / 26.8 fps`, so a 30-image
+job reads about 8 fps on hardware running flat out. Scoring it that way restarted a
+healthy engine roughly daily. With `startup_allowance` discounted, every job size
+converges on ~27 fps, so `low_rate_threshold: 8.0` finally means one thing:
+*under 30% of normal*. Jobs below `min_rate_frames` are not scored at all.
+
+**The restart budget is a trailing window, not a lifetime cap.** The fault it guards —
+a long batch job overheating the accelerator into thermal throttling — is recoverable
+and recurring, so restarts legitimately repeat over a long-lived process. A budget keyed
+to uptime disarms itself: nine days of ordinary operation exhausted a limit of ten,
+after which the engine had no self-healing left at all. Measured over
+`restart_window_hours`, thermal recovery once or twice an hour never approaches the
+limit, while a genuine restart loop still spends it within the hour and stops.
+Set `restart_window_hours: 0` to restore the old per-uptime behavior.
 
 ### State Maintenance
 
@@ -126,10 +161,61 @@ systemd sends SIGKILL.
 
 ### Data Retention (DailyCleanup)
 
-Configured via `templates/tasks/DailyCleanup.yaml.j2` with per-node retention profiles:
-- **Keep-if-any-valuable**: events kept if ANY data type has value
-- **Per-event evaluation**: quality faces, speed violations, etc.
-- **Node-based profiles**: different retention policies per outpost
+`templates/tasks/DailyCleanup.yaml.j2` renders the deployed policy from inventory
+variables on every run — **never hand-edit the task file on the node.** To tune
+retention, override the relevant scalar in `group_vars` or
+`host_vars/<sentinel-host>.yaml` and re-run `deploy-sentinel.yaml`.
+
+Logic: an event is **kept if ANY data type it carries still has value**, and deleted
+only when all of it is past retention. Profiles are per-node — quality faces on person
+nodes, speed violations on vehicle nodes.
+
+```yaml
+sentinel_cleanup_run_deletes: true          # false = report only, take no action
+sentinel_cleanup_max_scan_days: 14          # days scanned backwards from run date
+
+# person_tracking profile (face_quality)
+sentinel_cleanup_person_retention_days: 2
+sentinel_cleanup_person_min_face_ratio: 0.15
+sentinel_cleanup_person_confidence_threshold: 0.975
+
+# vehicle_tracking profile (vehicle_interest)
+sentinel_cleanup_vehicle_retention_days: 1  # keeps ALL events, incl. non-speed transits
+sentinel_cleanup_vehicle_speed_cutoff: 45.0 # beyond extended_days, only these survive
+sentinel_cleanup_vehicle_extended_days: 2
+
+sentinel_cleanup_default_retention_days: 7  # minimal_retention fallback profile
+```
+
+#### Scene retention — a second, independent clock
+
+Scene frames are ~99% of the data store and the first thing to lose value. Measured on
+the primary data sink: 360 GB of frames against 2.0 GB of crops and 604 MB of CSVs — the
+entire analytical corpus is 0.7% of the store.
+
+Scene frames therefore expire **independently of the retention verdict above**. An event
+past its scene window survives in full — still indexed, still carrying its tracking data
+and high-resolution crops — it simply can no longer be replayed as video. Events locked
+as model ground truth are exempt and keep everything.
+
+```yaml
+sentinel_cleanup_person_scene_retention_days: ~   # null = never expire
+sentinel_cleanup_vehicle_scene_retention_days: ~
+sentinel_cleanup_default_scene_retention_days: ~
+sentinel_cleanup_scene_expiry_band: 3       # days past the window still eligible
+```
+
+Null means never, so **no node changes behavior until its profile opts in**.
+
+> **`max_scan_days` must reach PAST the scene window or expiry never fires at all.**
+> The default 14 against a 30-day scene policy expires nothing, ever. Note also that
+> widening the scan deepens the reach of the *retention* pass too — the first run after
+> such a change sweeps previously unreachable backlog, which is intended but is a
+> one-time larger-than-usual deletion. Read one report-only run first if that matters.
+
+`scene_expiry_band` bounds the nightly work to events actually crossing the threshold;
+without it every run re-issues deletes for every already-expired event in the scan
+window. Widen it for a one-time catch-up sweep.
 
 ## Deployment
 

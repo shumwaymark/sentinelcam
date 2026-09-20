@@ -85,6 +85,36 @@ For the lifecycle concepts these knobs tune, see [docs/TRACKING_ARCHITECTURE.md]
 
 Datasink mapping is auto-resolved from the `sentinelcam_outposts` registry in `group_vars/all/site.yaml`.
 
+Two further detector settings predate the §4.10 redesign and survived it: `spyglass: (w,h)`,
+which **sizes the SpyGlass shared-memory buffer and must match the true pipeline image size**,
+and `ROI`, which bounds motion detection in frame percentages. Both are documented in
+[OUTPOST_CONFIGURATION.md §5](../../../../docs/OUTPOST_CONFIGURATION.md).
+
+### SpyGlass watchdog
+
+```yaml
+detector:
+  spyglass_timeout: 30        # seconds; 0 disables
+```
+
+An inference accelerator can wedge with the device open and never answer — no exception, no
+error return, no kernel event, just a reply that never comes. The outpost presents this as a
+heartbeat still reporting a healthy frame rate while its `looks` counter stays frozen: the
+main loop, scene publisher and FPS all fine, detection dead.
+
+A deadline is the only available detector and killing the child is the only recovery, since
+the blocking call sits in C holding the device file descriptor. On a breach the SpyGlass is
+recycled — child killed, IPC wire rebuilt (its socket is stranded mid-transaction), shared
+frame buffer kept.
+
+The timer measures **time since anything was readable on the wire**, not time since the
+request was sent — a healthy result may sit uncollected during a quiet scene, and timing that
+would fire on a perfectly healthy idle camera.
+
+> Set this above a cold start: the child loads its model before it can answer anything. A
+> recycle announces itself on its own log line rather than in the heartbeat, whose shape is a
+> parsing contract with the **camwatcher**.
+
 ### Hardware Accelerator
 
 Set `imagenode_accelerator_type` in host_vars: `coral`, `ncs2`, or `none`. Coral EdgeTPU packages
