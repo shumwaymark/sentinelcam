@@ -16,14 +16,11 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
 - Support multiple result sets from both `Outpost` event management, and from running 
   **sentinel** tasks. Needed to support the capture of multiple neural nets producing 
   results in parallel from a single event or task. 
-- Aditional refinements for the **sentinel** module. 
-  - Provide an abstraction to support a reusable design pattern for ring buffer control 
-    based on an object detection result filter.
-  - Support a job runtime limit as a configurable setting per task engine? Provide tolerance
-    based on the queue length for tasks waiting in that job class.  
+- Consider providing a refinement for the **sentinel** module to define an abstraction as
+  a reusable design pattern implementing standard ring buffer control mechanisms based on 
+  preceding task result filters.
 - Begin to explore capitalizing on the functionality of the **librarian**  and its design 
   philosophy as a vehicle to centralize knowledge and state.
-
 
 ### Known bugs
 
@@ -31,7 +28,16 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
-## Unreleased
+## 0.3.1-alpha - 2026-09-20
+
+The headline of this release is **scene retention** — replay footage now expires on its own
+clock, independently of the event record it belongs to — and, standing behind it, a sustained
+pass over the failure modes that never announce themselves. A wedged inference accelerator
+holding a USB device open, a crop stream gone quiet after a power loss, a camwatcher shredding
+the event it was recording, a deployment quietly deleting runtime state, a health metric that
+moved under the very judge reading it. None of these raised. Several had been running for some
+time. The capture substrate established in 0.3.0 is now durable enough to build recognition
+work on top of.
 
 ### Added
 
