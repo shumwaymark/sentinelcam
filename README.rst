@@ -6,9 +6,10 @@ Introduction
 ============
 
 **SentinelCam** is an ongoing development effort. The project goal is to develop a small-scale
-distributed facial recognition and learning pipeline hosted on a network of Raspberry Pi computers.
+distributed computer vision and machine learning pipeline hosted on a network of Raspberry Pi computers.
 The practical application for this is to build a stand-alone embedded system served by multiple
-camera feeds that can easily support presence detection within the context of smart home automation.
+camera feeds that can easily support such requirements as presence detection within the context 
+of smart home automation.
 
 .. contents::
 
