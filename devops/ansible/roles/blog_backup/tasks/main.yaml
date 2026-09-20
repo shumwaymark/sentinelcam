@@ -1,0 +1,96 @@
+---
+# blog_backup — pull the WordPress blog backup store from the VPS to the datasink.
+#
+# The VPS (cloud2 / blog.swanriver.dev) is outside this inventory and manages
+# its own nightly backup. This role owns the datasink side only.
+
+- name: "Ensure SSH directory exists"
+  ansible.builtin.file:
+    path: "/home/{{ sentinelcam_user }}/.ssh"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0700'
+  tags: [blog_backup, ssh_keys, vps]
+
+# Same key and pattern the watchtower uses to reach the VPS for video export
+# uploads. Deploying it here widens that access to the datasink deliberately:
+# the datasink is the only node running 24x7, so it is the only one that can
+# own a nightly pull.
+- name: "Deploy VPS SSH key for blog backup pulls"
+  ansible.builtin.copy:
+    content: "{{ vault_vps_ssh_private_key }}"
+    dest: "/home/{{ sentinelcam_user }}/.ssh/sentinelcam_vps"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0600'
+  when: vault_vps_ssh_private_key is defined
+  tags: [blog_backup, ssh_keys, vps]
+
+- name: "Configure SSH to use VPS key"
+  ansible.builtin.blockinfile:
+    path: "/home/{{ sentinelcam_user }}/.ssh/config"
+    create: yes
+    mode: '0644'
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - vps"
+    block: |
+      Host {{ blog_backup_src_host }}
+        IdentityFile ~/.ssh/sentinelcam_vps
+        User {{ blog_backup_src_user }}
+        Port {{ blog_backup_src_port }}
+  when: vault_vps_ssh_private_key is defined
+  tags: [blog_backup, ssh_keys, vps]
+
+- name: "Create blog backup destination on the NVMe"
+  ansible.builtin.file:
+    path: "{{ blog_backup_dest }}"
+    state: directory
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0750'
+  tags: [blog_backup, config]
+
+- name: "Deploy blog backup pull script"
+  ansible.builtin.template:
+    src: blog-backup-pull.sh.j2
+    dest: "{{ blog_backup_script }}"
+    owner: "{{ sentinelcam_user }}"
+    group: "{{ sentinelcam_group }}"
+    mode: '0755'
+  tags: [blog_backup, config]
+
+- name: "Deploy blog backup pull service unit"
+  ansible.builtin.template:
+    src: blog_backup_pull.service.j2
+    dest: /etc/systemd/system/blog_backup_pull.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: reload systemd
+  tags: [blog_backup, service]
+
+- name: "Deploy blog backup pull timer unit"
+  ansible.builtin.template:
+    src: blog_backup_pull.timer.j2
+    dest: /etc/systemd/system/blog_backup_pull.timer
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: reload systemd
+  tags: [blog_backup, service]
+
+- name: "Flush handlers so the units are loaded before enabling"
+  ansible.builtin.meta: flush_handlers
+  tags: [blog_backup, service]
+
+- name: "Enable and start the blog backup pull timer"
+  ansible.builtin.systemd:
+    name: blog_backup_pull.timer
+    enabled: "{{ blog_backup_enabled }}"
+    state: "{{ 'started' if blog_backup_enabled else 'stopped' }}"
+  become: true
+  tags: [blog_backup, service]

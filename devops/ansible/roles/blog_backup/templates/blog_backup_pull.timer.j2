@@ -1,0 +1,15 @@
+# blog backup pull timer unit file
+# SentinelCam Ansible Template
+
+[Unit]
+Description=Nightly pull of the WordPress blog backup store
+Requires=blog_backup_pull.service
+
+[Timer]
+Unit=blog_backup_pull.service
+OnCalendar={{ blog_backup_oncalendar }}
+RandomizedDelaySec={{ blog_backup_randomized_delay }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+# blog backup pull service unit file
+# SentinelCam Ansible Template
+
+[Unit]
+Description=Pull the WordPress blog backup store from the VPS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ sentinelcam_user }}
+Group={{ sentinelcam_group }}
+ExecStart={{ blog_backup_script }}

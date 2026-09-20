@@ -1,0 +1,25 @@
+---
+# Deploy the off-box blog backup pull to the datasink.
+#
+# The WordPress blog on cloud2 (blog.swanriver.dev) takes its own nightly
+# backup of its database and uploads. That host is outside this inventory and
+# is hand-managed. This playbook owns only the datasink side: a nightly pull
+# so the blog's history does not live solely on the VM it is a backup of.
+#
+# The datasink is the target because it is the only node running 24x7.
+#
+# Requires the vault, which holds the VPS SSH key:
+#   ansible-playbook playbooks/deploy-blog-backup.yaml --ask-vault-pass
+#
+# Verify afterwards:
+#   ssh data1 'systemctl list-timers blog_backup_pull.timer'
+#   ssh data1 'sudo systemctl start blog_backup_pull.service'
+#   ssh data1 'journalctl -u blog_backup_pull.service -n 20 --no-pager'
+
+- name: "Deploy blog backup pull"
+  hosts: datasinks
+  become: false
+
+  roles:
+    - role: blog_backup
+      tags: [blog_backup]

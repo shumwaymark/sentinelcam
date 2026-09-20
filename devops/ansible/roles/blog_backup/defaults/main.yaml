@@ -1,0 +1,42 @@
+---
+# blog_backup — off-box retention of the WordPress blog hosted on cloud2.
+#
+# cloud2 (blog.swanriver.dev) runs its own nightly backup of the blog database
+# and uploads. That host is deliberately outside this inventory, so its local
+# backup is hand-managed there. This role owns only the datasink side: pulling
+# that store down so the blog's history does not live solely on the VM it
+# describes.
+#
+# PULL rather than push, on purpose. The datasink reaches out to the VPS; the
+# VPS holds no credential for the datasink and cannot reach in. A compromised
+# cloud2 therefore cannot destroy the copies taken before it was compromised.
+
+blog_backup_enabled: true
+
+# --- source: the VPS, over the WireGuard tunnel ---------------------------
+# Addressed by tunnel IP, exactly as the watchtower reaches it for video
+# export uploads. cloud2 restricts SSH to the tunnel, so the public hostname
+# is not a usable path from inside.
+blog_backup_src_host: "{{ vault_vps_ssh_host | default('10.0.0.1') }}"
+blog_backup_src_user: "{{ vault_vps_ssh_user | default('shumway') }}"
+blog_backup_src_port: "{{ vault_vps_ssh_port | default(22) }}"
+blog_backup_src_path: "/var/backups/blog/"
+
+# --- destination: the NVMe, never the SD card root ------------------------
+# Alongside the deployment rollback snapshots, which already live here.
+blog_backup_dest: "{{ sentinelcam_data_path }}/backups/blog"
+
+blog_backup_script: "/home/{{ sentinelcam_user }}/blog-backup-pull.sh"
+
+# Hold a deeper history here than the VPS keeps locally (14 days there). The
+# point of an off-box copy is surviving a mistake noticed late.
+blog_backup_keep_days: 90
+
+# After the VPS has taken its own 03:30 backup, with room for its delay.
+blog_backup_oncalendar: "*-*-* 05:15:00"
+blog_backup_randomized_delay: "30m"
+
+# Fail loudly if the newest file pulled is older than this. A pull that
+# silently succeeds against a source that stopped being written is the
+# failure mode this whole arrangement exists to prevent.
+blog_backup_max_age_hours: 48

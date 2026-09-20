@@ -1,0 +1,56 @@
+#!/bin/bash
+# blog backup pull — datasink side
+# SentinelCam Ansible Template — do not edit on the node
+#
+# Pulls the WordPress backup store from cloud2 down to the datasink NVMe.
+# The VPS takes its own nightly backup; this exists so that history does not
+# live solely on the machine it is a backup of.
+#
+set -euo pipefail
+
+SRC="{{ blog_backup_src_user }}@{{ blog_backup_src_host }}:{{ blog_backup_src_path }}"
+DEST="{{ blog_backup_dest }}"
+KEEP_DAYS={{ blog_backup_keep_days }}
+MAX_AGE_H={{ blog_backup_max_age_hours }}
+
+mkdir -p "$DEST"
+
+# No --delete. The VPS prunes its own store at 14 days; this side keeps
+# {{ blog_backup_keep_days }}. Mirroring its deletions would throw away exactly the
+# depth an off-box copy exists to provide.
+rsync -a --timeout=120 \
+    -e "ssh -p {{ blog_backup_src_port }} -o BatchMode=yes -o ConnectTimeout=20 -i $HOME/.ssh/sentinelcam_vps" \
+    "$SRC" "$DEST/"
+
+# --- verify, do not just transfer ----------------------------------------
+# A pull that reports success against a source which quietly stopped being
+# written is the precise failure this arrangement exists to prevent, so the
+# freshness and integrity of what landed are checked rather than assumed.
+
+newest=$(find "$DEST" -maxdepth 1 -name 'db-*.sql.gz' -printf '%T@ %p\n' 2>/dev/null \
+         | sort -rn | head -1)
+
+if [ -z "$newest" ]; then
+    echo "FATAL: no database backup present in $DEST after pull" >&2
+    exit 1
+fi
+
+newest_path=${newest#* }
+newest_epoch=${newest%% *}
+age_h=$(( ( $(date +%s) - ${newest_epoch%.*} ) / 3600 ))
+
+if [ "$age_h" -gt "$MAX_AGE_H" ]; then
+    echo "FATAL: newest blog backup is ${age_h}h old (limit ${MAX_AGE_H}h) — is the VPS timer still running?" >&2
+    exit 1
+fi
+
+# Cheap integrity check: a truncated or half-written dump fails this.
+if ! gzip -t "$newest_path" 2>/dev/null; then
+    echo "FATAL: $newest_path is not a valid gzip stream" >&2
+    exit 1
+fi
+
+# --- retention ------------------------------------------------------------
+find "$DEST" -maxdepth 1 -type f -mtime +"$KEEP_DAYS" -delete
+
+echo "blog backup pull ok — newest $(basename "$newest_path") (${age_h}h old), $(find "$DEST" -maxdepth 1 -type f | wc -l) files, $(du -sh "$DEST" | cut -f1)"
