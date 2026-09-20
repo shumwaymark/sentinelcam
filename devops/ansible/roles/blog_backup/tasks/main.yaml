@@ -43,6 +43,36 @@
   when: vault_vps_ssh_private_key is defined
   tags: [blog_backup, ssh_keys, vps]
 
+# The pull runs unattended under BatchMode, which will not prompt to accept an
+# unknown host key -- it simply fails with "Host key verification failed". The
+# key therefore has to be present before the first run rather than accepted by
+# hand, which is how the watchtower's VPS access came to depend on someone
+# having typed "yes" during setup.
+#
+# This is trust-on-first-use, but the scan crosses only the WireGuard tunnel to
+# a host this inventory already holds a private key for, so the exposure is the
+# tunnel itself rather than the open internet.
+- name: "Scan the VPS host key"
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -T 10 -p {{ blog_backup_src_port }} {{ blog_backup_src_host }}"
+  register: blog_backup_hostkey
+  changed_when: false
+  failed_when: blog_backup_hostkey.stdout | trim == ""
+  when: vault_vps_ssh_private_key is defined
+  tags: [blog_backup, ssh_keys, vps]
+
+- name: "Pin the VPS host key for the service user"
+  ansible.builtin.known_hosts:
+    path: "/home/{{ sentinelcam_user }}/.ssh/known_hosts"
+    name: "{{ blog_backup_src_host }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ blog_backup_hostkey.stdout_lines | default([]) | reject('match', '^#') | reject('equalto', '') | list }}"
+  become: true
+  become_user: "{{ sentinelcam_user }}"
+  when: vault_vps_ssh_private_key is defined
+  tags: [blog_backup, ssh_keys, vps]
+
 - name: "Create blog backup destination on the NVMe"
   ansible.builtin.file:
     path: "{{ blog_backup_dest }}"
