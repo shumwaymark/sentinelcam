@@ -60,9 +60,6 @@ cameras:
             tracker:
 {{ camera.detector.tracker | to_nice_yaml(indent=2) | indent(14, first=true) }}
 {% endif %}
-{% if camera.detector.interesting_objects is defined %}
-            interesting_objects: {{ camera.detector.interesting_objects | list }}
-{% endif %}
 {% if camera.detector.motion_params is defined %}
             motion_params:
                 varThreshold: {{ camera.detector.motion_params.varThreshold }}

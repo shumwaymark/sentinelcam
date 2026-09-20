@@ -79,7 +79,8 @@ nodes.
 For building out the functionality of the **Outpost**, it quickly became obvious that
 Jeff's **imagenode** project could provide scaffolding that was both structurally sound and
 already working. This project has been forked as a submodule here. Additional details
-regarding enhancements are documented in `YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
+regarding what was inherited and what was added are documented in
+`Outpost History <docs/OUTPOST_HISTORY.md>`_.
 
 Most significantly, this enhanced **imagenode** module completely encapsulates all the
 functionality required by the **Outpost**, while continuing to serve in its existing
@@ -107,9 +108,6 @@ command.
 
 The ``Outpost`` is implemented as a ``Detector`` for an **imagenode** camera. This allows it to easily
 slip into the existing **imagenode** / **imagehub** / **librarian** ecosystem as supplemental functionality.
-
-.. image:: docs/images/Outpost.png
-   :alt: High-level sketch of Outpost integration with imagenode
 
 Two key enhancements provide the essential wiring to make this possible. Log and image publishing over
 ZeroMQ and imageZMQ respectively.
@@ -178,7 +176,7 @@ them answerable.
 Further detail on the design, structure, and operation of the ``Outpost`` is documented in
 `Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_. The project's earlier
 motion-driven, cascading-lens lineage — the proof of concept this evolved from — is preserved in
-`YingYangRanch_Changes <docs/YingYangRanch_Changes.rst>`_.
+`Outpost History <docs/OUTPOST_HISTORY.md>`_.
 
 Camwatcher design
 -----------------
@@ -625,7 +623,9 @@ Additional documentation
 ========================
 - `Version history and Changelog <HISTORY.md>`_
 - `Tracking and event-management architecture <docs/TRACKING_ARCHITECTURE.md>`_
-- `Changes to imagenode project <docs/YingYangRanch_Changes.rst>`_
+- `Outpost event protocol -- the wire contract <docs/EVENT_PROTOCOL.md>`_
+- `Outpost configuration and tuning reference <docs/OUTPOST_CONFIGURATION.md>`_
+- `Outpost history -- the imagenode fork and the motion-driven era <docs/OUTPOST_HISTORY.md>`_
 - `Facial recognition, model training, and machine learning pipeline <docs/FACIAL_RECON_LEARNING.md>`_
 - `Data management policies and retention strategy <docs/DATA_MANAGEMENT.md>`_
 - `Ansible playbooks for provisioning, application deployment, and configuration <devops/ansible/README.md>`_

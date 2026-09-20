@@ -25,10 +25,14 @@ imagenode_config:
         depthai:                     # OAK nodes only
           oak_pipeline:
             crop_profiles: { ... }   # §2 — high-res crop geometry per class
-        interesting_objects: [ ... ] # classes that may trigger event capture
-        ROI: (10,20),(70,80)         # motion region of interest (% of frame)
+        spyglass: (768, 432)         # §5 — shared buffer size; MUST match pipeline
+        ROI: (10,20),(70,80)         # §5 — motion region of interest (% of frame)
         sentinel_tasks: { ... }      # §4 — post-event analysis dispatch
 ```
+
+> **Retired key.** `interesting_objects` is no longer read by any code. Its
+> replacement is `interesting_classes` **inside the `tracker:` dict**, a
+> `TrackerConfig` field defaulting to `{person, vehicle}` — see §1.
 
 > **§4.10 note.** `detector.tracker` is a *dict* and lives at the detector level
 > for **every** node type. A dict opts the node into the unified host-tracker
@@ -132,10 +136,133 @@ tasks submit at priority 1, `default` at priority 2.)
 
 ---
 
+## 5. `spyglass` and `ROI` — buffer sizing and motion region
+
+Two detector-level settings that predate the §4.10 redesign and survived it intact.
+
+### `spyglass` — shared memory buffer dimensions
+
+```yaml
+spyglass: (768, 432)    # MUST match the true pipeline image size
+```
+
+The `SpyGlass` runs in a separate process, so a shared memory buffer is allocated to
+pass full-size frames to it. **This setting sizes that buffer.** Get it wrong and
+the operation fails.
+
+It must match the image size actually flowing through the imagenode pipeline —
+normally the camera's `resolution`, but not always. In particular, `resize_width`
+changes the pipeline image size and should be avoided on an outpost regardless,
+being computationally expensive. Any other detectors configured on the node affect
+performance too; know what else is running.
+
+> **Why the setting exists at all.** A `Detector` initializes *before* camera startup
+> completes, so the `Camera` instance has not yet learned its true image size. The only
+> alternative would be deferring `SpyGlass` initialization until the first frame arrives.
+> Do not guess this value — determine the true size passing through the pipeline and
+> state it.
+
+### `ROI` — motion region of interest
+
+```yaml
+ROI: (10,20),(70,80)    # region of interest for motion detection
+```
+
+Restricts **motion detection** to a rectangular sub-region. Note the scope: a
+`spyglass` and the object detection it performs always apply to the full-size image;
+`ROI` bounds motion only, so it is meaningful on host-NN nodes where motion schedules
+inference, and inert where `motion_detector: none`.
+
+Corners are given as OpenCV-style `(X1,Y1),(X2,Y2)` — top-left then bottom-right — but
+in **integer percentages (0–100) of frame size**, not pixels. That convention lets the
+region survive a resolution change unaltered, which is exactly what a node needs when
+its scene size is retuned. The default is `(0,0),(100,100)`, the full frame.
+
+The baseline imagenode also offers `draw_roi`, `draw_time`, `draw_time_org` and
+`draw_time_fontScale` for visualizing these while tuning; see *"Camera Detectors, ROI
+and Event Tuning"* in the [upstream imagenode settings
+documentation](https://github.com/shumwaymark/imagenode/blob/master/docs/settings-yaml.rst).
+
+> There is **no validation** on any detector setting. A misconfiguration surfaces as an
+> operational failure, and most settings have no usable default.
+
+---
+
+## 6. Node-level publishing and connection settings
+
+Everything above is per-camera, under `detector:`. These four are different: they
+sit at the **imagenode level**, are applied once per node regardless of how many
+cameras it runs, and are what connect an outpost to a **camwatcher** at all.
+
+```yaml
+imagenode_config:
+  node_name: east
+  publish_cam: 5567       # port for scene image publishing (ImageZMQ PUB)
+  publish_log: 5565       # port for log publishing (ZMQ PUB)
+  logconfig:              # logging configuration dictionary
+    interface_or_socket: tcp://*:5565
+    root_topic: east      # MUST match node_name
+    level: INFO           # INFO is the minimum for outpost functionality
+  camwatcher: tcp://data1:5566   # optional — dynamic registration
+```
+
+### `publish_cam`
+
+Port number for scene image publishing. Activates an `imagezmq.ImageSender`; every
+frame through the camera's pipeline is published as a JPEG, so any client can
+subscribe for a live feed. Achievable frame rate falls with pipeline length —
+multiple cameras, larger frames, and additional detectors all compound.
+
+### `publish_log`
+
+Port number for log publishing over ZeroMQ. Must match the port in the
+`logconfig` connection string below.
+
+### `logconfig`
+
+Required dictionary configuring the ZMQ PUB log handler. Once active, **all**
+logger calls go through it.
+
+| Key | Requirement |
+|-----|-------------|
+| `interface_or_socket` | Bind string; its port must match `publish_log`. |
+| `root_topic` | Must match the node name at the top of the YAML — it is the topic subscribers filter on, and the `ote` records omit the node name precisely because it arrives this way. |
+| `level` | `INFO` is required for basic outpost functionality. `DEBUG` when diagnosing. |
+
+### `camwatcher`
+
+**Optional.** A connection string to a running camwatcher's control port. At
+startup the node sends a `CamUp` introduction, assembled from `publish_log`,
+`publish_cam`, and the hostname read from the running network configuration.
+
+This is a *dynamic, temporary* registration — a camwatcher restart clears it.
+Production nodes belong in the camwatcher's own configuration (generated from the
+`site.yaml` outpost registry); use this for ad hoc introductions during bring-up
+and testing.
+
+### Multiple cameras on one node
+
+Only the **first** camera entry's port numbers are used; values on subsequent
+entries are ignored. Keep them identical anyway so the configuration does not
+mislead. Frames from multiple cameras **interleave** on the single stream, so
+subscribers filter by `viewname` — the camwatcher always does.
+
+> Wire formats for all of the above — the `ote` record schemas, the image stream
+> text descriptors, the `CamUp` message — are specified in
+> [EVENT_PROTOCOL.md](EVENT_PROTOCOL.md).
+
+---
+
 ## See also
 
+- [EVENT_PROTOCOL.md](EVENT_PROTOCOL.md) — the wire contract these settings
+  produce: `ote` record schemas, stream descriptors, and the `CamUp` handshake.
 - [TRACKING_ARCHITECTURE.md](TRACKING_ARCHITECTURE.md) — the lifecycle, state
   machine, and two-node-types design these knobs tune.
+- [OUTPOST_HISTORY.md](OUTPOST_HISTORY.md) — retired settings and what replaced
+  them. **Provisioning a picamera node? Read §5 first** — the `picamera2`
+  migration is interim, and every camera setting except `resolution` and
+  `framerate` is untested and assumed broken.
 - [imagenode role README](../devops/ansible/roles/imagenode/README.md) — deploying
   the outpost and the `imagenode_config` host_vars structure.
 - Empirical basis for the tracker defaults (replay K-sweeps, street-cam IoU
