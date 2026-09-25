@@ -108,8 +108,14 @@ class CropSelector:
             if crow is None:
                 return None
 
-            objid = int(crow["objid"])
-            seqnum = int(crow["seqnum"])
+            # NOT int(): objid is a string in every tracking set (trk/crp/vsp).
+            # Casting it made `crp["objid"] == objid` and `trk["objid"] == objid`
+            # match zero rows, so _best_crop_row fell back to the WHOLE event's
+            # crops (able to caption one vehicle's crop with another's speed in a
+            # multi-subject event) and _bbox_for always returned None, silently
+            # dropping the scene-bbox cue on every event.
+            objid = crow["objid"]
+            seqnum = int(crow["seqnum"])   # used only to format the crop filename
             classname = str(crow["classname"])
             phase = str(crow["phase"])
             if label is None:
@@ -143,7 +149,9 @@ class CropSelector:
         if len(ranked) == 0:
             return None, None
         top = ranked.loc[ranked["_mph"].idxmax()]
-        return int(top["objid"]), str(top["classname"])
+        # objid stays in the dtype the tracking sets actually carry (str). An
+        # int() here silently matched nothing downstream -- see select().
+        return top["objid"], str(top["classname"])
 
     def _pick_most_cropped(self, crp):
         """Fallback: the subject with the most crops (the best-observed one)."""
