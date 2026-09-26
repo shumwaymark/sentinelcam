@@ -20,14 +20,16 @@ Early project goals are to be able to recognize people and vehicles that are kno
 Differentiating between family, friends, guests, neighbors, *and strangers*. Identifying package and
 mail delivery. Knowing when a strange car has pulled into the driveway.
 
-Significantly, any unknown face should automatically be enrolled and subsequently recognized going
-forward. Unknown faces can always receive a "formal introduction" later by tagging and categorizing
-as desired.
+The larger ambition is a house that learns, largely on its own, what is normal around it and what
+isn't. The regular comings and goings become familiar; anything out of the ordinary stands out. So
+any unknown face or vehicle should automatically be enrolled and subsequently recognized going
+forward. Newcomers can always receive a "formal introduction" later by tagging and categorizing as
+desired.
 
 - Able to operate independently of any cloud-based services or externally hosted infrastructure
-- Automatic video capture should be triggered by motion detection and stored for review/modeling
-- Motion detector will provide basic object tracking for the duration of the event
-- Object identifiers and associated tracking centroids are logged as an outcome of motion detection
+- Image capture should begin automatically when a subject of interest is detected, and be stored for review/modeling
+- Each subject should be tracked for the duration of the event
+- Object identifiers and their bounding boxes are logged as the event unfolds
 - A live video feed from each camera must be available for on-demand viewing as desired
 - Video playback should support an optional timestamp and any desired labeling of inference results
 - Optional time-lapse capture
