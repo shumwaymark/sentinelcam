@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="760" height="300" rx="10" fill="#fbfbfd" stroke="#e5e7eb"/>
+  <text x="380" y="34" text-anchor="middle" font-size="18" font-weight="bold" fill="#1a1a1a">Joining the stores</text>
+  <text x="380" y="56" text-anchor="middle" font-size="12" fill="#555555">Every join stays inside one event. The key named on each edge completes it.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9aa3ad"/>
+    </marker>
+  </defs>
+
+  <!-- row of records -->
+  <rect x="20" y="100" width="120" height="64" rx="8" fill="#ffffff" stroke="#A23B72" stroke-width="2"/>
+  <text x="80" y="128" text-anchor="middle" font-size="14" font-weight="bold" fill="#A23B72">crop JPEG</text>
+  <text x="80" y="147" text-anchor="middle" font-size="11" fill="#555555">crops/{date}/</text>
+
+  <rect x="220" y="100" width="120" height="64" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="280" y="128" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">crp row</text>
+  <text x="280" y="147" text-anchor="middle" font-size="11" fill="#555555">no geometry</text>
+
+  <rect x="420" y="100" width="120" height="64" rx="8" fill="#2E86AB"/>
+  <text x="480" y="128" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">trk row</text>
+  <text x="480" y="147" text-anchor="middle" font-size="11" fill="#dbeefa">bounding box</text>
+
+  <rect x="620" y="100" width="120" height="64" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="680" y="128" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">vsp row</text>
+  <text x="680" y="147" text-anchor="middle" font-size="11" fill="#555555">speed</text>
+
+  <!-- edges -->
+  <path d="M140,132 L214,132" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="180" y="110" text-anchor="middle" font-size="11" fill="#555555">objid</text>
+  <text x="180" y="123" text-anchor="middle" font-size="11" fill="#555555">seqnum</text>
+
+  <path d="M340,132 L414,132" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="380" y="110" text-anchor="middle" font-size="11" fill="#555555">objid</text>
+  <text x="380" y="123" text-anchor="middle" font-size="11" fill="#555555">timestamp</text>
+
+  <path d="M620,132 L546,132" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="580" y="110" text-anchor="middle" font-size="11" fill="#555555">objid</text>
+  <text x="580" y="123" text-anchor="middle" font-size="11" fill="#555555">timestamp</text>
+
+  <path d="M480,164 L480,220" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="490" y="197" font-size="11" fill="#555555">timestamp</text>
+
+  <rect x="420" y="226" width="120" height="54" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="480" y="250" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">scene frame</text>
+  <text x="480" y="268" text-anchor="middle" font-size="11" fill="#555555">images/{date}/</text>
+
+  <text x="20" y="246" font-size="12" fill="#555555">objid is the tracker's persistent identity</text>
+  <text x="20" y="264" font-size="12" fill="#555555">(tid) in trk, crp and vsp alike.</text>
+</svg>

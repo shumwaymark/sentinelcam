@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 390" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="800" height="390" rx="10" fill="#fbfbfd" stroke="#e5e7eb"/>
+  <text x="400" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#1a1a1a">Where the data lives</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9aa3ad"/>
+    </marker>
+  </defs>
+
+  <!-- sources -->
+  <rect x="20" y="130" width="170" height="116" rx="8" fill="#2E86AB"/>
+  <text x="105" y="160" text-anchor="middle" font-size="16" font-weight="bold" fill="#ffffff">Outposts</text>
+  <text x="105" y="184" text-anchor="middle" font-size="12" fill="#dbeefa">event logs</text>
+  <text x="105" y="202" text-anchor="middle" font-size="12" fill="#dbeefa">scene JPEGs &#183; 30 FPS</text>
+  <text x="105" y="220" text-anchor="middle" font-size="12" fill="#dbeefa">hi-res crops &#183; OAK</text>
+
+  <path d="M190,188 L226,188" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="232" y="154" width="130" height="68" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="297" y="184" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">CamWatcher</text>
+  <text x="297" y="203" text-anchor="middle" font-size="12" fill="#555555">writes to disk</text>
+
+  <path d="M362,188 L396,188" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- the datasink filesystem -->
+  <rect x="402" y="58" width="212" height="298" rx="10" fill="#f1f3f6" stroke="#e5e7eb"/>
+  <text x="508" y="80" text-anchor="middle" font-size="13" font-weight="bold" fill="#555555">datasink filesystem</text>
+
+  <rect x="416" y="92" width="184" height="54" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="428" y="114" font-size="13" font-weight="bold" fill="#1a1a1a">camwatcher/</text>
+  <text x="588" y="114" text-anchor="end" font-size="11" fill="#555555">0.6 GB</text>
+  <text x="428" y="133" font-size="12" fill="#555555">event index &#183; tracking CSV</text>
+
+  <rect x="416" y="156" width="184" height="118" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="428" y="178" font-size="13" font-weight="bold" fill="#1a1a1a">images/</text>
+  <text x="588" y="178" text-anchor="end" font-size="11" fill="#555555">360 GB</text>
+  <text x="428" y="197" font-size="12" fill="#555555">scene frames &#183; replay</text>
+  <text x="428" y="228" font-size="12" fill="#555555">99% of the bytes,</text>
+  <text x="428" y="245" font-size="12" fill="#555555">and the first to expire</text>
+
+  <rect x="416" y="284" width="184" height="58" rx="8" fill="#ffffff" stroke="#A23B72" stroke-width="2"/>
+  <text x="428" y="306" font-size="13" font-weight="bold" fill="#A23B72">crops/</text>
+  <text x="588" y="306" text-anchor="end" font-size="11" fill="#555555">2.0 GB</text>
+  <text x="428" y="326" font-size="12" fill="#555555">hi-res crops &#183; re-ID</text>
+
+  <path d="M614,146 L644,146" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- access -->
+  <rect x="650" y="112" width="130" height="68" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="715" y="142" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">DataPump</text>
+  <text x="715" y="161" text-anchor="middle" font-size="12" fill="#555555">serves requests</text>
+
+  <path d="M715,180 L715,226" fill="none" stroke="#9aa3ad" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="723" y="207" font-size="11" fill="#555555">DataFeed</text>
+
+  <rect x="650" y="232" width="130" height="96" rx="8" fill="#ffffff" stroke="#cfd6dd"/>
+  <text x="715" y="256" text-anchor="middle" font-size="13" font-weight="bold" fill="#1a1a1a">Clients</text>
+  <text x="715" y="277" text-anchor="middle" font-size="12" fill="#555555">sentinel</text>
+  <text x="715" y="295" text-anchor="middle" font-size="12" fill="#555555">watchtower</text>
+  <text x="715" y="313" text-anchor="middle" font-size="12" fill="#555555">notebooks</text>
+
+  <text x="400" y="377" text-anchor="middle" font-size="12" fill="#555555">Scene frames expire on their own clock. The event record, its tracking data and its crops outlive them.</text>
+</svg>

@@ -201,7 +201,3 @@ flowchart LR
 | OAK device pipeline (scene / detections / crops) + crop selection | `imagenode/.../oak_camera.py`, `imagenode/.../eventsampler.py`; device setups in `depthai.yaml` |
 | picamera feed (motion-scheduled observe/tick) | `imagenode/.../picamera_intake.py` (`PicameraIntake`) |
 | Per-camera thresholds | each node's `host_vars` `detector.tracker` block — field reference + tuning guidance in [OUTPOST_CONFIGURATION.md](OUTPOST_CONFIGURATION.md) |
-
-> **Diagram sources.** Panels 2, 3, and 4 are Mermaid (rendered inline). The lifecycle
-> timeline (panel 1) is kept as ASCII here; if a polished render is wanted it can be
-> promoted to an SVG/PNG in `docs/images/` alongside the other architecture figures.

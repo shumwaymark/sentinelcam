@@ -256,4 +256,5 @@ deletion, internal use only).
 - [OUTPOST_CONFIGURATION.md](OUTPOST_CONFIGURATION.md) — the settings that drive all of this
 - [TRACKING_ARCHITECTURE.md](TRACKING_ARCHITECTURE.md) — the lifecycle that produces the records
 - [OUTPOST_HISTORY.md](OUTPOST_HISTORY.md) — how the protocol arrived at this shape
+- [DATA_MODEL.md](DATA_MODEL.md) — how these records are stored, joined, and read back
 - [DATA_MANAGEMENT.md](DATA_MANAGEMENT.md) — how the stored result is retained and expired

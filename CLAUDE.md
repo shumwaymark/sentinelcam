@@ -80,6 +80,7 @@ Each component reads its configuration from `~/componentname.yaml` at startup. T
 | `docs/EVENT_PROTOCOL.md` | The wire contract: `ote` schemas, heartbeat, stream descriptors, `CamUp` |
 | `docs/OUTPOST_CONFIGURATION.md` | Every current outpost setting, detector-level and node-level |
 | `docs/OUTPOST_HISTORY.md` | Retired designs and settings, and what replaced them |
+| `docs/DATA_MODEL.md` | Data at rest: stores, schemas, joins, the full DataFeed API and access patterns |
 | `docs/DATA_MANAGEMENT.md` | Retention policy and storage strategy |
 | `HISTORY.md` | Release changelog — the reasoning behind most current behavior |
 
@@ -183,6 +184,8 @@ Outpost logs carry `ote` (object tracking event) prefixed JSON messages. Record 
 **Full wire contract: `docs/EVENT_PROTOCOL.md`** — record schemas, the `fps` heartbeat, image-stream text descriptors, and the `CamUp` handshake. Note the discriminator is `type` (not `evt`) and the class label is `clas` (not `class`); both were renamed in §4.10 and consumers written against the old names match nothing.
 
 ## Data Model
+
+**Full reference: `docs/DATA_MODEL.md`** — schemas per result type, the join chain, retention clocks, the complete DataFeed API (and which client copy has what), and worked access examples.
 
 ### Filesystem Structure (on data sinks)
 ```

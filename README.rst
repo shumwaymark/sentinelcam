@@ -90,7 +90,11 @@ role.
 Project status
 ==============
 
-**SentinelCam** is a functional work in progress. A continually evolving and on-going research experiment.
+**SentinelCam** is an on-going research experiment, built on a foundation that is no longer in flux.
+The core pipeline — ``Outpost``, **camwatcher**, **datapump**, and **sentinel** — is stable and in
+continuous production use. The **watchtower** continues to evolve, mostly through UI improvements and
+whatever new features come to mind. The active frontier is the recognition work being built on top of
+all this; see the `Research and development roadmap`_ below.
 
 Outpost design
 --------------
@@ -137,8 +141,6 @@ for closer analysis of selected frames. The idea is to keep the main pipeline le
 publishing each frame, while heavier per-subject inference runs in parallel. This is a
 multiprocessing solution.
 
-  **Status**: the tracker-driven lifecycle described below is deployed across the camera fleet.
-
 .. image:: docs/images/SpyGlass.png
    :alt: Outpost to Spyglass inter-process marshalling
 
@@ -182,9 +184,8 @@ motion-driven, cascading-lens lineage — the proof of concept this evolved from
 Camwatcher design
 -----------------
 
-A prototype of the **camwatcher** functionality is up and running in production. Early design goals
-for this module have been met. This key component has proven to be a stable proof of concept.
-See below for a high-level design sketch.
+The **camwatcher** is the collection point on each data sink, subscribing to the ``Outpost`` nodes
+assigned to it and writing everything they report to disk. See below for a high-level design sketch.
 
 .. image:: docs/images/CamWatcher.png
    :alt: Sketch of basic camwatcher design
@@ -192,8 +193,6 @@ See below for a high-level design sketch.
 Depending on how many camera events are occuring at any one time, each **camwatcher** node can support
 a limited number of ``Outpost`` publishers. As the total number of deployed camera nodes increase,
 additional data sinks will need to be included in the system architecture design to distribute the load.
-
-  **Status**: stable working prototype.
 
 - Image publishing over imageZMQ supports multiple subscribers concurrently. Event analysis and
   image capture can occur, while simultaneously supporting a live camera feed on one or more video
@@ -206,130 +205,39 @@ additional data sinks will need to be included in the system architecture design
   `camwatcher.yaml <camwatcher.yaml>`_ file for how this is configured.
 
 The *CSV File Writers* run as dedicated I/O threads. This component is responsible for receiving
-queued data records and writing them into CSV-format text files based on the following data model.
+queued data records and writing them into CSV-format text files, as described below.
 
 Data model
 ----------
 
-Two types of data are collected by the **camwatcher**. Data related to the analysis of the event and
-captured images. All data is stored in the filesystem, within a separate folder for each category.
+.. image:: docs/images/DataStore.svg
+   :alt: Outposts feed the camwatcher, which writes three stores on the data sink; the datapump serves them to clients
 
-Event tracking data and results from event analysis are written to the filesystem as a set of
-CSV-format text files. For each date, there is an event index file and a separate file with
-the detailed result sets from each analysis task executed for the event.
+Everything the system collects lands on the filesystem of a data sink, in three stores, each organized
+into one folder per date. There is no database. Every stored file is named for the event it belongs to,
+and the date folder narrows any search to a single day. That buys fast, direct access to any event, and
+any moment within it, on very small hardware — with nothing more fragile than a text file to corrupt,
+and a layout anyone can inspect with ``ls``.
 
-The index file for each date folder is named ``camwatcher.csv`` as described below. There is no
-header row included in the data.
+- **Event index and tracking data**, as CSV text. A daily index of events, and for each event a detail
+  file per result type: the ``Outpost``'s tracking records, its crop correlations, and each result set
+  produced by analysis on the **sentinel**. Small, and the analytical heart of the system.
 
-.. csv-table:: Event Index
-  :header: "Name", "Type", "Description"
-  :widths: 20, 20, 60
+- **Scene frames**, every published frame of every event stored as an individual JPEG. Frames rather
+  than video, because the analysis downstream works on still images, and a stored frame keeps every
+  detail the camera published. The storage this demands is best characterized as greedy. *Very greedy*.
+  Scene frames are 99% of the bytes.
 
-  node, str, node name
-  viewname, str, camera view name
-  timestamp, datetime, timestamp at the start of the event
-  event, str, unique identifer for the event
-  width, int, width of captured images
-  height, int, height of captured images
-  type, str, tracking result type
+- **Crops**, the high-resolution, subject-sized images cut from the full sensor frame by an OAK camera.
+  A sliver of the storage, and the source imagery the re-identification work stands on.
 
-Event detail files always include a header row, with the data structure varying by the type of result
-data. Most tracking result sets share the geometry-bearing record described below; some carry a
-type-specific schema instead — for example, crop-correlation records reference a subject and frame
-without a bounding box of their own. The naming convention for these detail files is:
-``EventID_TypeCode.csv``
+That imbalance shapes retention. Scene frames expire on their own clock, while the event record, its
+tracking data, and its crops outlive them. An old event can no longer be replayed as video, but what
+happened — and the imagery worth learning from — remains. The policy is described in
+`Data Management <docs/DATA_MANAGEMENT.md>`_.
 
-.. csv-table:: Tracking Event Detail
-  :header: "Name", "Type", "Description"
-  :widths: 20, 20, 60
-
-  timestamp, datetime, timestamp for the image
-  objid, str, object identifier
-  classname, str, classification name
-  rect_x1, int, bounding rectangle X1-coordinate
-  rect_y1, int, bounding rectangle Y1-coordinate
-  rect_x2, int, bounding rectangle X2-coordinate
-  rect_y2, int, bounding rectangle Y2-coordinate
-
-These CSV files are written into the folder specified by the ``csvfiles`` configuration
-setting in the `camwatcher.yaml <camwatcher.yaml>`_ file, and organized by date into subfolders
-with a YYYY-MM-DD naming convention.
-
-Although identifiers are unique, event data is always referenced by date. There is no event
-index crossing date boundaries.
-
-.. code-block::
-
-  camwatcher
-  ├── 2021-02-11
-  │   ├── camwatcher.csv
-  │   ├── 0b98da686cbf11ebb942dca63261a32e_trk.csv
-  │   ├── 109543546cbe11ebb942dca63261a32e_trk.csv
-  │   ├── 1fda8cb26cbd11ebb942dca63261a32e_trk.csv
-  │   ├── 202cda206cbe11ebb942dca63261a32e_trk.csv
-  │   ├── 7bf2ba8c6cb911ebb942dca63261a32e_trk.csv
-  │   ├── a4f355686cbe11ebb942dca63261a32e_trk.csv
-  │   ├── cde802a06cc011ebb942dca63261a32e_trk.csv
-  │   ├── d1995d346cb811ebb942dca63261a32e_trk.csv
-  │   └──  # etc, etc. for additional events
-  ├── 2021-02-12
-  │   ├── camwatcher.csv
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_trk.csv
-  │   ├── 1af4aac66d5c11ebb942dca63261a32e_trk.csv
-  │   ├── 1dd50b3a6d4a11ebb942dca63261a32e_trk.csv
-  │   ├── 27f4b4686d3f11ebb942dca63261a32e_trk.csv
-  │   ├── 3ce8389c6d3d11ebb942dca63261a32e_trk.csv
-  │   └──  # etc, etc. for additional events
-  │
-  └──  # additional directories for each date
-
-Captured images are written to the filesystem as individual full-sized frames
-compressed into JPEG files. These files are written into the folder specified
-by the ``images`` configuration setting in the `camwatcher.yaml <camwatcher.yaml>`_
-file, and organized by date into subfolders with a YYYY-MM-DD naming convention.
-
-This convention allows for retrieval and storage that is both fast and efficient
-on such small devices. Analysis tasks have speedy direct access to any desired
-event and point in time. The price paid for this includes a little extra network
-bandwidth when pulling the images down, and disk storage requirements which are
-best characterized as greedy. *Very greedy*.
-
-The file name convention for each stored frame is: ``EventID_TimeStamp.jpg`` as
-portrayed below.
-
-.. code-block::
-
-  images
-  ├── 2021-02-11
-  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.542141.jpg
-  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.572958.jpg
-  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.603971.jpg
-  │   ├── 109543546cbe11ebb942dca63261a32e_2021-02-11_23.08.34.635492.jpg
-  │   ├── ...
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.274055.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.305151.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.336279.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.367344.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.399926.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.429276.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.459129.jpg
-  │   ├── a4f355686cbe11ebb942dca63261a32e_2021-02-11_23.12.43.490918.jpg
-  │   └──  # etc, etc. for additional images
-  ├── 2021-02-12
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.33.998836.jpg
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.028291.jpg
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.060119.jpg
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.093632.jpg
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.124754.jpg
-  │   ├── 11ddcf986d6211ebb942dca63261a32e_2021-02-12_18.42.34.154909.jpg
-  │   └──  # etc, etc. for additional images
-  │
-  └──  # additional directories for each date
-
-The collection of image data occurs independently from the tracking data. Some variation in the rate
-of capture can be expected, though these differences are not expected to be significant. There can also
-be minor differences between the clock times from one network node to another. Reporting around image
-analysis is designed to connect any results to the timestamp of the image when it was captured.
+Schemas, file naming, how the stores join together, and the complete access API are documented in
+`Data Model <docs/DATA_MODEL.md>`_.
 
 DataPump and DataFeed
 ---------------------
@@ -338,79 +246,31 @@ Collecting and storing data are only steps one and two. What logically follows, 
 for analysis. Once tasked with event review, the **sentinel** will be hungry for images and
 any tracking records generated by the outpost.
 
-This potentially ravenous fast-food style appetite is to be fed with requests to a
-``DataFeed``. The Data Feed was conceived as a library to provide application programs with
-functions for accessing any desired set of images and tracking data produced from an outpost
-and collected by a **camwatcher**.
-
-Thus both the ``DataFeed`` and ``DataPump`` classes, along with the **datapump** module, were born.
-The **datapump** is the stand-alone server process which responds to Data Feed access requests
-over the network. Communication between components is via imageZMQ using a REQ/REP socket pair.
+This potentially ravenous fast-food style appetite is to be fed with requests to a ``DataFeed``,
+a library providing application programs with access to any desired set of images and tracking
+data collected by a **camwatcher**. The **datapump** is the stand-alone server process on each
+data sink which responds to those requests over the network. Communication between components is
+via imageZMQ using a REQ/REP socket pair, so tracking data travels as pandas DataFrames on the same
+transport that carries images throughout the system.
 
 .. code-block:: python
 
   class DataFeed(imagezmq.ImageSender):  # REQ socket - sends requests to a DataPump
   class DataPump(imagezmq.ImageHub):     # REP socket - responds to DataFeed requests
 
-Any module needing access to **camwatcher** data simply needs to create a ``DataFeed`` instance.
-The network address for a running **datapump** process is specified at that time.
+Any module needing access to **camwatcher** data simply needs to create a ``DataFeed`` instance,
+naming the network address of a running **datapump**. The **sentinel**, the **watchtower**, and
+analysis notebooks all read through it. Every captured frame is individually addressable: if the
+images of interest are not available until 3 seconds after the start of the event, the first 90-100
+frames are simply skipped.
 
-.. image:: docs/images/DataFeed.png
-   :alt: DataPump to DataFeed flow
-
-The ``DataFeed`` and ``DataPump`` subclasses extend the imageZMQ base classes with support
-for transmitting both pandas DataFrame objects, and lists of timestamps. Built upon the
-same serialization context underpinning imageZMQ, this helps maintain consistent image
-transport technology throughout the system.
-
-Internally, the first element of the (text, data) tuple returned to the Data Feed has been
-reserved for carrying a yet-to-be-implemented response code from the **datapump**.
-
-  **Status**: working proof of concept, still evolving.
-
-.. code-block:: python
-
-  DataFeed.get_date_index (date) -> pandas.DataFrame
-
-The ``get_date_index()`` function returns the content of the Event Index for a date. The date
-parameter is always required and specified in 'YYYY-MM-DD' format. There is no default value.
-The Event Index data is returned as a ``pandas.DataFrame`` obect. Refer to the description of
-the data model above for further detail.
-
-.. code-block:: python
-
-  DataFeed.get_tracking_data (date, event, type='trk') -> pandas.DataFrame
-
-The first two arguments to the ``get_tracking_data()`` function are required, a date and an
-event identifier. Used to retrieve the full Tracking Event Detail dataset (see *Data model* above)
-as a ``pandas.DataFrame`` object. The date is specified in 'YYYY-MM-DD' format, the EventID
-reference must exist for the indicated date.
-
-.. code-block:: python
-
-  DataFeed.get_image_list (date, event) -> [timestamp]
-
-This function provides a list of ``datetime.timestamp`` objects reflecting the capture times
-on images published by the Outpost. These are provided in chronological order. Function arguments
-are identical to what is described above for ``get_tracking_data()``.
-
-.. code-block:: python
-
-  DataFeed.get_image_jpeg (date, event, timestamp) -> bytes
-
-Returns a buffer with the image frame as compressed JPEG data. Always for an existing date,
-event, and timestamp as described above.
-
-Presenting **camwatcher** data in this fashion provides the **sentinel** with direct access to
-specific subsets of captured image data. For example, perhaps the images of interest are
-not available until 3 seconds after the start of the event. This facilitates skipping
-over the first 90-100 frames, for fast efficient access to the point of interest.
+The complete ``DataFeed`` API, along with examples of typical access patterns, is documented in
+`Data Model <docs/DATA_MODEL.md>`_.
 
 Sentinel design
 ---------------
 
-A working prototype of the **sentinel** module is up and running in production. Early design goals
-for this module have been met. The **sentinel** accepts job service requests as JSON over ZeroMQ.
+The **sentinel** is the batch analysis engine. It accepts job service requests as JSON over ZeroMQ.
 Parallelization is provided by a multi-processing design, allowing multiple tasks to run at once.
 Employs a dedicated I/O thread to supply image requests for use in analysis tasks through a set of
 ring buffers in shared memory.
@@ -420,8 +280,6 @@ ring buffers in shared memory.
 
 The **sentinel** module is conceived as the primary inference and signaling center; the very
 heartbeat of the larger system.
-
-  **Status**: stable working prototype.
 
 Workloads are configured through a set of YAML files. Tasks can be configured by job class to
 have an affinity for a certain task engine. Perhaps one of the task engines has a dedicated
@@ -446,8 +304,8 @@ results. They subscribe to **sentinel** log publishing, and are continually revi
 
 These nodes are configured as kiosks with an always-on display. Although originally conceived as a wall mount,
 depending on case selection preferences, they can also be adapted for use on a desk or table top.
-
-  **Status**: working proof of concept; in production use, still evolving.
+In daily production use, the **watchtower** is also the component most likely to keep changing: it
+is where new features tend to surface first.
 
 As new events occur, a sample image is selected based on inference results available at that time. Labeling
 and bounding box overlays from neural net outputs are drawn on the image along with a time stamp. This selected
@@ -464,11 +322,12 @@ which was shown on the viewer.
 
 The **watchtower**, though functional, is still being developed. It has an open-ended feature list, much of which
 is still only whiteboarded at this point. Its primary purpose as a live camera viewer and event review tool has been
-realized. Conceptually, this will become the central hub for operational control and status, system health monitoring,
-model development feedback, and general administration.
+realized. Conceptually, this will become the central hub for operational control and status, model development feedback, and general administration.
 
   Currently implemented features include:
 
+  - Storage analysis report
+  - System health monitoring and status display 
   - Video export and external sharing of event captures
   - An interactive motion detection calibration and tuning tool
 
@@ -480,12 +339,51 @@ describe an all-inclusive list, they are simply interrelated areas of current fo
 conceptual framework driving the overall project is larger in scope. Updates are published
 here on an incremental basis as new functionality is fleshed out, proven, and stabilized.
 
-Facial recognition and learning pipeline
-----------------------------------------
-
 For all machine learning aspects of SentinelCam related to computer vision, the system is
 designed so that models are trained on data which has been collected by the deployed Outpost
 cameras.
+
+The recognition flywheel
+------------------------
+
+All of this is heading towards a system that gets better at knowing who and what it sees, simply by
+continuing to watch. Recognition as a loop that keeps turning: capture, organize, match, confirm,
+learn. Then back to capture, with a better idea of what is worth collecting. Each turn of the wheel
+should make the next one easier.
+
+Vehicles come first. The street camera is the richest source of data in the system, and the
+groundwork is already in place: high-resolution crops from the OAK cameras, and a persistent track
+identity binding each crop to the vehicle's path through the scene and to its measured speed. Faces
+follow on the same machinery. What carries over from one to the other is the infrastructure and the
+methodology, rather than any particular model.
+
+A few ideas shape the design:
+
+- **Knowing what kind of event it was.** A car passing by and a car pulling into the driveway are
+  different events, calling for different handling, capture included.
+
+- **A memory above the event level.** Data is organized by date and event, which is right for capture
+  and wrong for recognition. Knowing that this is the third visit from the same car this week takes a
+  summary of events and a registry of known identities: a role the **librarian** was always meant to
+  play.
+
+- **Matching, rather than periodic retraining.** New crops are compared against a gallery of confirmed
+  examples. Learning becomes the continuous curation of that gallery, instead of an occasional
+  retraining exercise.
+
+- **Human confirmation as the learning event.** A tap on the **watchtower** to confirm or correct a
+  match is the feedback that turns the wheel, keeping human input to a bare minimum.
+
+None of this exists yet, and the details will change as it gets built. Most of the development work
+ahead is in its service. The facial recognition pipeline that follows is the first working instance
+of the same loop, built before the rest of the machinery existed.
+
+Facial recognition and learning pipeline
+----------------------------------------
+
+The premier machine learning component for SentinelCam was this facial recognition pipeline, designed as
+as a continuous learning loop, and it integrates data capture, organization, matching, human confirmation, 
+and model refinement.
 
 Strategy
 ........
@@ -628,6 +526,7 @@ Additional documentation
 - `Outpost configuration and tuning reference <docs/OUTPOST_CONFIGURATION.md>`_
 - `Outpost history -- the imagenode fork and the motion-driven era <docs/OUTPOST_HISTORY.md>`_
 - `Facial recognition, model training, and machine learning pipeline <docs/FACIAL_RECON_LEARNING.md>`_
+- `Data model -- storage, schemas, and the DataFeed API <docs/DATA_MODEL.md>`_
 - `Data management policies and retention strategy <docs/DATA_MANAGEMENT.md>`_
 - `Ansible playbooks for provisioning, application deployment, and configuration <devops/ansible/README.md>`_
 - `Automated edge deployment and CI/CD pipeline <devops/README.rst>`_
