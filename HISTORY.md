@@ -28,7 +28,15 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
-## Unreleased
+## 0.3.2-alpha - 2026-10-24
+
+The headline of this release is **time** — an outpost that boots on a wrong clock now
+follows NTP when it corrects, instead of keeping the error until someone restarts it. A power
+outage left the street camera stamping everything almost four hours early for four days, and
+it said nothing about it: the system clock was right, the frame rate was right, every event
+was captured, and every one of them was filed at the wrong time. Alongside it, SentinelCam's
+first unit tests, a reference documentation set brought level with the code, and an off-box
+backup for the project blog.
 
 ### Added
 
@@ -42,6 +50,37 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   `imagenode/tests/sentinelcam` under `pytest`, are run on the workstation, and never ship.
   They are written with new pure logic, or with a fix that reproduces the bug; there is no
   backfilling for its own sake.
+
+- **An off-box backup for the project blog.** The WordPress blog had no backup at all: the
+  folder named "backup" in its web root held content and no database, so it could never have
+  restored the site, and nothing was scheduled. The VPS now takes its own nightly dump, and a
+  new `blog_backup` role pulls it to the data sink, the one node running around the clock.
+  Pull rather than push, so a compromised VPS holds no credential for the data sink and
+  cannot destroy copies taken before it was compromised. No `--delete`: the VPS prunes at 14
+  days and this side keeps 90, and mirroring its deletions would discard exactly the depth an
+  off-box copy is for. The pull verifies rather than transfers, failing loudly when the newest
+  dump is stale or not a valid gzip stream — a pull that reports success against a source
+  that quietly stopped being written is the failure this exists to prevent. The VPS host key
+  is seeded by the role before the first unattended run, and was cross-checked over two
+  independent paths before it was trusted.
+
+### Changed
+
+- **The reference documentation now matches the code.** The wire contract has its own
+  document, `docs/EVENT_PROTOCOL.md`, corrected against the shipping code — the retired text
+  still named the `evt` and `class` fields, renamed to `type` and `clas`, and a consumer
+  written against it matches nothing. The outpost's lineage moved to `docs/OUTPOST_HISTORY.md`,
+  and the three live settings documented nowhere else (`spyglass`, `ROI`, and the
+  `interesting_objects` that had quietly gone dead) were rehomed or removed. The data model
+  outgrew the README and is now `docs/DATA_MODEL.md`: stores, schemas, the join chain, both
+  retention clocks and the full DataFeed API, with what was found broken documented as found.
+  The role READMEs caught up with 0.3.1's engine-health and retention settings.
+
+- **The README charter is computer vision and learning, not facial recognition.** Facial
+  recognition was the 2020 framing; the system is vehicle-first re-identification now, with
+  faces to follow. The founding goals are restated as goals rather than mechanism, leading
+  with the ambition they always served: a house that learns, largely on its own, what is
+  normal around it and what isn't.
 
 ### Fixed
 
@@ -71,7 +110,18 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   naming and every speed computed across it; a two-minute limit bounds the wait. Each step
   is logged with its exact size and where it took effect, which is what a data repair
   needs. As a side effect, timestamps are now true capture time; the one-time anchor had
-  folded the first frame's ~0.1s of host latency into every timestamp.
+  folded the first frame's ~0.1s of host latency into every timestamp. Verified on east with a
+  controlled step, five seconds forward and then back: each was caught and rebased within a
+  frame, and scene images and `trk` records still matched timestamp for timestamp across the
+  window.
+
+- **The kiosk crop overlay could caption one vehicle with another's speed.** `objid` is a
+  string in every tracking set, and the **watchtower**'s crop selection cast it to an integer,
+  so every comparison against those sets matched nothing. Two consequences, both silent. The
+  scene-position cue drawn behind the crop had never rendered for any event. And the choice of
+  crop fell back from the selected subject to the whole event, so in a multi-subject event the
+  card could show one vehicle's crop under another's speed — measured over 1,200 recent
+  events, 11% of the multi-subject ones would have.
 
 ## 0.3.1-alpha - 2026-09-20
 
