@@ -28,6 +28,51 @@ This list includes a few current lower priority, *still on the whiteboard*, desi
   active development. SentinelCam is an on-going research experiment which may, at times, 
   be somewhat unstable around the edges.
 
+## Unreleased
+
+### Added
+
+- **Unit tests, for the node logic that can carry them.** SentinelCam has had none. The
+  transport, multiprocessing and hardware layers are still tested by deployment, which is
+  the only test environment that means anything for them, and faking them would be a large
+  body of code that misses what actually goes wrong on a Pi at 30 fps. But the outpost now
+  has a layer of pure decision logic — tracker, event manager, sampler, crop pairing — that
+  takes inputs and emits decisions with no sockets, devices or child processes, and several
+  recent bugs lived there and took days of live data to surface. Tests live in
+  `imagenode/tests/sentinelcam` under `pytest`, are run on the workstation, and never ship.
+  They are written with new pure logic, or with a fix that reproduces the bug; there is no
+  backfilling for its own sake.
+
+### Fixed
+
+- **An OAK outpost that booted on a stale clock kept the error until it was restarted.**
+  Found after a power outage of almost four hours. The east node has no battery-backed
+  clock, so it came back up believing it was the moment the power failed, and the
+  **outpost** service started four seconds after boot. NTP corrected the system clock six
+  minutes later. The outpost never noticed: it read the wall clock once, on its first frame,
+  and derived every timestamp after that from the device's monotonic capture time. Every
+  scene frame, `trk` and `crp` record from east was stamped 3h46m24.7s early for four days,
+  and each night's events between midnight and 03:46 were filed under the previous day. The
+  picamera nodes were unaffected, since they read the wall clock on every frame.
+
+  The offset was exact and constant, and was recovered two independent ways: from the
+  `uuid1` event ids, which carry the host's real clock, and from the journal, whose
+  realtime-minus-monotonic gap jumped by precisely the step at the moment NTP took hold.
+
+  The OAK clock is now `WallClock`. DepthAI frame timestamps are already on the host's
+  monotonic clock, which NTP never steps, so a frame's wall time is its capture time plus
+  `time.time() - time.monotonic()` — a value that moves only when the wall clock is stepped.
+  It is checked every frame, and a step is followed by a rebase. Two rules keep the
+  exact-match correlation between scene images and `trk`/`crp` records intact. The offset
+  is chosen by the frame's capture time rather than by when it is stamped, because the two
+  streams stamp the same frame from different threads. And the rebase is taken only when
+  nothing is in flight — no event open, every subject banked quiescent — so a correction
+  lands between events rather than as a three-hour jump inside one, which would break image
+  naming and every speed computed across it; a two-minute limit bounds the wait. Each step
+  is logged with its exact size and where it took effect, which is what a data repair
+  needs. As a side effect, timestamps are now true capture time; the one-time anchor had
+  folded the first frame's ~0.1s of host latency into every timestamp.
+
 ## 0.3.1-alpha - 2026-09-20
 
 The headline of this release is **scene retention** — replay footage now expires on its own
